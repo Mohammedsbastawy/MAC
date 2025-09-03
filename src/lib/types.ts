@@ -4,7 +4,7 @@ export type Device = {
   ipAddress: string;
   macAddress: string;
   status: 'online' | 'offline';
-  type: 'laptop' | 'server' | 'router' | 'mobile' | 'iot' | 'desktop';
+  type: 'laptop' | 'server' | 'router' | 'mobile' | 'iot' | 'desktop' | 'unknown';
   os: string;
   lastSeen: string;
 };

@@ -27,7 +27,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 
 const formSchema = z.object({
-  email: z.string().min(1, { message: "Please enter your email." }),
+  email: z.string().email({ message: "Please enter a valid email." }),
   password: z.string().min(1, { message: "Please enter your password." }),
 });
 
@@ -46,25 +46,40 @@ export default function LoginForm() {
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsLoading(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    // Simulate success/error
-    if (values.email === "admin@admin.com" && values.password === "admin") {
-      toast({
-        title: "Login Successful",
-        description: "Welcome back, Admin!",
+    try {
+      const response = await fetch("/api/validate-admin-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: values.email, pass: values.password }),
       });
-      router.push("/dashboard");
-    } else {
+
+      const data = await response.json();
+
+      if (data.ok) {
+        toast({
+          title: "Login Successful",
+          description: "Welcome back, Admin!",
+        });
+        router.push("/dashboard");
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Login Failed",
+          description: data.error || "Invalid credentials. Please try again.",
+        });
+        form.setError("root", { message: data.error || "Invalid credentials" });
+      }
+    } catch (error) {
       toast({
         variant: "destructive",
-        title: "Login Failed",
-        description: "Invalid email or password. Please try again.",
+        title: "An Error Occurred",
+        description: "Could not connect to the server. Please try again later.",
       });
-      form.setError("root", { message: "Invalid credentials" });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }
 
   return (
@@ -90,7 +105,7 @@ export default function LoginForm() {
                     <FormControl>
                       <Input
                         type="text"
-                        placeholder="admin@admin.com"
+                        placeholder="admin@domain.com"
                         className="pl-10"
                         {...field}
                       />
