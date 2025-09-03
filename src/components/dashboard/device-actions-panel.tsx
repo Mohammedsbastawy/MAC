@@ -30,7 +30,8 @@ import {
   MemoryStick,
   Settings2,
   File,
-  UserCheck
+  UserCheck,
+  ArrowUpDown
 } from "lucide-react";
 import {
   Sheet,
@@ -310,43 +311,95 @@ const PsFileResult: React.FC<{ data: PsFileData[] }> = ({ data }) => (
     </Card>
 );
 
-const PsServiceResult: React.FC<{ data: PsServiceData[] }> = ({ data }) => (
-    <Card>
-        <CardHeader>
-            <CardTitle className="flex items-center text-lg">
-                <Settings2 className="mr-2 h-5 w-5" /> Services
-            </CardTitle>
-        </CardHeader>
-        <CardContent>
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Service Name</TableHead>
-                        <TableHead>Display Name</TableHead>
-                        <TableHead>State</TableHead>
-                        <TableHead>Type</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {data.map((service) => (
-                         <TableRow key={service.name}>
-                             <TableCell className="font-mono text-xs">{service.name}</TableCell>
-                             <TableCell className="font-medium">{service.display_name}</TableCell>
-                             <TableCell>
-                                 <Badge variant={service.state.includes('RUNNING') ? 'default' : 'secondary'}
-                                     className={cn(service.state.includes('RUNNING') && "bg-green-600")}
-                                 >
-                                    {service.state}
-                                 </Badge>
-                             </TableCell>
-                             <TableCell>{service.type}</TableCell>
-                         </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
-        </CardContent>
-    </Card>
-);
+type SortKey = 'name' | 'display_name' | 'state';
+type SortDirection = 'asc' | 'desc';
+type ServiceFilter = 'all' | 'running' | 'stopped';
+
+const PsServiceResult: React.FC<{ data: PsServiceData[] }> = ({ data }) => {
+    const [sortKey, setSortKey] = React.useState<SortKey>('display_name');
+    const [sortDirection, setSortDirection] = React.useState<SortDirection>('asc');
+    const [filter, setFilter] = React.useState<ServiceFilter>('all');
+
+    const handleSort = (key: SortKey) => {
+        if (sortKey === key) {
+            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortKey(key);
+            setSortDirection('asc');
+        }
+    };
+
+    const filteredData = React.useMemo(() => {
+        return data.filter(service => {
+            if (filter === 'all') return true;
+            if (filter === 'running') return service.state.includes('RUNNING');
+            if (filter === 'stopped') return service.state.includes('STOPPED');
+            return true;
+        });
+    }, [data, filter]);
+
+    const sortedData = React.useMemo(() => {
+        return [...filteredData].sort((a, b) => {
+            const valA = a[sortKey].toLowerCase();
+            const valB = b[sortKey].toLowerCase();
+            if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }, [filteredData, sortKey, sortDirection]);
+
+    const SortableHeader: React.FC<{ sortKey: SortKey, children: React.ReactNode }> = ({ children, sortKey: key }) => (
+        <TableHead>
+            <Button variant="ghost" onClick={() => handleSort(key)} className="px-2 py-1 h-auto">
+                {children}
+                <ArrowUpDown className="ml-2 h-4 w-4" />
+            </Button>
+        </TableHead>
+    );
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center text-lg">
+                    <Settings2 className="mr-2 h-5 w-5" /> Services
+                </CardTitle>
+                <div className="flex items-center gap-2 pt-2">
+                    <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>All</Button>
+                    <Button size="sm" variant={filter === 'running' ? 'default' : 'outline'} onClick={() => setFilter('running')} className="bg-green-600 hover:bg-green-700 text-white">Running</Button>
+                    <Button size="sm" variant={filter === 'stopped' ? 'default' : 'outline'} onClick={() => setFilter('stopped')}>Stopped</Button>
+                </div>
+            </CardHeader>
+            <CardContent>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <SortableHeader sortKey="name">Service Name</SortableHeader>
+                            <SortableHeader sortKey="display_name">Display Name</SortableHeader>
+                            <SortableHeader sortKey="state">State</SortableHeader>
+                            <TableHead>Type</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {sortedData.map((service) => (
+                             <TableRow key={service.name}>
+                                 <TableCell className="font-mono text-xs">{service.name}</TableCell>
+                                 <TableCell className="font-medium">{service.display_name}</TableCell>
+                                 <TableCell>
+                                     <Badge variant={service.state.includes('RUNNING') ? 'default' : 'secondary'}
+                                         className={cn(service.state.includes('RUNNING') && "bg-green-600")}
+                                     >
+                                        {service.state}
+                                     </Badge>
+                                 </TableCell>
+                                 <TableCell>{service.type}</TableCell>
+                             </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </CardContent>
+        </Card>
+    );
+};
 
 
 const CommandOutputDialog: React.FC<{
