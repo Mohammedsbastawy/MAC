@@ -135,7 +135,7 @@ const UserMenu: React.FC = () => {
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Settings</span>
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push('/dashboard/help')}>
                 <LifeBuoy className="mr-2 h-4 w-4" />
                 <span>Support</span>
               </DropdownMenuItem>
@@ -159,6 +159,12 @@ export default function DashboardHeader() {
         <span className="font-headline text-lg text-foreground">Dominion</span>
       </Link>
       <div className="ml-auto flex items-center gap-4">
+         <Link href="/dashboard/help">
+            <Button variant="outline" size="icon" className="h-9 w-9">
+                <LifeBuoy className="h-4 w-4" />
+                <span className="sr-only">Help & Support</span>
+            </Button>
+        </Link>
         {isLoading ? (
             <Loader2 className="animate-spin text-muted-foreground" />
         ) : user ? (
