@@ -53,7 +53,7 @@ def api_network_interfaces():
                     try:
                         net = ipaddress.ip_network(f"{iface.ip}/{iface.netmask}", strict=False)
                         interfaces_list.append({
-                            "id": hasattr(iface, 'guid') and iface.guid is not None and iface.guid != ''  ? iface.guid : iface_name,
+                            "id": iface.guid if hasattr(iface, 'guid') and iface.guid is not None and iface.guid != '' else iface_name,
                             "name": iface.name or f"Interface ({iface.ip})",
                             "ip": iface.ip,
                             "netmask": iface.netmask,
