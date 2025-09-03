@@ -2,14 +2,7 @@
 import os
 import subprocess
 from flask import Blueprint, request, jsonify, current_app, session
-from pstools_app.utils.helpers import is_valid_ip
-
-# تم تحديث المسار ليبحث عن الأدوات في نفس مجلد التطبيق
-PSTOOLS_DIR = os.environ.get("PSTOOLS_DIR", os.path.dirname(os.path.dirname(__file__)))
-
-def pspath(exe_name: str) -> str:
-    candidate = os.path.join(PSTOOLS_DIR, exe_name)
-    return candidate if os.path.isfile(candidate) else exe_name
+from pstools_app.utils.helpers import is_valid_ip, get_pstools_path
 
 def run_cmd(cmd_list, timeout=90):
     # Add -accepteula to all pstools commands
@@ -87,7 +80,7 @@ def api_psexec():
     data = request.get_json() or {}
     ip, user, pwd, cmd = data.get("ip",""), session.get("user"), session.get("password"), data.get("cmd","")
     try:
-        args = [pspath("PsExec.exe")] + build_remote_args(ip, user, pwd)
+        args = [get_pstools_path("PsExec.exe")] + build_remote_args(ip, user, pwd)
         if not cmd:
             return json_result(2, "", "Command is required")
         # For commands with spaces, we need to handle them correctly
@@ -105,7 +98,7 @@ def api_psservice():
     if not svc and action != "query":
         return json_result(2, "", "Service name is required for start/stop/restart")
     try:
-        args = [pspath("PsService.exe")] + build_remote_args(ip, user, pwd)
+        args = [get_pstools_path("PsService.exe")] + build_remote_args(ip, user, pwd)
         if action == "restart":
             # First stop
             args_stop = args + ["stop", svc]
@@ -135,7 +128,7 @@ def api_pslist():
     data = request.get_json() or {}
     ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
-        args = [pspath("PsList.exe")] + build_remote_args(ip, user, pwd) + ["-x"]
+        args = [get_pstools_path("PsList.exe")] + build_remote_args(ip, user, pwd) + ["-x"]
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
@@ -148,7 +141,7 @@ def api_pskill():
     if not proc:
         return json_result(2, "", "Process name or PID is required")
     try:
-        args = [pspath("PsKill.exe")] + build_remote_args(ip, user, pwd) + [proc]
+        args = [get_pstools_path("PsKill.exe")] + build_remote_args(ip, user, pwd) + [proc]
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
@@ -159,7 +152,7 @@ def api_psloglist():
     data = request.get_json() or {}
     ip, user, pwd, kind = data.get("ip",""), session.get("user"), session.get("password"), data.get("kind","system")
     try:
-        args = [pspath("PsLogList.exe")] + build_remote_args(ip, user, pwd) + ["-d", "1", kind] # last day
+        args = [get_pstools_path("PsLogList.exe")] + build_remote_args(ip, user, pwd) + ["-d", "1", kind] # last day
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
@@ -170,7 +163,7 @@ def api_psinfo():
     data = request.get_json() or {}
     ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
-        args = [pspath("PsInfo.exe")] + build_remote_args(ip, user, pwd) + ["-d"] # Show disk info
+        args = [get_pstools_path("PsInfo.exe")] + build_remote_args(ip, user, pwd) + ["-d"] # Show disk info
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
@@ -181,7 +174,7 @@ def api_psloggedon():
     data = request.get_json() or {}
     ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
-        args = [pspath("PsLoggedOn.exe")] + build_remote_args(ip, user, pwd)
+        args = [get_pstools_path("PsLoggedOn.exe")] + build_remote_args(ip, user, pwd)
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
@@ -195,7 +188,7 @@ def api_psshutdown():
     if not flag:
         return json_result(2, "", "Invalid power action")
     try:
-        args = [pspath("PsShutdown.exe")] + build_remote_args(ip, user, pwd) + [flag, "-t", "0", "-n"]
+        args = [get_pstools_path("PsShutdown.exe")] + build_remote_args(ip, user, pwd) + [flag, "-t", "0", "-n"]
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
@@ -206,7 +199,7 @@ def api_psfile():
     data = request.get_json() or {}
     ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
-        args = [pspath("PsFile.exe")] + build_remote_args(ip, user, pwd)
+        args = [get_pstools_path("PsFile.exe")] + build_remote_args(ip, user, pwd)
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
@@ -217,7 +210,7 @@ def api_psgetsid():
     data = request.get_json() or {}
     ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
-        args = [pspath("PsGetSid.exe")] + build_remote_args(ip, user, pwd)
+        args = [get_pstools_path("PsGetSid.exe")] + build_remote_args(ip, user, pwd)
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
@@ -231,7 +224,7 @@ def api_pspasswd():
     if not target_user or not new_pass:
         return json_result(2, "", "Target user and new password are required")
     try:
-        args = [pspath("PsPasswd.exe")] + build_remote_args(ip, user, pwd) + [target_user, new_pass]
+        args = [get_pstools_path("PsPasswd.exe")] + build_remote_args(ip, user, pwd) + [target_user, new_pass]
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
@@ -244,7 +237,7 @@ def api_pssuspend():
     if not proc:
         return json_result(2, "", "Process name or PID is required")
     try:
-        args = [pspath("PsSuspend.exe")] + build_remote_args(ip, user, pwd) + [proc]
+        args = [get_pstools_path("PsSuspend.exe")] + build_remote_args(ip, user, pwd) + [proc]
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
@@ -257,7 +250,7 @@ def api_psping():
     try:
         # PsPing does not use -u/-p, it relies on the context. But we can target an IP.
         # It's better to run it locally and target the remote IP.
-        args = [pspath("PsPing.exe")] 
+        args = [get_pstools_path("PsPing.exe")] 
         if extra:
             args += extra.split(' ')
         
