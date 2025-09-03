@@ -10,7 +10,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string) => Promise<{success: boolean, error?: string}>;
+  login: (email: string, password?: string) => Promise<{success: boolean, error?: string}>;
   logout: () => Promise<void>;
 }
 
@@ -42,12 +42,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkSession();
   }, [checkSession]);
 
-  const login = async (email: string): Promise<{success: boolean, error?: string}> => {
+  const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
     try {
       const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, password }),
       });
       const data = await response.json();
       if (data.ok) {

@@ -30,6 +30,7 @@ import { useAuth } from "@/hooks/use-auth";
 
 const formSchema = z.object({
   email: z.string().email({ message: "Please enter a valid domain email." }),
+  password: z.string().min(1, { message: "Password is required." }),
 });
 
 const InlineLoginForm: React.FC = () => {
@@ -42,12 +43,13 @@ const InlineLoginForm: React.FC = () => {
       resolver: zodResolver(formSchema),
       defaultValues: {
         email: "",
+        password: "",
       },
     });
   
     async function onSubmit(values: z.infer<typeof formSchema>) {
       setIsLoading(true);
-      const { success, error } = await login(values.email);
+      const { success, error } = await login(values.email, values.password);
       if (success) {
         toast({
           title: "Login Successful",
@@ -67,10 +69,18 @@ const InlineLoginForm: React.FC = () => {
     return (
         <form onSubmit={form.handleSubmit(onSubmit)} className="flex items-center gap-2">
              <Input
-                type="text"
+                type="email"
                 placeholder="Domain Admin Email"
+                autoComplete="email"
                 className="h-9 w-64"
                 {...form.register("email")}
+            />
+            <Input
+                type="password"
+                placeholder="Password"
+                autoComplete="current-password"
+                className="h-9 w-48"
+                {...form.register("password")}
             />
             <Button type="submit" className="h-9" disabled={isLoading}>
               {isLoading ? (
