@@ -127,6 +127,42 @@ def api_psservice():
     
     return json_result(rc, out, err)
 
+def parse_pslist_output(output):
+    data = []
+    lines = output.strip().split('\n')
+    header_found = False
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Find the header line to start parsing
+        if 'Name' in line and 'Pid' in line and 'Thd' in line:
+            header_found = True
+            continue
+            
+        if '----' in line:
+            continue
+
+        if header_found:
+            # Split by 2 or more spaces to handle variable spacing
+            parts = re.split(r'\s{2,}', line)
+            if len(parts) >= 8:
+                data.append({
+                    "name": parts[0],
+                    "pid": parts[1],
+                    "pri": parts[2],
+                    "thd": parts[3],
+                    "hnd": parts[4],
+                    "priv": parts[5],
+                    "cpu_time": parts[6],
+                    "elapsed_time": parts[7]
+                })
+
+    return {"pslist": data} if data else None
+
+
 @pstools_bp.route('/api/pslist', methods=['POST'])
 def api_pslist():
     data = request.get_json() or {}
@@ -138,7 +174,12 @@ def api_pslist():
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
-    return json_result(rc, out, err)
+
+    structured_data = None
+    if rc == 0 and out:
+        structured_data = parse_pslist_output(out)
+        
+    return json_result(rc, out, err, structured_data)
 
 @pstools_bp.route('/api/pskill', methods=['POST'])
 def api_pskill():
@@ -215,7 +256,7 @@ def parse_psinfo_output(output):
                         "free_percent": free_percent
                     })
     
-    return data if data["system_info"] or data["disk_info"] else None
+    return {"psinfo": data} if data["system_info"] or data["disk_info"] else None
 
 
 @pstools_bp.route('/api/psinfo', methods=['POST'])

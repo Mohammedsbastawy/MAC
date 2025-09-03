@@ -24,6 +24,10 @@ import {
   Network,
   HardDrive,
   Clock,
+  Cpu,
+  Hash,
+  Hourglass,
+  MemoryStick
 } from "lucide-react";
 import {
   Sheet,
@@ -92,13 +96,27 @@ type PsInfoData = {
     }[];
 }
 
+type PsListProcess = {
+    name: string;
+    pid: string;
+    pri: string;
+    thd: string;
+    hnd: string;
+    priv: string;
+    cpu_time: string;
+    elapsed_time: string;
+}
+
 type DialogState = {
     isOpen: boolean;
     title: string;
     description: string;
     output: string;
     error: string;
-    structuredData?: PsInfoData | null;
+    structuredData?: {
+        psinfo?: PsInfoData | null;
+        pslist?: PsListProcess[] | null;
+    } | null;
 }
 
 const ActionButton: React.FC<{
@@ -171,20 +189,62 @@ const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
     </div>
 )
 
+
+const PsListResult: React.FC<{ data: PsListProcess[] }> = ({ data }) => (
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center text-lg">
+                <Activity className="mr-2 h-5 w-5" /> Process List
+            </CardTitle>
+        </CardHeader>
+        <CardContent>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>PID</TableHead>
+                        <TableHead className="text-right">Threads</TableHead>
+                        <TableHead className="text-right">Handles</TableHead>
+                        <TableHead className="text-right">CPU Time</TableHead>
+                        <TableHead className="text-right">Elapsed Time</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {data.map(proc => (
+                        <TableRow key={proc.pid}>
+                            <TableCell className="font-medium">{proc.name}</TableCell>
+                            <TableCell>{proc.pid}</TableCell>
+                            <TableCell className="text-right">{proc.thd}</TableCell>
+                            <TableCell className="text-right">{proc.hnd}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{proc.cpu_time}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{proc.elapsed_time}</TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </CardContent>
+    </Card>
+)
+
 const CommandOutputDialog: React.FC<{
     state: DialogState;
     onClose: () => void;
-}> = ({ state, onClose }) => (
+}> = ({ state, onClose }) => {
+    
+    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist;
+
+    return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
-        <AlertDialogContent className="max-w-3xl">
+        <AlertDialogContent className="max-w-4xl">
             <AlertDialogHeader>
                 <AlertDialogTitle>{state.title}</AlertDialogTitle>
                 <AlertDialogDescription>{state.description}</AlertDialogDescription>
             </AlertDialogHeader>
             <div className="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
-                {state.structuredData ? (
-                    <PsInfoResult data={state.structuredData} />
-                ) : (
+                {state.structuredData?.psinfo && <PsInfoResult data={state.structuredData.psinfo} />}
+                {state.structuredData?.pslist && <PsListResult data={state.structuredData.pslist} />}
+
+                {(!hasStructuredData) && (
                     <>
                     {state.output && (
                         <div>
@@ -201,7 +261,7 @@ const CommandOutputDialog: React.FC<{
                     </>
                 )}
                  {/* Show raw output for psinfo even with structured data, for debugging */}
-                {state.structuredData && state.output && (
+                {hasStructuredData && state.output && (
                     <details className="mt-4">
                         <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
                         <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />
@@ -214,7 +274,7 @@ const CommandOutputDialog: React.FC<{
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
-)
+)}
 
 
 export default function DeviceActionsPanel({
