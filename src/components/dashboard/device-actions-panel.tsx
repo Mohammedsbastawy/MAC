@@ -31,7 +31,10 @@ import {
   Settings2,
   File,
   UserCheck,
-  ArrowUpDown
+  ArrowUpDown,
+  PlayCircle,
+  StopCircle,
+  HelpCircle
 } from "lucide-react";
 import {
   Sheet,
@@ -72,6 +75,7 @@ import {
 } from "@/components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 
 type DeviceActionsPanelProps = {
@@ -129,6 +133,7 @@ type PsServiceData = {
     display_name: string;
     state: string;
     type: string;
+    description: string;
 }
 
 type DialogState = {
@@ -315,7 +320,7 @@ type SortKey = 'name' | 'display_name' | 'state';
 type SortDirection = 'asc' | 'desc';
 type ServiceFilter = 'all' | 'running' | 'stopped';
 
-const PsServiceResult: React.FC<{ data: PsServiceData[] }> = ({ data }) => {
+const PsServiceResult: React.FC<{ data: PsServiceData[], onAction: (serviceName: string, action: 'start' | 'stop' | 'restart') => void, onInfo: (service: PsServiceData) => void }> = ({ data, onAction, onInfo }) => {
     const [sortKey, setSortKey] = React.useState<SortKey>('display_name');
     const [sortDirection, setSortDirection] = React.useState<SortDirection>('asc');
     const [filter, setFilter] = React.useState<ServiceFilter>('all');
@@ -364,38 +369,87 @@ const PsServiceResult: React.FC<{ data: PsServiceData[] }> = ({ data }) => {
                     <Settings2 className="mr-2 h-5 w-5" /> Services
                 </CardTitle>
                 <div className="flex items-center gap-2 pt-2">
-                    <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>All</Button>
-                    <Button size="sm" variant={filter === 'running' ? 'default' : 'outline'} onClick={() => setFilter('running')} className="bg-green-600 hover:bg-green-700 text-white">Running</Button>
-                    <Button size="sm" variant={filter === 'stopped' ? 'default' : 'outline'} onClick={() => setFilter('stopped')}>Stopped</Button>
+                    <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>All ({data.length})</Button>
+                    <Button size="sm" variant={filter === 'running' ? 'default' : 'outline'} onClick={() => setFilter('running')} className="bg-green-600 hover:bg-green-700 text-white">Running ({data.filter(s => s.state.includes("RUNNING")).length})</Button>
+                    <Button size="sm" variant={filter === 'stopped' ? 'default' : 'outline'} onClick={() => setFilter('stopped')}>Stopped ({data.filter(s => s.state.includes("STOPPED")).length})</Button>
                 </div>
             </CardHeader>
             <CardContent>
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <SortableHeader sortKey="name">Service Name</SortableHeader>
-                            <SortableHeader sortKey="display_name">Display Name</SortableHeader>
-                            <SortableHeader sortKey="state">State</SortableHeader>
-                            <TableHead>Type</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {sortedData.map((service) => (
-                             <TableRow key={service.name}>
-                                 <TableCell className="font-mono text-xs">{service.name}</TableCell>
-                                 <TableCell className="font-medium">{service.display_name}</TableCell>
-                                 <TableCell>
-                                     <Badge variant={service.state.includes('RUNNING') ? 'default' : 'secondary'}
-                                         className={cn(service.state.includes('RUNNING') && "bg-green-600")}
-                                     >
-                                        {service.state}
-                                     </Badge>
-                                 </TableCell>
-                                 <TableCell>{service.type}</TableCell>
-                             </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
+                 <TooltipProvider>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <SortableHeader sortKey="display_name">Display Name</SortableHeader>
+                                <SortableHeader sortKey="state">State</SortableHeader>
+                                <TableHead>Actions</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {sortedData.map((service) => (
+                                 <TableRow key={service.name}>
+                                     <TableCell className="font-medium max-w-xs truncate" title={service.display_name}>
+                                        {service.display_name}
+                                        <p className="text-xs text-muted-foreground font-mono">{service.name}</p>
+                                     </TableCell>
+                                     <TableCell>
+                                         <Badge variant={service.state.includes('RUNNING') ? 'default' : 'secondary'}
+                                             className={cn(service.state.includes('RUNNING') && "bg-green-600")}
+                                         >
+                                            {service.state}
+                                         </Badge>
+                                     </TableCell>
+                                     <TableCell>
+                                         <div className="flex items-center gap-1">
+                                             <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onInfo(service)}>
+                                                        <HelpCircle className="h-4 w-4" />
+                                                    </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent>
+                                                    <p>Show Details</p>
+                                                </TooltipContent>
+                                            </Tooltip>
+
+                                            {service.state.includes("STOPPED") && (
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600" onClick={() => onAction(service.name, 'start')}>
+                                                            <PlayCircle className="h-4 w-4" />
+                                                        </Button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent><p>Start Service</p></TooltipContent>
+                                                </Tooltip>
+                                            )}
+
+                                            {service.state.includes("RUNNING") && (
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                         <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600" onClick={() => onAction(service.name, 'stop')}>
+                                                            <StopCircle className="h-4 w-4" />
+                                                        </Button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent><p>Stop Service</p></TooltipContent>
+                                                </Tooltip>
+                                            )}
+
+                                            {service.state.includes("RUNNING") && (
+                                                 <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onAction(service.name, 'restart')}>
+                                                            <RefreshCw className="h-4 w-4" />
+                                                        </Button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent><p>Restart Service</p></TooltipContent>
+                                                </Tooltip>
+                                            )}
+                                         </div>
+                                     </TableCell>
+                                 </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </TooltipProvider>
             </CardContent>
         </Card>
     );
@@ -405,7 +459,9 @@ const PsServiceResult: React.FC<{ data: PsServiceData[] }> = ({ data }) => {
 const CommandOutputDialog: React.FC<{
     state: DialogState;
     onClose: () => void;
-}> = ({ state, onClose }) => {
+    onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void,
+    onServiceInfo?: (service: PsServiceData) => void
+}> = ({ state, onClose, onServiceAction, onServiceInfo }) => {
     
     const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice;
 
@@ -421,7 +477,13 @@ const CommandOutputDialog: React.FC<{
                 {state.structuredData?.pslist && <PsListResult data={state.structuredData.pslist} />}
                 {state.structuredData?.psloggedon && <PsLoggedOnResult data={state.structuredData.psloggedon} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
-                {state.structuredData?.psservice && <PsServiceResult data={state.structuredData.psservice} />}
+                {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
+                    <PsServiceResult 
+                        data={state.structuredData.psservice} 
+                        onAction={onServiceAction}
+                        onInfo={onServiceInfo}
+                    />
+                }
 
 
                 {(!hasStructuredData) && (
@@ -456,6 +518,34 @@ const CommandOutputDialog: React.FC<{
     </AlertDialog>
 )}
 
+const ServiceInfoDialog: React.FC<{
+    service: PsServiceData | null;
+    onClose: () => void;
+}> = ({ service, onClose }) => {
+    if (!service) return null;
+    return (
+        <AlertDialog open={!!service} onOpenChange={onClose}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>{service.display_name}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        <Badge variant={service.state.includes('RUNNING') ? 'default' : 'secondary'} className={cn(service.state.includes('RUNNING') && "bg-green-600")}>
+                            {service.state}
+                        </Badge>
+                         <p className="font-mono text-xs mt-2">{service.name}</p>
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="text-sm text-muted-foreground my-4">
+                    {service.description}
+                </div>
+                <AlertDialogFooter>
+                    <AlertDialogCancel onClick={onClose}>Close</AlertDialogCancel>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+    );
+};
+
 
 export default function DeviceActionsPanel({
   device,
@@ -472,15 +562,19 @@ export default function DeviceActionsPanel({
       error: "",
       structuredData: null,
   });
+  const [serviceInfo, setServiceInfo] = React.useState<PsServiceData | null>(null);
+
 
   if (!device) return null;
 
   const Icon = ICONS[device.type] || Laptop;
 
-  const handlePstoolAction = async (tool: string, extraParams: Record<string, any> = {}) => {
+  const handlePstoolAction = async (tool: string, extraParams: Record<string, any> = {}, showToast = true) => {
       if (!user || !device) return;
 
-      toast({ title: "Sending Command...", description: `Running ${tool} on ${device.name}` });
+      if(showToast) {
+        toast({ title: "Sending Command...", description: `Running ${tool} on ${device.name}` });
+      }
 
       try {
           const response = await fetch(`/api/${tool}`, {
@@ -492,6 +586,14 @@ export default function DeviceActionsPanel({
               }),
           });
           const result = await response.json();
+
+          // If the action was a service control, we might want to refresh the list
+          if (tool === 'psservice' && extraParams.action !== 'query') {
+              toast({ title: `Service ${extraParams.svc}`, description: `${extraParams.action} command sent successfully.`})
+              // Refetch the service list to show updated state
+              handlePstoolAction('psservice', { action: 'query' }, false);
+              return; // We don't want to show the dialog for action commands
+          }
           
           setDialogState({
             isOpen: true,
@@ -566,7 +668,7 @@ export default function DeviceActionsPanel({
                 <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />
                 <ActionButton icon={Users} label="Logged On Users" onClick={() => handlePstoolAction('psloggedon')} />
-                <ActionButton icon={Settings2} label="List Services" onClick={() => handlePstoolAction('psservice', { action: 'query' })} />
+                <ActionButton icon={Settings2} label="Manage Services" onClick={() => handlePstoolAction('psservice', { action: 'query' })} />
                 <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handlePstoolAction('psloglist', { kind: 'system' })} />
                 <ActionButton icon={FileLock} label="Opened Files" onClick={() => handlePstoolAction('psfile')} />
                 <ActionButton icon={Fingerprint} label="Get SID" onClick={() => handlePstoolAction('psgetsid')} />
@@ -629,7 +731,13 @@ export default function DeviceActionsPanel({
     <CommandOutputDialog 
         state={dialogState}
         onClose={() => setDialogState(prev => ({...prev, isOpen: false}))}
+        onServiceAction={(serviceName, action) => handlePstoolAction('psservice', { action, svc: serviceName }, true)}
+        onServiceInfo={(service) => setServiceInfo(service)}
     />
+     <ServiceInfoDialog 
+        service={serviceInfo}
+        onClose={() => setServiceInfo(null)}
+     />
     </>
   );
 }

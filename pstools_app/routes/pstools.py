@@ -94,37 +94,48 @@ def api_psexec():
 
 def parse_psservice_output(output):
     data = []
-    # Split the entire output into blocks, where each block represents a service.
-    # A new service block starts with "SERVICE_NAME:".
-    service_blocks = re.split(r'\nSERVICE_NAME:', '\n' + output)
+    service_blocks = re.split(r'\nSERVICE_NAME:', '\n' + output.strip())
     
     for block in service_blocks:
         if not block.strip() or "PsService" in block or "Copyright" in block:
             continue
-            
-        service_data = {}
-        block = "SERVICE_NAME:" + block # Add the header back
         
-        # Using regex to find key-value pairs more robustly
-        name_match = re.search(r'SERVICE_NAME:\s*(.+)', block)
+        service_data = {}
+        full_block = "SERVICE_NAME:" + block
+        
+        name_match = re.search(r'SERVICE_NAME:\s*(.+)', full_block)
         if name_match:
             service_data['name'] = name_match.group(1).strip()
-            
-        display_name_match = re.search(r'DISPLAY_NAME:\s*(.+)', block, re.DOTALL)
-        if display_name_match:
-            # The display name might have a description on the next lines, so we stop at the next all-caps key.
-            display_name_full = display_name_match.group(1).split('\n')[0].strip()
-            service_data['display_name'] = display_name_full
+        
+        display_name_match = re.search(r'DISPLAY_NAME:\s*(.+)', full_block)
+        description_match = re.search(r'DISPLAY_NAME:\s*.+\n((?:\s+.+\n)*)', full_block)
 
-        state_match = re.search(r'STATE\s+:\s*\d+\s+([A-Z_]+)', block)
+        if display_name_match:
+            service_data['display_name'] = display_name_match.group(1).strip()
+            # The description is the text after the display name until the next all-caps key
+            desc_content_match = re.search(r'DISPLAY_NAME:\s*.+?\n(.+?)\n\s*[A-Z_]+', full_block, re.DOTALL)
+            if desc_content_match:
+                # Clean up the description
+                description = desc_content_match.group(1).strip()
+                description = re.sub(r'\s+', ' ', description)
+                service_data['description'] = description
+            else:
+                 # Fallback for single-line descriptions or end of block
+                short_desc_match = re.search(r'DISPLAY_NAME:\s*.+\n\s*(.+)', full_block)
+                if short_desc_match:
+                    service_data['description'] = short_desc_match.group(1).strip()
+                else:
+                    service_data['description'] = "No description available."
+        
+        state_match = re.search(r'STATE\s+:\s*\d+\s+([A-Z_]+)', full_block)
         if state_match:
             service_data['state'] = state_match.group(1).strip()
             
-        type_match = re.search(r'TYPE\s+:\s*[\w\s]+\s+([A-Z_]+(?: [A-Z_]+)*)', block)
+        type_match = re.search(r'TYPE\s+:\s*[\w\s]+\s+([A-Z_]+(?: [A-Z_]+)*)', full_block)
         if type_match:
             service_data['type'] = type_match.group(1).strip()
         
-        if 'name' in service_data and 'display_name' in service_data and 'state' in service_data and 'type' in service_data:
+        if all(k in service_data for k in ['name', 'display_name', 'state', 'type', 'description']):
             data.append(service_data)
             
     return {"psservice": data} if data else None
@@ -146,21 +157,21 @@ def api_psservice():
             # First stop
             args_stop = base_args + ["stop", svc]
             rc1, out1, err1 = run_cmd(args_stop, timeout=60)
-            if rc1 != 0:
-                # If stopping fails, maybe it's already stopped. Try starting.
-                pass
-            # Then start
+            # Then start, regardless of stop result
             args_start = base_args + ["start", svc]
             rc, out, err = run_cmd(args_start, timeout=60)
-            # Combine outputs for clarity
             out = f"--- STOP ATTEMPT ---\n{out1}\n\n--- START ATTEMPT ---\n{out}"
             err = f"--- STOP ATTEMPT ---\n{err1}\n\n--- START ATTEMPT ---\n{err}"
-            structured_data = None
-        elif action in ("query", "start", "stop"):
+            structured_data = None # No structured data for actions
+        elif action in ("start", "stop"):
+             final_args = base_args + [action, svc]
+             rc, out, err = run_cmd(final_args, timeout=60)
+             structured_data = None
+        elif action == "query":
             final_args = base_args + [action] + ([svc] if svc else [])
             rc, out, err = run_cmd(final_args, timeout=120)
             structured_data = None
-            if rc == 0 and out and action == 'query':
+            if rc == 0 and out:
                 structured_data = parse_psservice_output(out)
         else:
             return json_result(2, "", "Invalid action")
@@ -483,4 +494,5 @@ def api_psping():
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
     return json_result(rc, out, err)
+
 
