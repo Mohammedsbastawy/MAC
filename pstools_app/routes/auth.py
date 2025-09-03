@@ -17,7 +17,11 @@ auth_bp = Blueprint('auth', __name__)
 def check_is_domain_admin_with_cred(username, password, domain="."):
     """Checks credentials and domain admin status."""
     if not PYWIN32_AVAILABLE:
-        return False, "مكتبة pywin32 غير مثبتة على الخادم، لا يمكن التحقق من كلمة المرور."
+        # Fallback for non-windows environments - THIS WILL NOT WORK FOR PRODUCTION
+        # We will assume success for local development if pywin32 is not installed
+        if os.environ.get("FLASK_ENV") == "development":
+             return True, None, "pywin32 not found, assuming success for dev"
+        return False, "مكتبة pywin32 غير مثبتة على الخادم، لا يمكن التحقق من كلمة المرور.", password
 
     try:
         # 1. Authenticate user credentials
@@ -25,19 +29,12 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
             username,
             domain,
             password,
-            win32con.LOGON32_LOGON_NETWORK,
+            win32con.LOGON32_LOGON_NETWORK_CLEARTEXT, # Use this for network credentials
             win32con.LOGON32_PROVIDER_DEFAULT
         )
         # If LogonUser succeeds, credentials are valid.
         
         # 2. Check if the user is a member of the "Domain Admins" group.
-        # Note: For local admins, use win32security.LookupAccountName("", "Administrators")
-        # For domain, you might need more complex ADSI logic if the simple check fails.
-        # This check works for the local "Administrators" group and may work for Domain Admins
-        # depending on the context the server is running in.
-        
-        # We will use the 'net group' command as it's more reliable for domain checks
-        # and doesn't require the server itself to be a domain controller.
         is_admin, error_msg = check_is_domain_admin_group_member(username)
         
         # Close the handle from LogonUser
@@ -45,35 +42,35 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
 
         if error_msg:
              # The user is authenticated, but we couldn't check admin status
-             return False, f"تم التحقق من الحساب ولكن: {error_msg}"
+             return False, f"تم التحقق من الحساب ولكن: {error_msg}", password
         
         if not is_admin:
-            return False, "تم التحقق من الحساب بنجاح، ولكن المستخدم ليس لديه صلاحيات مسؤول على الشبكة (Domain Admin)."
+            return False, "تم التحقق من الحساب بنجاح، ولكن المستخدم ليس لديه صلاحيات مسؤول على الشبكة (Domain Admin).", password
 
-        return True, None
+        return True, None, password
 
     except win32security.error as e:
         # Common error code for bad username/password is 1326
         if e.winerror == 1326:
-            return False, "البريد الإلكتروني أو كلمة المرور غير صحيحة."
-        return False, f"حدث خطأ أثناء المصادقة: {e}"
+            return False, "البريد الإلكتروني أو كلمة المرور غير صحيحة.", None
+        return False, f"حدث خطأ أثناء المصادقة: {e}", None
     except Exception as e:
-        return False, f"An unexpected error occurred: {str(e)}"
+        return False, f"An unexpected error occurred: {str(e)}", None
 
 def check_is_domain_admin_group_member(username):
     """Checks if a user is a member of the Domain Admins group using 'net group'."""
     try:
         # Use 'net group' which is reliable for checking domain group membership.
         cmd = f'net group "Domain Admins" /domain'
-        proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=30)
+        proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
 
+        # The command can fail if the machine is not on a domain.
+        # In that case, we fall back to checking the local Administrators group.
         if proc.returncode != 0:
-            # Fallback for non-domain environments or if the command fails
-            # Check local administrators group instead
             cmd = f'net localgroup "Administrators"'
-            proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=30)
+            proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
             if proc.returncode != 0:
-                 return False, f"فشل الاستعلام عن مجموعة المدراء: {proc.stderr or proc.stdout}"
+                 return False, f"فشل الاستعلام عن مجموعة المدراء المحليين أو على النطاق: {proc.stderr or proc.stdout}"
 
         output_lines = proc.stdout.strip().splitlines()
         user_section_started = False
@@ -83,6 +80,7 @@ def check_is_domain_admin_group_member(username):
                 user_section_started = True
                 continue
             if user_section_started:
+                # Users can be in columns, so we split by spaces and filter out empty strings
                 user_list.extend(filter(None, line.strip().split('  ')))
         
         return any(username.lower() == admin.lower() for admin in user_list), None
@@ -110,9 +108,7 @@ def api_login():
     username = parts[0]
     domain = parts[1] if len(parts) > 1 else "." # Use current domain if not specified
 
-    # For this application, we check if the user is a Domain Admin
-    # AND verify their password.
-    is_admin, error_msg = check_is_domain_admin_with_cred(username, password, domain)
+    is_admin, error_msg, stored_password = check_is_domain_admin_with_cred(username, password, domain)
 
     if not is_admin:
         error_to_show = error_msg or "فشل تسجيل الدخول."
@@ -122,11 +118,14 @@ def api_login():
     session.permanent = True
     session['user'] = username
     session['email'] = email
+    # IMPORTANT: Store the password in the session for PsTools commands
+    session['password'] = stored_password
     return jsonify({"ok": True, "user": username, "email": email})
 
-@auth_p.route('/api/check-session', methods=['GET'])
+@auth_bp.route('/api/check-session', methods=['GET'])
 def api_check_session():
     if 'user' in session and 'email' in session:
+        # Don't return the password to the client, but confirm session is ok
         return jsonify({"ok": True, "user": session['user'], "email": session['email']})
     return jsonify({"ok": False})
 

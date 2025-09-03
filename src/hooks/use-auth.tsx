@@ -5,6 +5,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 interface User {
   user: string;
   email: string;
+  password?: string; // Add password to the user type, but keep it optional
 }
 
 interface AuthContextType {
@@ -16,6 +17,13 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// A simple in-memory store for the password.
+// This is NOT secure for production in a multi-user server environment,
+// but for a single-user desktop-like app, it's a pragmatic way
+// to hold the password for backend calls without storing it in cookies or localStorage.
+let sessionPassword: string | undefined = undefined;
+
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,13 +34,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await fetch('/api/check-session');
       const data = await response.json();
       if (data.ok) {
-        setUser(data);
+        // Restore password to user object if it exists in our memory store
+        setUser({ ...data, password: sessionPassword });
       } else {
         setUser(null);
+        sessionPassword = undefined;
       }
     } catch (error) {
       console.error("Failed to check session", error);
       setUser(null);
+      sessionPassword = undefined;
     } finally {
       setIsLoading(false);
     }
@@ -43,6 +54,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [checkSession]);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
+    if (!password) {
+        return { success: false, error: "Password is required." };
+    }
     try {
       const response = await fetch("/api/login", {
         method: "POST",
@@ -51,6 +65,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (data.ok) {
+        // Store password in our in-memory variable
+        sessionPassword = password;
         await checkSession(); // Re-check session to get user details
         return { success: true };
       }
@@ -65,6 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await fetch('/api/logout', { method: 'POST' });
       setUser(null);
+      sessionPassword = undefined;
     } catch (error) {
       console.error("Logout failed", error);
     }

@@ -12,7 +12,16 @@ import {
   Smartphone,
   Terminal,
   ToyBrick,
-  X,
+  Users,
+  Info,
+  FileCode,
+  KeyRound,
+  Fingerprint,
+  PowerOff,
+  UserX,
+  FileLock,
+  PauseCircle,
+  Network
 } from "lucide-react";
 import {
   Sheet,
@@ -23,10 +32,27 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import type { Device } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
+import * as React from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Input } from "../ui/input";
+
 
 type DeviceActionsPanelProps = {
   device: Device | null;
@@ -41,7 +67,57 @@ const ICONS: Record<Device["type"], React.ElementType> = {
   mobile: Smartphone,
   desktop: Monitor,
   iot: ToyBrick,
+  unknown: Laptop,
 };
+
+const ActionButton: React.FC<{
+    icon: React.ElementType,
+    label: string,
+    onClick: () => void,
+    variant?: "outline" | "destructive"
+}> = ({ icon: Icon, label, onClick, variant = "outline" }) => (
+    <Button variant={variant} className="justify-start" onClick={onClick}>
+        <Icon className="mr-2 h-4 w-4" />
+        <span>{label}</span>
+        <ChevronRight className="ml-auto h-4 w-4" />
+    </Button>
+)
+
+const CommandOutputDialog: React.FC<{
+    title: string;
+    description: string;
+    output: string;
+    error: string;
+    isOpen: boolean;
+    onClose: () => void;
+}> = ({ title, description, output, error, isOpen, onClose }) => (
+    <AlertDialog open={isOpen} onOpenChange={onClose}>
+        <AlertDialogContent className="max-w-3xl">
+            <AlertDialogHeader>
+                <AlertDialogTitle>{title}</AlertDialogTitle>
+                <AlertDialogDescription>{description}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="mt-4 space-y-4">
+                {output && (
+                    <div>
+                        <Label>Output</Label>
+                        <Textarea readOnly value={output} className="mt-1 h-64 font-mono text-xs bg-muted" />
+                    </div>
+                )}
+                {error && (
+                     <div>
+                        <Label className="text-destructive">Error</Label>
+                        <Textarea readOnly value={error} className="mt-1 h-32 font-mono text-xs bg-destructive/10 text-destructive" />
+                    </div>
+                )}
+            </div>
+            <AlertDialogFooter>
+                <AlertDialogCancel onClick={onClose}>Close</AlertDialogCancel>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+    </AlertDialog>
+)
+
 
 export default function DeviceActionsPanel({
   device,
@@ -49,19 +125,59 @@ export default function DeviceActionsPanel({
   onClose,
 }: DeviceActionsPanelProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const [dialogState, setDialogState] = React.useState({
+      isOpen: false,
+      title: "",
+      description: "",
+      output: "",
+      error: "",
+  });
 
   if (!device) return null;
 
-  const Icon = ICONS[device.type];
+  const Icon = ICONS[device.type] || Laptop;
 
-  const handleAction = (action: string) => {
-    toast({
-      title: `Action: ${action}`,
-      description: `Command sent to ${device.name}`,
-    });
+  const handlePstoolAction = async (tool: string, extraParams: Record<string, any> = {}) => {
+      if (!user || !device) return;
+
+      toast({ title: "Sending Command...", description: `Running ${tool} on ${device.name}` });
+
+      try {
+          const response = await fetch(`/api/${tool}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  ip: device.ipAddress,
+                  user: user.user,
+                  pass: user.password, // Assuming password stored in auth context
+                  ...extraParams,
+              }),
+          });
+          const result = await response.json();
+          
+          setDialogState({
+            isOpen: true,
+            title: `Result from: ${tool}`,
+            description: `Command executed on ${device.name} (${device.ipAddress}).`,
+            output: result.stdout,
+            error: result.stderr,
+          });
+
+      } catch (err: any) {
+        setDialogState({
+            isOpen: true,
+            title: "Connection Error",
+            description: `Failed to connect to backend for tool: ${tool}.`,
+            output: "",
+            error: err.message || "An unknown network error occurred.",
+          });
+      }
   };
 
+
   return (
+    <>
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent className="w-full sm:max-w-md p-0 flex flex-col">
         <SheetHeader className="p-6 pb-4">
@@ -73,7 +189,8 @@ export default function DeviceActionsPanel({
             {device.os}
           </SheetDescription>
         </SheetHeader>
-        <div className="flex-1 overflow-y-auto">
+
+        <ScrollArea className="flex-1">
           <div className="px-6 pb-6 space-y-4">
             <div className="space-y-2">
               <h4 className="font-semibold text-foreground">Device Status</h4>
@@ -107,31 +224,72 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Actions</h4>
               <div className="grid grid-cols-1 gap-2">
-                <Button variant="outline" className="justify-start" onClick={() => handleAction("Restart")}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  <span>Restart Device</span>
-                  <ChevronRight className="ml-auto h-4 w-4" />
-                </Button>
-                <Button variant="outline" className="justify-start" onClick={() => handleAction("Run Diagnostics")}>
-                  <Activity className="mr-2 h-4 w-4" />
-                  <span>Run Diagnostics</span>
-                  <ChevronRight className="ml-auto h-4 w-4" />
-                </Button>
-                 <Button variant="outline" className="justify-start" onClick={() => handleAction("Open Terminal")}>
-                  <Terminal className="mr-2 h-4 w-4" />
-                  <span>Open Terminal</span>
-                  <ChevronRight className="ml-auto h-4 w-4" />
-                </Button>
-                <Button variant="destructive" className="justify-start mt-4" onClick={() => handleAction("Shutdown")}>
-                  <Power className="mr-2 h-4 w-4" />
-                  <span>Shut Down</span>
-                  <ChevronRight className="ml-auto h-4 w-4" />
-                </Button>
+                <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
+                <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />
+                <ActionButton icon={Users} label="Logged On Users" onClick={() => handlePstoolAction('psloggedon')} />
+                <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handlePstoolAction('psloglist', { kind: 'system' })} />
+                <ActionButton icon={FileLock} label="Opened Files" onClick={() => handlePstoolAction('psfile')} />
+                <ActionButton icon={Fingerprint} label="Get SID" onClick={() => handlePstoolAction('psgetsid')} />
               </div>
             </div>
+
+            <Separator />
+            
+            <div className="space-y-3">
+              <h4 className="font-semibold text-foreground">Power Management</h4>
+                <div className="grid grid-cols-1 gap-2">
+                    <ActionButton icon={RefreshCw} label="Restart" onClick={() => handlePstoolAction('psshutdown', { action: 'restart' })} />
+                    <ActionButton icon={PowerOff} label="Shutdown" onClick={() => handlePstoolAction('psshutdown', { action: 'shutdown' })} variant="destructive" />
+                    <ActionButton icon={UserX} label="Logoff User" onClick={() => handlePstoolAction('psshutdown', { action: 'logoff' })} variant="destructive" />
+                </div>
+            </div>
+
+             <Separator />
+
+            <div className="space-y-3">
+              <h4 className="font-semibold text-foreground">Advanced Actions</h4>
+                <div className="grid grid-cols-1 gap-2">
+                    <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button variant="outline" className="justify-start">
+                                <Terminal className="mr-2 h-4 w-4" />
+                                <span>Execute Command</span>
+                                <ChevronRight className="ml-auto h-4 w-4" />
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                const formData = new FormData(e.currentTarget);
+                                const cmd = formData.get('command') as string;
+                                handlePstoolAction('psexec', { cmd });
+                                (e.currentTarget.closest('[data-radix-popper-content-wrapper]')?.previousSibling as HTMLElement)?.click(); // close dialog
+                            }}>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Execute Remote Command</AlertDialogTitle>
+                                    <AlertDialogDescription>Enter a command to run on {device.name} via PsExec.</AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <div className="my-4">
+                                    <Input name="command" placeholder="e.g. ipconfig /all" />
+                                </div>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction type="submit">Run Command</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </form>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                </div>
+            </div>
+
           </div>
-        </div>
+        </ScrollArea>
       </SheetContent>
     </Sheet>
+    <CommandOutputDialog 
+        {...dialogState}
+        onClose={() => setDialogState(prev => ({...prev, isOpen: false}))}
+    />
+    </>
   );
 }
