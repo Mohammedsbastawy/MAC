@@ -94,52 +94,47 @@ def api_psexec():
 
 def parse_psservice_output(output):
     data = []
-    service_blocks = re.split(r'\nSERVICE_NAME:', '\n' + output.strip())
+    # Split by the service name delimiter, keeping the delimiter
+    service_blocks = re.split(r'(?=\nSERVICE_NAME:)', output.strip())
     
     for block in service_blocks:
         if not block.strip() or "PsService" in block or "Copyright" in block:
             continue
         
         service_data = {}
-        full_block = "SERVICE_NAME:" + block
+        # Use regex to find key-value pairs
+        name_match = re.search(r'SERVICE_NAME:\s*(.+)', block)
+        display_name_match = re.search(r'DISPLAY_NAME:\s*(.+)', block)
+        state_match = re.search(r'STATE\s+:\s*\d+\s+([A-Z_]+)', block)
+        type_match = re.search(r'TYPE\s+:\s*[\w\s]+\s+([A-Z_]+(?: [A-Z_]+)*)', block)
         
-        name_match = re.search(r'SERVICE_NAME:\s*(.+)', full_block)
-        if name_match:
-            service_data['name'] = name_match.group(1).strip()
-        
-        display_name_match = re.search(r'DISPLAY_NAME:\s*(.+)', full_block)
-        description_match = re.search(r'DISPLAY_NAME:\s*.+\n((?:\s+.+\n)*)', full_block)
+        # Extract description which can be multi-line
+        description_match = re.search(r'DISPLAY_NAME:\s*.+?\n((?:.|\n)*?)\n\s*(?:GROUP|TYPE|STATE)', block, re.DOTALL)
 
-        if display_name_match:
-            service_data['display_name'] = display_name_match.group(1).strip()
-            # The description is the text after the display name until the next all-caps key
-            desc_content_match = re.search(r'DISPLAY_NAME:\s*.+?\n(.+?)\n\s*[A-Z_]+', full_block, re.DOTALL)
-            if desc_content_match:
-                # Clean up the description
-                description = desc_content_match.group(1).strip()
-                description = re.sub(r'\s+', ' ', description)
+        if name_match: service_data['name'] = name_match.group(1).strip()
+        if display_name_match: service_data['display_name'] = display_name_match.group(1).strip()
+        if state_match: service_data['state'] = state_match.group(1).strip()
+        if type_match: service_data['type'] = type_match.group(1).strip()
+        
+        if description_match:
+            # Clean up the description
+            description = description_match.group(1).strip()
+            description = re.sub(r'\s{2,}', ' ', description).strip()
+            service_data['description'] = description
+        else:
+            # Fallback for descriptions that are at the end of a block
+            fallback_desc_match = re.search(r'DISPLAY_NAME:\s*.+?\n((?:.|\n)*)', block, re.DOTALL)
+            if fallback_desc_match:
+                description = fallback_desc_match.group(1).strip()
+                description = re.sub(r'\s{2,}', ' ', description).strip()
                 service_data['description'] = description
             else:
-                 # Fallback for single-line descriptions or end of block
-                short_desc_match = re.search(r'DISPLAY_NAME:\s*.+\n\s*(.+)', full_block)
-                if short_desc_match:
-                    service_data['description'] = short_desc_match.group(1).strip()
-                else:
-                    service_data['description'] = "No description available."
-        
-        state_match = re.search(r'STATE\s+:\s*\d+\s+([A-Z_]+)', full_block)
-        if state_match:
-            service_data['state'] = state_match.group(1).strip()
-            
-        type_match = re.search(r'TYPE\s+:\s*[\w\s]+\s+([A-Z_]+(?: [A-Z_]+)*)', full_block)
-        if type_match:
-            service_data['type'] = type_match.group(1).strip()
+                 service_data['description'] = "No description available."
         
         if all(k in service_data for k in ['name', 'display_name', 'state', 'type', 'description']):
             data.append(service_data)
             
     return {"psservice": data} if data else None
-
 
 @pstools_bp.route('/api/psservice', methods=['POST'])
 def api_psservice():
@@ -249,6 +244,58 @@ def api_pskill():
     rc, out, err = run_cmd(args, timeout=60)
     return json_result(rc, out, err)
 
+def parse_psloglist_output(output):
+    events = []
+    # Split the entire output into blocks, where each block starts with the record number in brackets.
+    event_blocks = re.split(r'(?=\[\d+\])', output)
+    
+    for block in event_blocks:
+        block = block.strip()
+        if not block or "PsLoglist" in block or "System log on" in block:
+            continue
+        
+        event_data = {}
+        # Using regex to capture all fields
+        record_match = re.search(r'\[(\d+)\]\s*(.*)', block)
+        type_match = re.search(r'Type:\s+(.*)', block)
+        computer_match = re.search(r'Computer:\s+(.*)', block)
+        time_match = re.search(r'Time:\s+(.*)', block)
+        id_match = re.search(r'ID:\s+(.*)', block)
+        user_match = re.search(r'User:\s+(.*)', block)
+        
+        if record_match:
+            event_data['record_num'] = record_match.group(1).strip()
+            event_data['source'] = record_match.group(2).strip()
+        
+        if type_match: event_data['type'] = type_match.group(1).strip()
+        if computer_match: event_data['computer'] = computer_match.group(1).strip()
+        if id_match: event_data['id'] = id_match.group(1).strip()
+        if user_match: event_data['user'] = user_match.group(1).strip()
+        
+        # Combine Time and ID line for Time parsing
+        if time_match and id_match:
+            event_data['time'] = time_match.group(1).replace(f"ID: {event_data['id']}", "").strip()
+        elif time_match:
+             event_data['time'] = time_match.group(1).strip()
+
+
+        # The message is whatever is left after the 'User:' line
+        message_parts = block.split('User:')
+        if len(message_parts) > 1:
+            message = message_parts[1]
+            # remove user from the beginning of the message
+            if 'user' in event_data and event_data['user'] in message:
+                message = message.replace(event_data['user'], '', 1).strip()
+            event_data['message'] = message
+        else:
+            event_data['message'] = ""
+        
+        # Ensure all core fields are present before adding
+        if all(k in event_data for k in ['record_num', 'source', 'type', 'time', 'id', 'computer', 'user', 'message']):
+            events.append(event_data)
+            
+    return {"psloglist": events} if events else None
+
 @pstools_bp.route('/api/psloglist', methods=['POST'])
 def api_psloglist():
     data = request.get_json() or {}
@@ -260,7 +307,12 @@ def api_psloglist():
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
-    return json_result(rc, out, err)
+
+    structured_data = None
+    if rc == 0 and out:
+        structured_data = parse_psloglist_output(out)
+
+    return json_result(rc, out, err, structured_data)
 
 def parse_psinfo_output(output):
     data = {
@@ -494,5 +546,6 @@ def api_psping():
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
     return json_result(rc, out, err)
+
 
 

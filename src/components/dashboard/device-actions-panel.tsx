@@ -34,7 +34,11 @@ import {
   ArrowUpDown,
   PlayCircle,
   StopCircle,
-  HelpCircle
+  HelpCircle,
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  InfoIcon
 } from "lucide-react";
 import {
   Sheet,
@@ -43,6 +47,12 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
@@ -136,6 +146,17 @@ type PsServiceData = {
     description: string;
 }
 
+type PsLogListData = {
+    record_num: string;
+    source: string;
+    time: string;
+    type: string;
+    id: string;
+    computer: string;
+    user: string;
+    message: string;
+};
+
 type DialogState = {
     isOpen: boolean;
     title: string;
@@ -148,6 +169,7 @@ type DialogState = {
         psloggedon?: PsLoggedOnUser[] | null;
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
+        psloglist?: PsLogListData[] | null;
     } | null;
 }
 
@@ -455,6 +477,54 @@ const PsServiceResult: React.FC<{ data: PsServiceData[], onAction: (serviceName:
     );
 };
 
+const PsLogListResult: React.FC<{ data: PsLogListData[] }> = ({ data }) => {
+    const getEventTypeIcon = (type: string) => {
+        switch (type.toUpperCase()) {
+            case 'INFORMATION': return <InfoIcon className="h-4 w-4 text-blue-500" />;
+            case 'WARNING': return <AlertCircle className="h-4 w-4 text-yellow-500" />;
+            case 'ERROR': return <XCircle className="h-4 w-4 text-red-500" />;
+            case 'SUCCESS': return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+            default: return <InfoIcon className="h-4 w-4 text-gray-500" />;
+        }
+    };
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center text-lg">
+                    <FileCode className="mr-2 h-5 w-5" /> Event Log
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                <Accordion type="single" collapsible className="w-full">
+                    {data.map((event, index) => (
+                        <AccordionItem value={`item-${index}`} key={index}>
+                            <AccordionTrigger>
+                                <div className="flex items-center gap-3 text-sm w-full">
+                                    {getEventTypeIcon(event.type)}
+                                    <span className="font-medium truncate flex-1 text-left">{event.source}</span>
+                                    <Badge variant="outline">{event.type}</Badge>
+                                    <span className="text-xs text-muted-foreground font-mono hidden md:inline-block">ID: {event.id}</span>
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                <div className="space-y-3 pl-7">
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                        <div className="text-muted-foreground">Time</div><div>{event.time}</div>
+                                        <div className="text-muted-foreground">User</div><div>{event.user}</div>
+                                        <div className="text-muted-foreground">Computer</div><div>{event.computer}</div>
+                                        <div className="text-muted-foreground">Record #</div><div>{event.record_num}</div>
+                                    </div>
+                                    <p className="text-sm font-mono bg-muted p-3 rounded-md mt-2">{event.message}</p>
+                                </div>
+                            </AccordionContent>
+                        </AccordionItem>
+                    ))}
+                </Accordion>
+            </CardContent>
+        </Card>
+    );
+}
 
 const CommandOutputDialog: React.FC<{
     state: DialogState;
@@ -463,7 +533,7 @@ const CommandOutputDialog: React.FC<{
     onServiceInfo?: (service: PsServiceData) => void
 }> = ({ state, onClose, onServiceAction, onServiceInfo }) => {
     
-    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice;
+    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist;
 
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
@@ -484,7 +554,7 @@ const CommandOutputDialog: React.FC<{
                         onInfo={onServiceInfo}
                     />
                 }
-
+                {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
 
                 {(!hasStructuredData) && (
                     <>
