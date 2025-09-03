@@ -1,71 +1,75 @@
-# Firebase Studio
+# Dominion Control Panel - دليل المستخدم
 
-This is a NextJS starter in Firebase Studio.
+أهلاً بك في لوحة تحكم Dominion! هذا التطبيق مصمم لمساعدتك على اكتشاف وإدارة الأجهزة الموجودة على شبكتك المحلية بسهولة.
 
-To get started, take a look at src/app/page.tsx.
+## ماذا تحتاج للبدء؟
 
-## Local Setup Guide
+قبل أن تبدأ، تأكد من أن لديك البرامج التالية مثبتة على جهازك (إذا لم تكن لديك، يمكنك البحث عن كيفية تثبيتها بسهولة):
 
-This application consists of two main parts: a Next.js frontend and a Flask (Python) backend. To run it on your local machine, please follow these steps.
+1.  **Node.js**: لتشغيل واجهة المستخدم الرسومية.
+2.  **Python**: لتشغيل الخادم الذي يدير الأوامر.
+3.  **PsTools**: مجموعة أدوات مساعدة من مايكروسوفت (سيتم شرح كيفية إعدادها).
 
-**Prerequisites:**
-*   Node.js and npm (or a similar package manager)
-*   Python 3 and pip
-*   PsTools downloaded and extracted.
+---
 
-### 1. Backend Setup (Flask)
+## خطوات التشغيل خطوة بخطوة
 
-The backend is responsible for all interactions with PsTools and network scanning.
+لتشغيل التطبيق على جهازك الشخصي، يرجى اتباع هذه الخطوات بالترتيب.
 
-a. **Install Python Dependencies:**
-Navigate to the `pstools_app` directory and install the required packages using the `requirements.txt` file.
-```bash
-cd pstools_app
-pip install -r requirements.txt
-```
+### الخطوة الأولى: تجهيز أدوات PsTools
 
-b. **Configure Environment Variables:**
-Create a file named `.env` inside the `pstools_app` directory. This file will hold the path to your PsTools utilities and a secret key for the Flask session.
+هذه الأدوات ضرورية لكي يتمكن التطبيق من التواصل مع الأجهزة الأخرى على شبكتك.
 
-```env
-# Path to the folder containing PsTools executables (e.g., PsExec.exe)
-PSTOOLS_DIR="C:\\Path\\To\\Your\\Sysinternals"
+1.  قم بتحميل **PsTools** من موقع مايكروسوفت الرسمي.
+2.  بعد التحميل، ستحصل على ملف مضغوط. قم بفك ضغط هذا الملف في أي مجلد على جهازك (مثلاً: `C:\PsTools`).
+3.  **مهم جداً:** انسخ مسار هذا المجلد، ستحتاجه في الخطوة التالية.
 
-# A random string to secure user sessions
-FLASK_SECRET_KEY="your-super-secret-key"
+### الخطوة الثانية: إعداد الخادم (الجزء الخلفي)
 
-# Optional: Define the network range for scanning, e.g., "192.168.1.0/24"
-# If not set, it will try to determine it automatically.
-# SCAN_CIDR="192.168.1.0/24"
-```
-**Note:** You must run this application on a Windows machine that is part of a domain for the PsTools commands and admin validation to work correctly.
+هذا هو "العقل" الذي يدير كل العمليات في الخلفية.
 
-c. **Run the Backend Server:**
-From within the `pstools_app` directory, start the Flask server.
-```bash
-flask run --host=0.0.0.0 --port=5000
-```
-The backend server will now be running on `http://127.0.0.1:5000`.
+1.  افتح مجلد `pstools_app` الموجود ضمن ملفات المشروع.
+2.  قم بتثبيت المكتبات المطلوبة عن طريق فتح نافذة الأوامر (Command Prompt أو PowerShell) في هذا المجلد وتشغيل الأمر التالي:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  في نفس المجلد (`pstools_app`)، أنشئ ملفًا جديدًا وسمّه `.env`.
+4.  افتح ملف `.env` وألصق فيه النص التالي، مع استبدال `"C:\\Path\\To\\Your\\Sysinternals"` بالمسار الذي نسخته في الخطوة الأولى.
+    ```env
+    # استبدل هذا المسار بالمسار الصحيح لمجلد PsTools على جهازك
+    PSTOOLS_DIR="C:\\Path\\To\\Your\\Sysinternals"
 
-### 2. Frontend Setup (Next.js)
+    # مفتاح سري عشوائي، يمكنك تركه كما هو
+    FLASK_SECRET_KEY="your-super-secret-key"
+    ```
+    **ملاحظة:** تأكد من استخدام شرطتين مائلتين `\\` في المسار.
 
-The frontend provides the user interface for interacting with the backend.
+5.  الآن، قم بتشغيل الخادم باستخدام الأمر التالي في نافذة الأوامر:
+    ```bash
+    flask run --host=0.0.0.0 --port=5000
+    ```
+    اترك نافذة الأوامر هذه مفتوحة، فالخادم يجب أن يظل يعمل.
 
-a. **Install Node.js Dependencies:**
-In the project's root directory, install the necessary npm packages.
-```bash
-npm install
-```
+### الخطوة الثالثة: تشغيل واجهة المستخدم (الجزء الأمامي)
 
-b. **Run the Frontend Development Server:**
-Start the Next.js application.
-```bash
-npm run dev
-```
-The frontend will be available at `http://localhost:9002`. The Next.js app is configured to proxy API requests from `/api/*` to the Flask backend running on port 5000.
+هذه هي الشاشة الرسومية التي ستتفاعل معها.
 
-### 3. Usage
+1.  افتح نافذة أوامر جديدة في المجلد الرئيسي للمشروع.
+2.  قم بتثبيت المكتبات المطلوبة عن طريق تشغيل الأمر:
+    ```bash
+    npm install
+    ```
+3.  بعد اكتمال التثبيت، قم بتشغيل واجهة المستخدم بالأمر التالي:
+    ```bash
+    npm run dev
+    ```
 
-1.  Open your browser and go to `http://localhost:9002`.
-2.  Log in using an email address of a user who is a member of the "Domain Admins" group on your network. The password field can be anything, as it's not currently validated against the actual user password (for security reasons, password validation should be handled carefully, e.g., via LDAP).
-3.  Once logged in, you will be taken to the dashboard where you can discover and manage devices on your network.
+### الخطوة الرابعة: استخدام التطبيق
+
+1.  افتح متصفح الإنترنت واذهب إلى العنوان التالي: `http://localhost:9002`
+2.  ستظهر لك شاشة تسجيل الدخول. استخدم بيانات الدخول التالية:
+    *   **البريد الإلكتروني:** `admin@admin.com`
+    *   **كلمة المرور:** `admin`
+3.  بعد تسجيل الدخول، ستكون في لوحة التحكم الرئيسية حيث يمكنك البدء في اكتشاف وإدارة أجهزتك.
+
+**ملاحظة هامة:** لكي يعمل التطبيق بشكل صحيح، يجب تشغيله على جهاز كمبيوتر يعمل بنظام ويندوز ويكون جزءًا من شبكة (Domain)، ويجب أن يكون حساب المستخدم الذي تسجل به عضواً في مجموعة "Domain Admins".
