@@ -27,8 +27,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 
 const formSchema = z.object({
-  email: z.string().email({ message: "Please enter a valid email." }),
-  password: z.string().min(6, { message: "Password must be at least 6 characters." }),
+  email: z.string().min(1, { message: "Please enter your email." }),
+  password: z.string().min(1, { message: "Please enter your password." }),
 });
 
 export default function LoginForm() {
@@ -50,7 +50,7 @@ export default function LoginForm() {
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Simulate success/error
-    if (values.email === "admin@example.com" && values.password === "password") {
+    if (values.email === "admin" && values.password === "admin") {
       toast({
         title: "Login Successful",
         description: "Welcome back, Admin!",
@@ -89,8 +89,8 @@ export default function LoginForm() {
                     <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <FormControl>
                       <Input
-                        type="email"
-                        placeholder="admin@example.com"
+                        type="text"
+                        placeholder="admin"
                         className="pl-10"
                         {...field}
                       />
