@@ -42,43 +42,54 @@ def require_login():
 
 @network_bp.route('/api/network-interfaces', methods=['POST'])
 def api_network_interfaces():
-    if not SCAPY_AVAILABLE:
-        return jsonify({"ok": False, "error": "Scapy library not found, cannot list interfaces."}), 500
-    
     interfaces_list = []
     try:
-        for iface_name in get_if_list():
-            iface = conf.ifaces.get(iface_name)
-            if iface and iface.ip and iface.netmask and iface.ip != '127.0.0.1':
-                try:
-                    # Create a network object to validate and get CIDR
-                    net = ipaddress.ip_network(f"{iface.ip}/{iface.netmask}", strict=False)
-                    interfaces_list.append({
-                        "id": iface.guid if hasattr(iface, 'guid') else iface_name,
-                        "name": iface.name,
-                        "ip": iface.ip,
-                        "netmask": iface.netmask,
-                        "cidr": str(net.with_prefixlen)
-                    })
-                except ValueError:
-                    # Skip invalid interfaces
-                    continue
+        # Scapy can be unreliable, so we build a primary list and a fallback
+        if SCAPY_AVAILABLE:
+            for iface_name in get_if_list():
+                iface = conf.ifaces.get(iface_name)
+                # Check for valid IP and netmask, ignore loopback
+                if iface and hasattr(iface, 'ip') and hasattr(iface, 'netmask') and iface.ip and iface.netmask and iface.ip != '127.0.0.1':
+                    try:
+                        net = ipaddress.ip_network(f"{iface.ip}/{iface.netmask}", strict=False)
+                        interfaces_list.append({
+                            "id": hasattr(iface, 'guid') and iface.guid is not None and iface.guid != ''  ? iface.guid : iface_name,
+                            "name": iface.name or f"Interface ({iface.ip})",
+                            "ip": iface.ip,
+                            "netmask": iface.netmask,
+                            "cidr": str(net.with_prefixlen)
+                        })
+                    except (ValueError, TypeError):
+                        # Skip if IP/Netmask is invalid for ipaddress library
+                        continue
 
-        # Fallback if scapy fails to find interfaces with IPs
+        # If scapy fails or finds nothing, use a more reliable fallback
         if not interfaces_list:
             hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            interfaces_list.append({
-                "id": "default_fallback",
-                "name": f"Default ({hostname})",
-                "ip": local_ip,
-                "netmask": "255.255.255.0",
-                "cidr": f"{local_ip.rsplit('.', 1)[0]}.0/24"
-            })
+            # This gets all IPs associated with the host, including VPNs
+            all_ips = socket.getaddrinfo(hostname, None)
+            
+            for res in all_ips:
+                family, socktype, proto, canonname, sockaddr = res
+                ip_addr = sockaddr[0]
+                # Filter for IPv4 and non-loopback
+                if family == socket.AF_INET and not ip_addr.startswith('127.'):
+                    # Create a plausible CIDR, usually /24 for local networks
+                    cidr = f"{ip_addr.rsplit('.', 1)[0]}.0/24"
+                    # Avoid adding duplicates
+                    if not any(d['ip'] == ip_addr for d in interfaces_list):
+                        interfaces_list.append({
+                            "id": f"fallback_{ip_addr}",
+                            "name": f"Network ({ip_addr})",
+                            "ip": ip_addr,
+                            "netmask": "255.255.255.0", # Assumption
+                            "cidr": cidr
+                        })
             
         return jsonify({"ok": True, "interfaces": interfaces_list})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        # Ensure some response is always sent on error
+        return jsonify({"ok": False, "error": f"An unexpected error occurred while fetching interfaces: {str(e)}"}), 500
 
 
 @network_bp.route('/api/arp-scan-status', methods=['POST'])

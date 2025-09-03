@@ -32,6 +32,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const ICONS: Record<Device["type"], React.ElementType> = {
   laptop: Laptop,
@@ -59,22 +60,26 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
   const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
   const [selectedInterface, setSelectedInterface] = React.useState<NetworkInterface | null>(null);
+  const [networkError, setNetworkError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const fetchInterfaces = async () => {
         try {
+            setNetworkError(null);
             const res = await fetch("/api/network-interfaces", { method: 'POST' });
             const data = await res.json();
-            if(data.ok) {
+            if(data.ok && data.interfaces.length > 0) {
                 setInterfaces(data.interfaces);
-                if (data.interfaces.length > 0) {
-                    setSelectedInterface(data.interfaces[0]);
-                }
+                setSelectedInterface(data.interfaces[0]);
             } else {
-                toast({ variant: "destructive", title: "Network Error", description: "Could not fetch network interfaces."});
+                 const errorMsg = data.error || "Could not find any usable network interfaces.";
+                 setNetworkError(errorMsg);
+                 toast({ variant: "destructive", title: "Network Error", description: errorMsg});
             }
-        } catch (err) {
-            toast({ variant: "destructive", title: "Network Error", description: "Could not fetch network interfaces."});
+        } catch (err: any) {
+             const errorMsg = err.message || "An unknown error occurred while fetching network interfaces.";
+             setNetworkError(errorMsg);
+             toast({ variant: "destructive", title: "Network Error", description: errorMsg});
         }
     };
     fetchInterfaces();
@@ -112,7 +117,11 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
         if (!data.running) {
           stopPolling();
-          toast({ title: "Scan Complete", description: `Found ${data.devices.length} devices.` });
+          if (data.error) {
+              toast({ variant: "destructive", title: "Scan Finished with Error", description: data.error });
+          } else {
+              toast({ title: "Scan Complete", description: `Found ${data.devices.length} devices.` });
+          }
         }
       } else {
         stopPolling();
@@ -122,7 +131,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       stopPolling();
       toast({ variant: "destructive", title: "Scan Error", description: "Could not get scan status." });
     }
-  }, [toast]);
+  }, [toast, stopPolling]);
 
   const stopPolling = React.useCallback(() => {
     if (pollingTimer.current) {
@@ -143,21 +152,26 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setScanCount(0);
 
     try {
+      // Start polling immediately for user feedback
+      if (pollingTimer.current) clearInterval(pollingTimer.current);
+      pollingTimer.current = setInterval(pollScanStatus, POLLING_INTERVAL);
+      
       const res = await fetch("/api/arp-scan", { 
           method: "POST",
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cidr: selectedInterface.cidr })
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-          throw new Error(data.error || "Failed to start scan.");
+      
+      // The backend now runs the scan async, so we don't need to check its response to start polling
+      // But we can check if it immediately errored out.
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to start scan.");
       }
-      // Start polling for status
-      if (pollingTimer.current) clearInterval(pollingTimer.current);
-      pollingTimer.current = setInterval(pollScanStatus, POLLING_INTERVAL);
+
     } catch (err: any) {
         toast({ variant: "destructive", title: "Scan Error", description: err.message });
-        setIsScanning(false);
+        stopPolling();
     }
   };
 
@@ -181,6 +195,20 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   }, []);
 
   const renderContent = () => {
+    if (networkError) {
+        return (
+             <Alert variant="destructive" className="h-80 flex flex-col items-center justify-center text-center">
+                <WifiOff className="h-12 w-12" />
+                <AlertTitle className="mt-4 text-lg">Failed to Load Network Interfaces</AlertTitle>
+                <AlertDescription className="mt-2">
+                    {networkError}
+                    <br/>
+                    Please ensure the backend is running and the user has appropriate permissions.
+                </AlertDescription>
+            </Alert>
+        )
+    }
+
     if (isScanning && devices.length === 0) {
       return (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -260,13 +288,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         <div className="flex items-center gap-2">
              <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="h-11 min-w-[250px] justify-between">
+                    <Button variant="outline" className="h-11 min-w-[250px] justify-between" disabled={interfaces.length === 0}>
                         <div className="flex items-center gap-2">
                            <Network className="h-4 w-4" />
                            {selectedInterface ? (
                                <span>{selectedInterface.name} ({selectedInterface.cidr})</span>
                            ) : (
-                               <span>Select a Network</span>
+                               <span>{networkError ? "No networks found" : "Select a Network"}</span>
                            )}
                         </div>
                         <ChevronDown className="h-4 w-4" />
@@ -283,7 +311,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
             {isScanning ? (
                 <Button onClick={handleCancelScan} variant="destructive" size="lg">
-                    <WifiOff className="mr-2 h-4 w-4" />
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Cancel Scan
                 </Button>
             ) : (
