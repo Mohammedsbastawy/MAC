@@ -97,6 +97,14 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     return "unknown";
   };
 
+  const stopPolling = React.useCallback(() => {
+    if (pollingTimer.current) {
+      clearInterval(pollingTimer.current);
+      pollingTimer.current = null;
+    }
+    setIsScanning(false);
+  }, []);
+
   const pollScanStatus = React.useCallback(async () => {
     try {
       const res = await fetch("/api/arp-scan-status", { method: "POST" });
@@ -133,13 +141,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     }
   }, [toast, stopPolling]);
 
-  const stopPolling = React.useCallback(() => {
-    if (pollingTimer.current) {
-      clearInterval(pollingTimer.current);
-      pollingTimer.current = null;
-    }
-    setIsScanning(false);
-  }, []);
 
   const handleScan = async () => {
     if (!selectedInterface) {
@@ -326,5 +327,3 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </div>
   );
 }
-
-    
