@@ -165,49 +165,49 @@ def parse_psinfo_output(output):
         "disk_info": []
     }
     
-    system_info_section = re.search(r'System information:(.*?)Disk information:', output, re.DOTALL)
-    if system_info_section:
-        content = system_info_section.group(1).strip()
+    # Use regex to find the system information section more reliably
+    system_info_match = re.search(r'System information for .*?:(.*?)(?:Disk information:|$)', output, re.DOTALL)
+    if system_info_match:
+        content = system_info_match.group(1).strip()
         lines = content.split('\n')
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-            match = re.match(r'^(.*?):\s+(.*)', line)
+            # Regex to match "Key    : Value" format
+            match = re.match(r'([^:]+):\s+(.*)', line)
             if match:
                 key = match.group(1).strip()
                 value = match.group(2).strip()
                 data["system_info"].append({"key": key, "value": value})
 
-    disk_info_section = re.search(r'Disk information:(.*)', output, re.DOTALL)
-    if disk_info_section:
-        content = disk_info_section.group(1).strip()
+    # Use regex to find the disk information section
+    disk_info_match = re.search(r'Disk information:(.*)', output, re.DOTALL)
+    if disk_info_match:
+        content = disk_info_match.group(1).strip()
         lines = content.split('\n')
-        # Find the header line to make parsing more robust
-        header_index = -1
-        for i, line in enumerate(lines):
+        header_found = False
+        for line in lines:
             if 'Volume' in line and 'Size' in line and 'Free' in line:
-                header_index = i
-                break
-        
-        if header_index != -1:
-            for line in lines[header_index + 2:]: # Skip header and separator line
-                line = line.strip()
-                if not line:
-                    continue
-                # This regex is more flexible, capturing groups of non-space characters
-                parts = re.split(r'\s{2,}', line)
-                if len(parts) == 5:
-                    volume, disk_type, size_gb, free_gb, free_percent = parts
+                header_found = True
+                continue
+            if header_found and "----" in line:
+                continue
+            if header_found and line.strip():
+                # Flexible split based on 2 or more spaces
+                parts = re.split(r'\s{2,}', line.strip())
+                if len(parts) >= 5:
+                    volume, type_val, size_gb, free_gb, free_percent = parts[:5]
                     data["disk_info"].append({
-                        "volume": volume.strip(),
-                        "type": disk_type.strip(),
-                        "size_gb": size_gb.replace('GB','').strip(),
-                        "free_gb": free_gb.replace('GB','').strip(),
-                        "free_percent": free_percent.strip()
+                        "volume": volume,
+                        "type": type_val,
+                        "size_gb": size_gb.replace('GB', '').strip(),
+                        "free_gb": free_gb.replace('GB', '').strip(),
+                        "free_percent": free_percent
                     })
     
     return data if data["system_info"] or data["disk_info"] else None
+
 
 @pstools_bp.route('/api/psinfo', methods=['POST'])
 def api_psinfo():
