@@ -8,3 +8,13 @@ export type Device = {
   os: string;
   lastSeen: string;
 };
+
+export type NetworkInterface = {
+  id: string;
+  name: string;
+  ip: string;
+  netmask: string;
+  cidr: string;
+};
+
+    

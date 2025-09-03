@@ -7,6 +7,13 @@ from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pstools_app.utils.helpers import is_valid_ip, get_pstools_path
 
+try:
+    from scapy.all import get_if_list, get_if_addr, get_if_hwaddr, conf, srp, Ether, ARP
+    SCAPY_AVAILABLE = True
+except ImportError:
+    SCAPY_AVAILABLE = False
+
+
 network_bp = Blueprint('network', __name__)
 
 def get_local_cidr():
@@ -18,7 +25,7 @@ def get_local_cidr():
     except Exception:
         return "192.168.1.0/24"
 
-DEFAULT_SCAN_CIDR = os.environ.get("SCAN_CIDR", get_local_cidr())
+DEFAULT_SCAN_CIDR = get_local_cidr()
 arp_scan_status = {"running": False, "count": 0, "devices": [], "error": None}
 arp_scan_lock = threading.Lock()
 
@@ -32,6 +39,47 @@ def require_login():
     if request.endpoint and request.endpoint.startswith('network.'):
         if 'user' not in session or 'email' not in session:
             return jsonify({'ok': False, 'error': 'يجب تسجيل الدخول أولاً'}), 401
+
+@network_bp.route('/api/network-interfaces', methods=['POST'])
+def api_network_interfaces():
+    if not SCAPY_AVAILABLE:
+        return jsonify({"ok": False, "error": "Scapy library not found, cannot list interfaces."}), 500
+    
+    interfaces_list = []
+    try:
+        for iface_name in get_if_list():
+            iface = conf.ifaces.get(iface_name)
+            if iface and iface.ip and iface.netmask and iface.ip != '127.0.0.1':
+                try:
+                    # Create a network object to validate and get CIDR
+                    net = ipaddress.ip_network(f"{iface.ip}/{iface.netmask}", strict=False)
+                    interfaces_list.append({
+                        "id": iface.guid if hasattr(iface, 'guid') else iface_name,
+                        "name": iface.name,
+                        "ip": iface.ip,
+                        "netmask": iface.netmask,
+                        "cidr": str(net.with_prefixlen)
+                    })
+                except ValueError:
+                    # Skip invalid interfaces
+                    continue
+
+        # Fallback if scapy fails to find interfaces with IPs
+        if not interfaces_list:
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            interfaces_list.append({
+                "id": "default_fallback",
+                "name": f"Default ({hostname})",
+                "ip": local_ip,
+                "netmask": "255.255.255.0",
+                "cidr": f"{local_ip.rsplit('.', 1)[0]}.0/24"
+            })
+            
+        return jsonify({"ok": True, "interfaces": interfaces_list})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @network_bp.route('/api/arp-scan-status', methods=['POST'])
 def api_arp_scan_status():
@@ -54,9 +102,12 @@ def api_arp_scan_cancel():
 @network_bp.route('/api/arp-scan', methods=['POST'])
 def api_arp_scan():
     import concurrent.futures
+    data = request.get_json() or {}
+    scan_cidr = data.get("cidr", DEFAULT_SCAN_CIDR)
+
     devices = {}
     try:
-        net = ipaddress.ip_network(DEFAULT_SCAN_CIDR, strict=False)
+        net = ipaddress.ip_network(scan_cidr, strict=False)
         with arp_scan_lock:
             arp_scan_status["running"] = True
             arp_scan_status["devices"] = []
@@ -86,31 +137,35 @@ def api_arp_scan():
                         if not any(d["ip"] == res["ip"] for d in arp_scan_status["devices"]):
                             arp_scan_status["devices"].append(res)
                             arp_scan_status["count"] = len(arp_scan_status["devices"])
-        try:
-            from scapy.all import ARP, Ether, srp
-            import socket as pysocket
-            ip_range = str(net)
-            ether = Ether(dst="ff:ff:ff:ff:ff:ff")
-            arp = ARP(pdst=ip_range)
-            ans, _ = srp(ether/arp, timeout=2, verbose=0)
-            for snd, rcv in ans:
-                ip = rcv.psrc
-                mac = rcv.hwsrc
-                try:
-                    hostname = pysocket.gethostbyaddr(ip)[0]
-                except:
-                    hostname = "Unknown"
-                if ip not in devices:
-                    devices[ip] = {"ip": ip, "mac": mac, "hostname": hostname}
-                    with arp_scan_lock:
-                        if not any(d["ip"] == ip for d in arp_scan_status["devices"]):
-                            arp_scan_status["devices"].append({"ip": ip, "mac": mac, "hostname": hostname})
-                            arp_scan_status["count"] = len(arp_scan_status["devices"])
-        except Exception:
-            pass
+        
+        if SCAPY_AVAILABLE:
+            try:
+                ether = Ether(dst="ff:ff:ff:ff:ff:ff")
+                arp = ARP(pdst=str(net))
+                ans, _ = srp(ether/arp, timeout=2, verbose=0)
+                for snd, rcv in ans:
+                    ip = rcv.psrc
+                    mac = rcv.hwsrc
+                    try:
+                        hostname = socket.gethostbyaddr(ip)[0]
+                    except:
+                        hostname = "Unknown"
+                    if ip not in devices:
+                        devices[ip] = {"ip": ip, "mac": mac, "hostname": hostname}
+                        with arp_scan_lock:
+                            if not any(d["ip"] == ip for d in arp_scan_status["devices"]):
+                                arp_scan_status["devices"].append({"ip": ip, "mac": mac, "hostname": hostname})
+                                arp_scan_status["count"] = len(arp_scan_status["devices"])
+            except Exception:
+                pass # Scapy might fail on some systems, ping sweep is a good fallback
+        
         with arp_scan_lock:
             arp_scan_status["running"] = False
-        return jsonify({"ok": True, "devices": list(devices.values())})
+            # Final sort of devices
+            sorted_devices = sorted(list(devices.values()), key=lambda x: ipaddress.ip_address(x['ip']))
+            arp_scan_status["devices"] = sorted_devices
+
+        return jsonify({"ok": True, "devices": arp_scan_status["devices"]})
     except Exception as e:
         with arp_scan_lock:
             arp_scan_status["running"] = False
@@ -119,9 +174,12 @@ def api_arp_scan():
 
 @network_bp.route('/api/scan', methods=['POST'])
 def api_scan():
+    data = request.get_json() or {}
+    scan_cidr = data.get("cidr", DEFAULT_SCAN_CIDR)
+
     hosts = []
     try:
-        net = ipaddress.ip_network(DEFAULT_SCAN_CIDR, strict=False)
+        net = ipaddress.ip_network(scan_cidr, strict=False)
         ip_list = [str(ip) for ip in net.hosts()]
         def ping_ip(ip_str):
             rc = os.system(f"ping -n 1 -w 200 {ip_str} >nul 2>&1")
@@ -135,3 +193,5 @@ def api_scan():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "hosts": []})
     return jsonify({"ok": True, "hosts": hosts})
+
+    

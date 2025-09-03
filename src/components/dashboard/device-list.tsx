@@ -5,12 +5,14 @@ import {
   Laptop,
   Loader2,
   Monitor,
+  Network,
   Router,
   Server,
   Smartphone,
   ToyBrick,
   Wifi,
   WifiOff,
+  ChevronDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,9 +23,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Device } from "@/lib/types";
+import type { Device, NetworkInterface } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 const ICONS: Record<Device["type"], React.ElementType> = {
   laptop: Laptop,
@@ -48,6 +56,30 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [scanCount, setScanCount] = React.useState(0);
   const { toast } = useToast();
   const pollingTimer = React.useRef<NodeJS.Timeout | null>(null);
+
+  const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
+  const [selectedInterface, setSelectedInterface] = React.useState<NetworkInterface | null>(null);
+
+  React.useEffect(() => {
+    const fetchInterfaces = async () => {
+        try {
+            const res = await fetch("/api/network-interfaces", { method: 'POST' });
+            const data = await res.json();
+            if(data.ok) {
+                setInterfaces(data.interfaces);
+                if (data.interfaces.length > 0) {
+                    setSelectedInterface(data.interfaces[0]);
+                }
+            } else {
+                toast({ variant: "destructive", title: "Network Error", description: "Could not fetch network interfaces."});
+            }
+        } catch (err) {
+            toast({ variant: "destructive", title: "Network Error", description: "Could not fetch network interfaces."});
+        }
+    };
+    fetchInterfaces();
+  }, [toast]);
+
 
   const determineDeviceType = (hostname: string): Device["type"] => {
     const lowerHostname = hostname.toLowerCase();
@@ -101,12 +133,21 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   }, []);
 
   const handleScan = async () => {
+    if (!selectedInterface) {
+        toast({ variant: "destructive", title: "No Network Selected", description: "Please select a network to scan."});
+        return;
+    }
+
     setIsScanning(true);
     setDevices([]);
     setScanCount(0);
 
     try {
-      const res = await fetch("/api/arp-scan", { method: "POST" });
+      const res = await fetch("/api/arp-scan", { 
+          method: "POST",
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cidr: selectedInterface.cidr })
+      });
       const data = await res.json();
       if (!res.ok || !data.ok) {
           throw new Error(data.error || "Failed to start scan.");
@@ -165,7 +206,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold text-foreground">No devices found</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Click "Discover Devices" to scan your network.
+            Select a network and click "Discover Devices" to scan.
           </p>
         </div>
       );
@@ -211,24 +252,51 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Network Devices</h1>
           <p className="text-muted-foreground">
             {isScanning 
-                ? `Scanning... Found ${scanCount} device(s) so far.`
+                ? `Scanning ${selectedInterface?.cidr}... Found ${scanCount} device(s) so far.`
                 : `Discovered ${devices.length} devices on your network.`
             }
           </p>
         </div>
-        {isScanning ? (
-            <Button onClick={handleCancelScan} variant="destructive" size="lg">
-                <WifiOff className="mr-2 h-4 w-4" />
-                Cancel Scan
-            </Button>
-        ) : (
-            <Button onClick={handleScan} disabled={isScanning} size="lg">
-                <Wifi className="mr-2 h-4 w-4" />
-                Discover Devices
-            </Button>
-        )}
+        <div className="flex items-center gap-2">
+             <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-11 min-w-[250px] justify-between">
+                        <div className="flex items-center gap-2">
+                           <Network className="h-4 w-4" />
+                           {selectedInterface ? (
+                               <span>{selectedInterface.name} ({selectedInterface.cidr})</span>
+                           ) : (
+                               <span>Select a Network</span>
+                           )}
+                        </div>
+                        <ChevronDown className="h-4 w-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-[300px]">
+                    {interfaces.map(iface => (
+                        <DropdownMenuItem key={iface.id} onClick={() => setSelectedInterface(iface)}>
+                            {iface.name} ({iface.cidr})
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            {isScanning ? (
+                <Button onClick={handleCancelScan} variant="destructive" size="lg">
+                    <WifiOff className="mr-2 h-4 w-4" />
+                    Cancel Scan
+                </Button>
+            ) : (
+                <Button onClick={handleScan} disabled={isScanning || !selectedInterface} size="lg">
+                    <Wifi className="mr-2 h-4 w-4" />
+                    Discover Devices
+                </Button>
+            )}
+        </div>
       </div>
       {renderContent()}
     </div>
   );
 }
+
+    
