@@ -91,6 +91,38 @@ def api_psexec():
     rc, out, err = run_cmd(args, timeout=180)
     return json_result(rc, out, err)
 
+def parse_psservice_output(output):
+    data = []
+    lines = output.strip().split('\n\n')
+    for block in lines:
+        service_data = {}
+        # Split block into lines and filter out empty ones
+        block_lines = [line.strip() for line in block.split('\n') if line.strip()]
+        if not block_lines:
+            continue
+        for line in block_lines:
+            if ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip().lower().replace(' ', '_')
+                value = value.strip()
+                if key == 'service_name':
+                    service_data['name'] = value
+                elif key == 'display_name':
+                    service_data['display_name'] = value
+                elif key == 'state':
+                     # Extract state code and text
+                    match = re.match(r'\d+\s+([A-Z_]+)', value)
+                    if match:
+                        service_data['state'] = match.group(1)
+                elif key == 'type':
+                    match = re.match(r'\d+\s+([A-Z_]+)', value)
+                    if match:
+                        service_data['type'] = match.group(1)
+        if 'name' in service_data and 'display_name' in service_data:
+            data.append(service_data)
+    return {"psservice": data} if data else None
+
+
 @pstools_bp.route('/api/psservice', methods=['POST'])
 def api_psservice():
     data = request.get_json() or {}
@@ -116,16 +148,19 @@ def api_psservice():
             # Combine outputs for clarity
             out = f"--- STOP ATTEMPT ---\n{out1}\n\n--- START ATTEMPT ---\n{out}"
             err = f"--- STOP ATTEMPT ---\n{err1}\n\n--- START ATTEMPT ---\n{err}"
-
+            structured_data = None
         elif action in ("query", "start", "stop"):
             final_args = base_args + [action] + ([svc] if svc else [])
             rc, out, err = run_cmd(final_args, timeout=120)
+            structured_data = None
+            if rc == 0 and out and action == 'query':
+                structured_data = parse_psservice_output(out)
         else:
             return json_result(2, "", "Invalid action")
     except Exception as e:
         return json_result(2, "", str(e))
     
-    return json_result(rc, out, err)
+    return json_result(rc, out, err, structured_data)
 
 def parse_pslist_output(output):
     data = []
@@ -278,6 +313,25 @@ def api_psinfo():
         
     return json_result(rc, out, err, structured_data)
 
+def parse_psloggedon_output(output):
+    users = []
+    lines = output.strip().split('\n')
+    user_section = False
+    for line in lines:
+        line = line.strip()
+        if not line or "Users logged on locally" in line or "No one is logged on locally" in line:
+            continue
+        # Section starts after the "Users logged on..." line
+        if line.startswith("----"):
+            user_section = True
+            continue
+        if user_section:
+            # Regex to capture date/time and username
+            match = re.match(r'(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\s+(.*)', line)
+            if match:
+                users.append({"time": match.group(1).strip(), "user": match.group(2).strip()})
+    return {"psloggedon": users} if users else None
+
 @pstools_bp.route('/api/psloggedon', methods=['POST'])
 def api_psloggedon():
     data = request.get_json() or {}
@@ -290,7 +344,12 @@ def api_psloggedon():
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
-    return json_result(rc, out, err)
+
+    structured_data = None
+    if rc == 0 and out:
+        structured_data = parse_psloggedon_output(out)
+
+    return json_result(rc, out, err, structured_data)
 
 @pstools_bp.route('/api/psshutdown', methods=['POST'])
 def api_psshutdown():
@@ -308,6 +367,34 @@ def api_psshutdown():
     rc, out, err = run_cmd(args, timeout=60)
     return json_result(rc, out, err)
 
+def parse_psfile_output(output):
+    data = []
+    lines = output.strip().split('\n')
+    header_found = False
+    for line in lines:
+        line = line.strip()
+        if not line or "PsFile" in line or "Copyright" in line:
+            continue
+        if "Path" in line and "User" in line and "Locks" in line:
+            header_found = True
+            continue
+        if "----" in line:
+            continue
+        if header_found:
+            # The structure is less predictable, so we look for known patterns
+            # Assuming format: ID, User, Locks, Path
+            parts = [p.strip() for p in re.split(r'\s{2,}', line) if p.strip()]
+            if len(parts) >= 4:
+                # The path is everything from the 4th element onwards
+                 data.append({
+                    "id": parts[0],
+                    "user": parts[1],
+                    "locks": parts[2],
+                    "path": ' '.join(parts[3:])
+                })
+    return {"psfile": data} if data else None
+
+
 @pstools_bp.route('/api/psfile', methods=['POST'])
 def api_psfile():
     data = request.get_json() or {}
@@ -319,7 +406,12 @@ def api_psfile():
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
-    return json_result(rc, out, err)
+    
+    structured_data = None
+    if rc == 0 and out:
+        structured_data = parse_psfile_output(out)
+
+    return json_result(rc, out, err, structured_data)
 
 @pstools_bp.route('/api/psgetsid', methods=['POST'])
 def api_psgetsid():

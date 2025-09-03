@@ -27,7 +27,10 @@ import {
   Cpu,
   Hash,
   Hourglass,
-  MemoryStick
+  MemoryStick,
+  Settings2,
+  File,
+  UserCheck
 } from "lucide-react";
 import {
   Sheet,
@@ -67,6 +70,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Badge } from "../ui/badge";
 
 
 type DeviceActionsPanelProps = {
@@ -107,6 +111,25 @@ type PsListProcess = {
     elapsed_time: string;
 }
 
+type PsLoggedOnUser = {
+    time: string;
+    user: string;
+};
+
+type PsFileData = {
+    id: string;
+    user: string;
+    locks: string;
+    path: string;
+};
+
+type PsServiceData = {
+    name: string;
+    display_name: string;
+    state: string;
+    type: string;
+}
+
 type DialogState = {
     isOpen: boolean;
     title: string;
@@ -116,6 +139,9 @@ type DialogState = {
     structuredData?: {
         psinfo?: PsInfoData | null;
         pslist?: PsListProcess[] | null;
+        psloggedon?: PsLoggedOnUser[] | null;
+        psfile?: PsFileData[] | null;
+        psservice?: PsServiceData[] | null;
     } | null;
 }
 
@@ -226,12 +252,109 @@ const PsListResult: React.FC<{ data: PsListProcess[] }> = ({ data }) => (
     </Card>
 )
 
+const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[] }> = ({ data }) => (
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center text-lg">
+                <UserCheck className="mr-2 h-5 w-5" /> Logged On Users
+            </CardTitle>
+        </CardHeader>
+        <CardContent>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Logon Time</TableHead>
+                        <TableHead>User</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {data.map((logon, index) => (
+                        <TableRow key={index}>
+                            <TableCell className="font-mono text-xs">{logon.time}</TableCell>
+                            <TableCell className="font-medium">{logon.user}</TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </CardContent>
+    </Card>
+);
+
+const PsFileResult: React.FC<{ data: PsFileData[] }> = ({ data }) => (
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center text-lg">
+                <File className="mr-2 h-5 w-5" /> Opened Files
+            </CardTitle>
+        </CardHeader>
+        <CardContent>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>User</TableHead>
+                        <TableHead>Locks</TableHead>
+                        <TableHead>Path</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {data.map((file, index) => (
+                        <TableRow key={index}>
+                            <TableCell>{file.user}</TableCell>
+                            <TableCell>{file.locks}</TableCell>
+                            <TableCell className="font-mono text-xs">{file.path}</TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </CardContent>
+    </Card>
+);
+
+const PsServiceResult: React.FC<{ data: PsServiceData[] }> = ({ data }) => (
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center text-lg">
+                <Settings2 className="mr-2 h-5 w-5" /> Services
+            </CardTitle>
+        </CardHeader>
+        <CardContent>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Service Name</TableHead>
+                        <TableHead>Display Name</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead>Type</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {data.map((service) => (
+                         <TableRow key={service.name}>
+                             <TableCell className="font-mono text-xs">{service.name}</TableCell>
+                             <TableCell className="font-medium">{service.display_name}</TableCell>
+                             <TableCell>
+                                 <Badge variant={service.state.includes('RUNNING') ? 'default' : 'secondary'}
+                                     className={cn(service.state.includes('RUNNING') && "bg-green-600")}
+                                 >
+                                    {service.state}
+                                 </Badge>
+                             </TableCell>
+                             <TableCell>{service.type}</TableCell>
+                         </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </CardContent>
+    </Card>
+);
+
+
 const CommandOutputDialog: React.FC<{
     state: DialogState;
     onClose: () => void;
 }> = ({ state, onClose }) => {
     
-    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist;
+    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice;
 
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
@@ -243,6 +366,10 @@ const CommandOutputDialog: React.FC<{
             <div className="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
                 {state.structuredData?.psinfo && <PsInfoResult data={state.structuredData.psinfo} />}
                 {state.structuredData?.pslist && <PsListResult data={state.structuredData.pslist} />}
+                {state.structuredData?.psloggedon && <PsLoggedOnResult data={state.structuredData.psloggedon} />}
+                {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
+                {state.structuredData?.psservice && <PsServiceResult data={state.structuredData.psservice} />}
+
 
                 {(!hasStructuredData) && (
                     <>
@@ -386,6 +513,7 @@ export default function DeviceActionsPanel({
                 <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />
                 <ActionButton icon={Users} label="Logged On Users" onClick={() => handlePstoolAction('psloggedon')} />
+                <ActionButton icon={Settings2} label="List Services" onClick={() => handlePstoolAction('psservice', { action: 'query' })} />
                 <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handlePstoolAction('psloglist', { kind: 'system' })} />
                 <ActionButton icon={FileLock} label="Opened Files" onClick={() => handlePstoolAction('psfile')} />
                 <ActionButton icon={Fingerprint} label="Get SID" onClick={() => handlePstoolAction('psgetsid')} />
