@@ -14,7 +14,7 @@ Make sure you have the following software installed on your computer:
 
 ## Setup and Run Instructions
 
-Follow these steps in order to get the application working correctly.
+Follow these steps in order to get the application working correctly. All commands should be run from the main project folder.
 
 ### Step 1: Set Up PsTools
 
