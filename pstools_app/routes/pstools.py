@@ -339,8 +339,8 @@ def api_psloggedon():
     try:
         target_arg = build_target_arg(ip)
         cred_args = build_remote_args(user, pwd)
-        # Correct argument order: exe, target, credentials
-        args = [get_pstools_path("PsLoggedOn.exe"), target_arg] + cred_args
+        # Correct argument order for PsLoggedOn: exe, credentials, target
+        args = [get_pstools_path("PsLoggedOn.exe")] + cred_args + [target_arg]
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
