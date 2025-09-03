@@ -182,22 +182,30 @@ def parse_psinfo_output(output):
     disk_info_section = re.search(r'Disk information:(.*)', output, re.DOTALL)
     if disk_info_section:
         content = disk_info_section.group(1).strip()
-        lines = content.split('\n')[2:] # Skip headers
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            # Regex to capture Volume, Type, Size, Free, and % Free
-            match = re.match(r'^\s*([A-Z]:)\s+([\w\s]+?)\s+([\d,.]+)\s+GB\s+([\d,.]+)\s+GB\s+([\d.]+%)\s*$', line)
-            if match:
-                volume, disk_type, size_gb, free_gb, free_percent = match.groups()
-                data["disk_info"].append({
-                    "volume": volume.strip(),
-                    "type": disk_type.strip(),
-                    "size_gb": size_gb.strip(),
-                    "free_gb": free_gb.strip(),
-                    "free_percent": free_percent.strip()
-                })
+        lines = content.split('\n')
+        # Find the header line to make parsing more robust
+        header_index = -1
+        for i, line in enumerate(lines):
+            if 'Volume' in line and 'Size' in line and 'Free' in line:
+                header_index = i
+                break
+        
+        if header_index != -1:
+            for line in lines[header_index + 2:]: # Skip header and separator line
+                line = line.strip()
+                if not line:
+                    continue
+                # This regex is more flexible, capturing groups of non-space characters
+                parts = re.split(r'\s{2,}', line)
+                if len(parts) == 5:
+                    volume, disk_type, size_gb, free_gb, free_percent = parts
+                    data["disk_info"].append({
+                        "volume": volume.strip(),
+                        "type": disk_type.strip(),
+                        "size_gb": size_gb.replace('GB','').strip(),
+                        "free_gb": free_gb.replace('GB','').strip(),
+                        "free_percent": free_percent.strip()
+                    })
     
     return data if data["system_info"] or data["disk_info"] else None
 
