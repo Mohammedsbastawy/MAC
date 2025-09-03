@@ -10,7 +10,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, pass: string) => Promise<boolean>;
+  login: (email: string) => Promise<{success: boolean, error?: string}>;
   logout: () => Promise<void>;
 }
 
@@ -42,22 +42,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkSession();
   }, [checkSession]);
 
-  const login = async (email: string, pass: string): Promise<boolean> => {
+  const login = async (email: string): Promise<{success: boolean, error?: string}> => {
     try {
-      const response = await fetch("/api/validate-admin-email", {
+      const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, pass }),
+        body: JSON.stringify({ email }),
       });
       const data = await response.json();
       if (data.ok) {
         await checkSession(); // Re-check session to get user details
-        return true;
+        return { success: true };
       }
-      return false;
+      return { success: false, error: data.error };
     } catch (error) {
       console.error("Login failed", error);
-      return false;
+      return { success: false, error: "An unknown error occurred during login." };
     }
   };
 

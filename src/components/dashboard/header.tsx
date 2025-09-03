@@ -29,8 +29,7 @@ import { useAuth } from "@/hooks/use-auth";
 
 
 const formSchema = z.object({
-  email: z.string().email({ message: "Please enter a valid email." }),
-  password: z.string().min(1, { message: "Please enter your password." }),
+  email: z.string().email({ message: "Please enter a valid domain email." }),
 });
 
 const InlineLoginForm: React.FC = () => {
@@ -42,26 +41,24 @@ const InlineLoginForm: React.FC = () => {
     const form = useForm<z.infer<typeof formSchema>>({
       resolver: zodResolver(formSchema),
       defaultValues: {
-        email: "admin@admin.com",
-        password: "admin",
+        email: "",
       },
     });
   
     async function onSubmit(values: z.infer<typeof formSchema>) {
       setIsLoading(true);
-      const success = await login(values.email, values.password);
+      const { success, error } = await login(values.email);
       if (success) {
         toast({
           title: "Login Successful",
-          description: "Welcome back, Admin!",
+          description: "Welcome back!",
         });
-        // Force a reload to refresh server-side session checks
         router.refresh();
       } else {
         toast({
           variant: "destructive",
           title: "Login Failed",
-          description: "Invalid credentials. Please try again.",
+          description: error || "Please check your credentials and try again.",
         });
       }
       setIsLoading(false);
@@ -71,15 +68,9 @@ const InlineLoginForm: React.FC = () => {
         <form onSubmit={form.handleSubmit(onSubmit)} className="flex items-center gap-2">
              <Input
                 type="text"
-                placeholder="Email"
-                className="h-9 max-w-48"
+                placeholder="Domain Admin Email"
+                className="h-9 w-64"
                 {...form.register("email")}
-            />
-             <Input
-                type="password"
-                placeholder="Password"
-                className="h-9 max-w-48"
-                {...form.register("password")}
             />
             <Button type="submit" className="h-9" disabled={isLoading}>
               {isLoading ? (
