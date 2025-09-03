@@ -21,7 +21,9 @@ import {
   UserX,
   FileLock,
   PauseCircle,
-  Network
+  Network,
+  HardDrive,
+  Clock,
 } from "lucide-react";
 import {
   Sheet,
@@ -52,6 +54,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "../ui/input";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table"
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
 
 type DeviceActionsPanelProps = {
@@ -70,6 +81,26 @@ const ICONS: Record<Device["type"], React.ElementType> = {
   unknown: Laptop,
 };
 
+type PsInfoData = {
+    system_info: { key: string, value: string }[];
+    disk_info: {
+        volume: string;
+        type: string;
+        size_gb: string;
+        free_gb: string;
+        free_percent: string;
+    }[];
+}
+
+type DialogState = {
+    isOpen: boolean;
+    title: string;
+    description: string;
+    output: string;
+    error: string;
+    structuredData?: PsInfoData | null;
+}
+
 const ActionButton: React.FC<{
     icon: React.ElementType,
     label: string,
@@ -83,32 +114,99 @@ const ActionButton: React.FC<{
     </Button>
 )
 
+const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
+    <div className="space-y-6">
+        {data.system_info?.length > 0 && (
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center text-lg">
+                        <Laptop className="mr-2 h-5 w-5" /> System Information
+                    </CardTitle>
+                </CardHeader>
+                <CardContent>
+                     <div className="divide-y">
+                        {data.system_info.map(info => (
+                             <div key={info.key} className="flex justify-between py-2 text-sm">
+                                <span className="text-muted-foreground">{info.key}</span>
+                                <span className="font-medium text-right">{info.value}</span>
+                            </div>
+                        ))}
+                    </div>
+                </CardContent>
+            </Card>
+        )}
+        {data.disk_info?.length > 0 && (
+             <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center text-lg">
+                        <HardDrive className="mr-2 h-5 w-5" /> Disk Information
+                    </CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Volume</TableHead>
+                                <TableHead>Type</TableHead>
+                                <TableHead className="text-right">Size (GB)</TableHead>
+                                <TableHead className="text-right">Free (GB)</TableHead>
+                                <TableHead className="text-right">Free %</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {data.disk_info.map(disk => (
+                                <TableRow key={disk.volume}>
+                                    <TableCell className="font-medium">{disk.volume}</TableCell>
+                                    <TableCell>{disk.type}</TableCell>
+                                    <TableCell className="text-right">{disk.size_gb}</TableCell>
+                                    <TableCell className="text-right">{disk.free_gb}</TableCell>
+                                    <TableCell className="text-right">{disk.free_percent}</TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
+        )}
+    </div>
+)
+
 const CommandOutputDialog: React.FC<{
-    title: string;
-    description: string;
-    output: string;
-    error: string;
-    isOpen: boolean;
+    state: DialogState;
     onClose: () => void;
-}> = ({ title, description, output, error, isOpen, onClose }) => (
-    <AlertDialog open={isOpen} onOpenChange={onClose}>
+}> = ({ state, onClose }) => (
+    <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className="max-w-3xl">
             <AlertDialogHeader>
-                <AlertDialogTitle>{title}</AlertDialogTitle>
-                <AlertDialogDescription>{description}</AlertDialogDescription>
+                <AlertDialogTitle>{state.title}</AlertDialogTitle>
+                <AlertDialogDescription>{state.description}</AlertDialogDescription>
             </AlertDialogHeader>
-            <div className="mt-4 space-y-4">
-                {output && (
-                    <div>
-                        <Label>Output</Label>
-                        <Textarea readOnly value={output} className="mt-1 h-64 font-mono text-xs bg-muted" />
-                    </div>
+            <div className="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
+                {state.structuredData ? (
+                    <PsInfoResult data={state.structuredData} />
+                ) : (
+                    <>
+                    {state.output && (
+                        <div>
+                            <Label>Output</Label>
+                            <Textarea readOnly value={state.output} className="mt-1 h-64 font-mono text-xs bg-muted" />
+                        </div>
+                    )}
+                    {state.error && (
+                         <div>
+                            <Label className="text-destructive">Error</Label>
+                            <Textarea readOnly value={state.error} className="mt-1 h-32 font-mono text-xs bg-destructive/10 text-destructive" />
+                        </div>
+                    )}
+                    </>
                 )}
-                {error && (
-                     <div>
-                        <Label className="text-destructive">Error</Label>
-                        <Textarea readOnly value={error} className="mt-1 h-32 font-mono text-xs bg-destructive/10 text-destructive" />
-                    </div>
+                 {/* Show raw output for psinfo even with structured data, for debugging */}
+                {state.structuredData && state.output && (
+                    <details className="mt-4">
+                        <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
+                        <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />
+                         {state.error && <Textarea readOnly value={state.error} className="mt-1 h-24 font-mono text-xs bg-destructive/10 text-destructive" />}
+                    </details>
                 )}
             </div>
             <AlertDialogFooter>
@@ -126,12 +224,13 @@ export default function DeviceActionsPanel({
 }: DeviceActionsPanelProps) {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [dialogState, setDialogState] = React.useState({
+  const [dialogState, setDialogState] = React.useState<DialogState>({
       isOpen: false,
       title: "",
       description: "",
       output: "",
       error: "",
+      structuredData: null,
   });
 
   if (!device) return null;
@@ -149,8 +248,6 @@ export default function DeviceActionsPanel({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                   ip: device.ipAddress,
-                  user: user.user,
-                  pass: user.password, // Assuming password stored in auth context
                   ...extraParams,
               }),
           });
@@ -162,6 +259,7 @@ export default function DeviceActionsPanel({
             description: `Command executed on ${device.name} (${device.ipAddress}).`,
             output: result.stdout,
             error: result.stderr,
+            structuredData: result.structured_data || null,
           });
 
       } catch (err: any) {
@@ -171,6 +269,7 @@ export default function DeviceActionsPanel({
             description: `Failed to connect to backend for tool: ${tool}.`,
             output: "",
             error: err.message || "An unknown network error occurred.",
+            structuredData: null
           });
       }
   };
@@ -262,8 +361,8 @@ export default function DeviceActionsPanel({
                                 e.preventDefault();
                                 const formData = new FormData(e.currentTarget);
                                 const cmd = formData.get('command') as string;
+                                (e.currentTarget.closest('[data-radix-popper-content-wrapper]')?.previousSibling as HTMLElement)?.click(); // close dialog first
                                 handlePstoolAction('psexec', { cmd });
-                                (e.currentTarget.closest('[data-radix-popper-content-wrapper]')?.previousSibling as HTMLElement)?.click(); // close dialog
                             }}>
                                 <AlertDialogHeader>
                                     <AlertDialogTitle>Execute Remote Command</AlertDialogTitle>
@@ -287,7 +386,7 @@ export default function DeviceActionsPanel({
       </SheetContent>
     </Sheet>
     <CommandOutputDialog 
-        {...dialogState}
+        state={dialogState}
         onClose={() => setDialogState(prev => ({...prev, isOpen: false}))}
     />
     </>
