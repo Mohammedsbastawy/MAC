@@ -12,6 +12,23 @@ Make sure you have the following software installed on your computer:
 
 ---
 
+## Important Prerequisites for Target Machines
+
+For the application's tools to function correctly, you must enable and start the **Remote Registry** service on all computers you intend to manage.
+
+This service allows tools like `PsInfo` to gather detailed system information.
+
+#### How to Enable via Group Policy (Recommended for Domains)
+
+You can enable this for all computers in your domain at once using Group Policy:
+1.  Open **Group Policy Management**.
+2.  Create or edit a Group Policy Object (GPO) that is linked to the Organizational Unit (OU) containing your computers.
+3.  Navigate to: `Computer Configuration` -> `Policies` -> `Windows Settings` -> `Security Settings` -> `System Services`.
+4.  Find **Remote Registry** in the list.
+5.  Define the policy setting and set the service startup mode to **Automatic**.
+
+---
+
 ## Setup and Run Instructions
 
 Follow these steps in order to get the application working correctly. All commands should be run from the main project folder.
