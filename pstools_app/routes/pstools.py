@@ -44,17 +44,14 @@ def run_cmd(cmd_list, timeout=90):
     except Exception as e:
         return 1, "", f"Unexpected error: {e}"
 
-def build_remote_args(ip, user, pwd):
+def build_remote_args(user, pwd):
     args = []
-    # This function is now simplified to only handle credentials,
-    # as the target IP is handled directly in each API endpoint.
     if user:
         args += ["-u", user]
     if pwd:
         args += ["-p", pwd]
     else: # If password is not provided, send an empty string for pstool
         args += ["-p", ""]
-
     return args
 
 def json_result(rc, out, err, structured_data=None):
@@ -246,11 +243,8 @@ def api_psloggedon():
     ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
         target_arg = build_target_arg(ip)
-        # PsLoggedOn does not need -u/-p, it runs in the security context
-        # of the user running the Flask app, which should be the admin.
-        # However, passing credentials can sometimes resolve context issues.
         cred_args = build_remote_args(user, pwd)
-        args = [get_pstools_path("PsLoggedOn.exe"), target_arg] + cred_args
+        args = [get_pstools_path("PsLoggedOn.exe")] + cred_args + [target_arg]
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=60)
