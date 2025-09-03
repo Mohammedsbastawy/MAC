@@ -94,33 +94,39 @@ def api_psexec():
 
 def parse_psservice_output(output):
     data = []
-    lines = output.strip().split('\n\n')
-    for block in lines:
-        service_data = {}
-        # Split block into lines and filter out empty ones
-        block_lines = [line.strip() for line in block.split('\n') if line.strip()]
-        if not block_lines:
+    # Split the entire output into blocks, where each block represents a service.
+    # A new service block starts with "SERVICE_NAME:".
+    service_blocks = re.split(r'\nSERVICE_NAME:', '\n' + output)
+    
+    for block in service_blocks:
+        if not block.strip() or "PsService" in block or "Copyright" in block:
             continue
-        for line in block_lines:
-            if ':' in line:
-                key, value = line.split(':', 1)
-                key = key.strip().lower().replace(' ', '_')
-                value = value.strip()
-                if key == 'service_name':
-                    service_data['name'] = value
-                elif key == 'display_name':
-                    service_data['display_name'] = value
-                elif key == 'state':
-                     # Extract state code and text
-                    match = re.match(r'\d+\s+([A-Z_]+)', value)
-                    if match:
-                        service_data['state'] = match.group(1)
-                elif key == 'type':
-                    match = re.match(r'\d+\s+([A-Z_]+)', value)
-                    if match:
-                        service_data['type'] = match.group(1)
-        if 'name' in service_data and 'display_name' in service_data:
+            
+        service_data = {}
+        block = "SERVICE_NAME:" + block # Add the header back
+        
+        # Using regex to find key-value pairs more robustly
+        name_match = re.search(r'SERVICE_NAME:\s*(.+)', block)
+        if name_match:
+            service_data['name'] = name_match.group(1).strip()
+            
+        display_name_match = re.search(r'DISPLAY_NAME:\s*(.+)', block, re.DOTALL)
+        if display_name_match:
+            # The display name might have a description on the next lines, so we stop at the next all-caps key.
+            display_name_full = display_name_match.group(1).split('\n')[0].strip()
+            service_data['display_name'] = display_name_full
+
+        state_match = re.search(r'STATE\s+:\s*\d+\s+([A-Z_]+)', block)
+        if state_match:
+            service_data['state'] = state_match.group(1).strip()
+            
+        type_match = re.search(r'TYPE\s+:\s*[\w\s]+\s+([A-Z_]+(?: [A-Z_]+)*)', block)
+        if type_match:
+            service_data['type'] = type_match.group(1).strip()
+        
+        if 'name' in service_data and 'display_name' in service_data and 'state' in service_data and 'type' in service_data:
             data.append(service_data)
+            
     return {"psservice": data} if data else None
 
 
@@ -477,3 +483,4 @@ def api_psping():
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
     return json_result(rc, out, err)
+
