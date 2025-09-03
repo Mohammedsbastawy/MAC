@@ -4,7 +4,8 @@ import subprocess
 from flask import Blueprint, request, jsonify, current_app, session
 from pstools_app.utils.helpers import is_valid_ip
 
-PSTOOLS_DIR = os.environ.get("PSTOOLS_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "Sysinternals"))
+# تم تحديث المسار ليبحث عن الأدوات في نفس مجلد التطبيق
+PSTOOLS_DIR = os.environ.get("PSTOOLS_DIR", os.path.dirname(os.path.dirname(__file__)))
 
 def pspath(exe_name: str) -> str:
     candidate = os.path.join(PSTOOLS_DIR, exe_name)

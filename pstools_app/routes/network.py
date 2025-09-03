@@ -7,7 +7,8 @@ from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pstools_app.utils.helpers import is_valid_ip
 
-PSTOOLS_DIR = os.environ.get("PSTOOLS_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "Sysinternals"))
+# تم تحديث المسار ليبحث عن الأدوات في نفس مجلد التطبيق
+PSTOOLS_DIR = os.environ.get("PSTOOLS_DIR", os.path.dirname(os.path.dirname(__file__)))
 network_bp = Blueprint('network', __name__)
 
 def get_local_cidr():
