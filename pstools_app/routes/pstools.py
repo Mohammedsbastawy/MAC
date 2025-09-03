@@ -186,7 +186,7 @@ def parse_pslist_output(output):
             continue
         
         # Find the header line to start parsing
-        if 'Name' in line and 'Pid' in line and 'Thd' in line:
+        if re.match(r'Name\s+Pid', line):
             header_found = True
             continue
             
@@ -546,6 +546,7 @@ def api_psping():
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
     return json_result(rc, out, err)
+
 
 
 

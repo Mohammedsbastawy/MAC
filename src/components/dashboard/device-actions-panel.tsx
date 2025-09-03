@@ -38,7 +38,8 @@ import {
   AlertCircle,
   CheckCircle2,
   XCircle,
-  InfoIcon
+  InfoIcon,
+  Skull
 } from "lucide-react";
 import {
   Sheet,
@@ -244,7 +245,7 @@ const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
 )
 
 
-const PsListResult: React.FC<{ data: PsListProcess[] }> = ({ data }) => (
+const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string) => void }> = ({ data, onKill }) => (
     <Card>
         <CardHeader>
             <CardTitle className="flex items-center text-lg">
@@ -252,30 +253,59 @@ const PsListResult: React.FC<{ data: PsListProcess[] }> = ({ data }) => (
             </CardTitle>
         </CardHeader>
         <CardContent>
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>PID</TableHead>
-                        <TableHead className="text-right">Threads</TableHead>
-                        <TableHead className="text-right">Handles</TableHead>
-                        <TableHead className="text-right">CPU Time</TableHead>
-                        <TableHead className="text-right">Elapsed Time</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {data.map(proc => (
-                        <TableRow key={proc.pid}>
-                            <TableCell className="font-medium">{proc.name}</TableCell>
-                            <TableCell>{proc.pid}</TableCell>
-                            <TableCell className="text-right">{proc.thd}</TableCell>
-                            <TableCell className="text-right">{proc.hnd}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{proc.cpu_time}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{proc.elapsed_time}</TableCell>
+            <TooltipProvider>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>PID</TableHead>
+                            <TableHead>Threads</TableHead>
+                            <TableHead>Handles</TableHead>
+                            <TableHead>CPU Time</TableHead>
+                            <TableHead>Elapsed Time</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
+                    </TableHeader>
+                    <TableBody>
+                        {data.map(proc => (
+                            <TableRow key={proc.pid}>
+                                <TableCell className="font-medium max-w-[200px] truncate" title={proc.name}>{proc.name}</TableCell>
+                                <TableCell>{proc.pid}</TableCell>
+                                <TableCell>{proc.thd}</TableCell>
+                                <TableCell>{proc.hnd}</TableCell>
+                                <TableCell className="font-mono text-xs">{proc.cpu_time}</TableCell>
+                                <TableCell className="font-mono text-xs">{proc.elapsed_time}</TableCell>
+                                <TableCell className="text-right">
+                                    <AlertDialog>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <AlertDialogTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                                                        <Skull className="h-4 w-4" />
+                                                    </Button>
+                                                </AlertDialogTrigger>
+                                            </TooltipTrigger>
+                                            <TooltipContent><p>Kill Process</p></TooltipContent>
+                                        </Tooltip>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                    This will forcefully terminate the process <strong className="font-mono">{proc.name}</strong> (PID: {proc.pid}). This action cannot be undone.
+                                                </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                <AlertDialogAction onClick={() => onKill(proc.pid)} className="bg-destructive hover:bg-destructive/90">Kill Process</AlertDialogAction>
+                                            </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </AlertDialog>
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </TooltipProvider>
         </CardContent>
     </Card>
 )
@@ -530,8 +560,9 @@ const CommandOutputDialog: React.FC<{
     state: DialogState;
     onClose: () => void;
     onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void,
-    onServiceInfo?: (service: PsServiceData) => void
-}> = ({ state, onClose, onServiceAction, onServiceInfo }) => {
+    onServiceInfo?: (service: PsServiceData) => void,
+    onProcessKill?: (processId: string) => void,
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill }) => {
     
     const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist;
 
@@ -544,7 +575,7 @@ const CommandOutputDialog: React.FC<{
             </AlertDialogHeader>
             <div className="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
                 {state.structuredData?.psinfo && <PsInfoResult data={state.structuredData.psinfo} />}
-                {state.structuredData?.pslist && <PsListResult data={state.structuredData.pslist} />}
+                {state.structuredData?.pslist && onProcessKill && <PsListResult data={state.structuredData.pslist} onKill={onProcessKill} />}
                 {state.structuredData?.psloggedon && <PsLoggedOnResult data={state.structuredData.psloggedon} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
@@ -663,6 +694,13 @@ export default function DeviceActionsPanel({
               // Refetch the service list to show updated state
               handlePstoolAction('psservice', { action: 'query' }, false);
               return; // We don't want to show the dialog for action commands
+          }
+
+          // If we just killed a process, refresh the list
+          if (tool === 'pskill') {
+              toast({ title: "Process Terminated", description: `Process ${extraParams.proc} was terminated.`});
+              handlePstoolAction('pslist', {}, false); // Refresh the list
+              return;
           }
           
           setDialogState({
@@ -803,6 +841,7 @@ export default function DeviceActionsPanel({
         onClose={() => setDialogState(prev => ({...prev, isOpen: false}))}
         onServiceAction={(serviceName, action) => handlePstoolAction('psservice', { action, svc: serviceName }, true)}
         onServiceInfo={(service) => setServiceInfo(service)}
+        onProcessKill={(processId) => handlePstoolAction('pskill', { proc: processId })}
     />
      <ServiceInfoDialog 
         service={serviceInfo}
