@@ -50,7 +50,7 @@ export default function LoginForm() {
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Simulate success/error
-    if (values.email === "admin" && values.password === "admin") {
+    if (values.email === "admin@admin.com" && values.password === "admin") {
       toast({
         title: "Login Successful",
         description: "Welcome back, Admin!",
@@ -90,7 +90,7 @@ export default function LoginForm() {
                     <FormControl>
                       <Input
                         type="text"
-                        placeholder="admin"
+                        placeholder="admin@admin.com"
                         className="pl-10"
                         {...field}
                       />
