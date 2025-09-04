@@ -13,6 +13,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarInset,
+  SidebarContent,
 } from "@/components/ui/sidebar";
 
 // We can't have metadata in a client component.
@@ -34,6 +35,7 @@ export default function DashboardLayout({
           <DashboardHeader />
           <div className="flex flex-1">
             <Sidebar>
+              <SidebarContent>
                 <SidebarMenu>
                     <SidebarMenuButton asChild tooltip="Network Devices" isActive={pathname === '/dashboard/devices'}>
                         <Link href="/dashboard/devices">
@@ -48,6 +50,7 @@ export default function DashboardLayout({
                         </Link>
                     </SidebarMenuButton>
                 </SidebarMenu>
+              </SidebarContent>
             </Sidebar>
             <SidebarInset>
               <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
