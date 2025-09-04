@@ -216,28 +216,44 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
   const handleMassGpUpdate = async () => {
     if (devices.length === 0) {
-        toast({ title: "No Devices", description: "There are no devices to update."});
-        return;
+      toast({ title: "No Devices", description: "There are no devices to update." });
+      return;
     }
 
     setIsGpUpdating(true);
-    toast({ title: "Starting Mass GpUpdate", description: `Updating ${devices.length} devices...`});
+    toast({ title: "Starting Mass GpUpdate", description: `Updating ${devices.length} devices...` });
 
     // Reset statuses and set all to loading
     const initialStatus: Record<string, GpUpdateResult> = {};
     devices.forEach(d => {
-        initialStatus[d.id] = { status: 'loading' };
+      initialStatus[d.id] = { status: 'loading' };
     });
     setGpUpdateStatus(initialStatus);
 
-    await Promise.all(devices.map(async (device) => {
+    for (const device of devices) {
         try {
             const response = await fetch('/api/psexec', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ip: device.ipAddress, cmd: "gpupdate /force" }),
             });
-            const result = await response.json();
+
+            // Check if the response is JSON, otherwise handle as text
+            const responseText = await response.text();
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                // If parsing fails, it's not JSON. Treat it as an error.
+                setGpUpdateStatus(prev => ({
+                    ...prev,
+                    [device.id]: {
+                        status: 'error',
+                        output: responseText // Show the raw non-JSON response
+                    }
+                }));
+                continue; // Move to the next device
+            }
             
             setGpUpdateStatus(prev => ({
                 ...prev,
@@ -246,6 +262,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                     output: result.stdout || result.stderr
                 }
             }));
+
         } catch (error: any) {
             setGpUpdateStatus(prev => ({
                 ...prev,
@@ -255,10 +272,10 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 }
             }));
         }
-    }));
+    }
     
     setIsGpUpdating(false);
-    toast({ title: "Mass GpUpdate Complete", description: "Finished updating all devices."});
+    toast({ title: "Mass GpUpdate Complete", description: "Finished updating all devices." });
   };
 
   const renderStatusIcon = (device: Device) => {
