@@ -232,6 +232,15 @@ def api_arp_scan():
             arp_scan_status["error"] = str(e)
         return jsonify({"ok": False, "error": str(e), "devices": []})
 
+@network_bp.route('/api/devices', methods=['POST'])
+def api_devices():
+    """Returns the currently cached list of devices without starting a new scan."""
+    with arp_scan_lock:
+        return jsonify({
+            "ok": True,
+            "devices": list(arp_scan_status["devices"]),
+        })
+
 @network_bp.route('/api/scan', methods=['POST'])
 def api_scan():
     data = request.get_json() or {}
@@ -255,3 +264,4 @@ def api_scan():
     return jsonify({"ok": True, "hosts": hosts})
 
     
+
