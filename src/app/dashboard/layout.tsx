@@ -35,22 +35,18 @@ export default function DashboardLayout({
           <div className="flex flex-1">
             <Sidebar>
                 <SidebarMenu>
-                    <SidebarMenuItem>
-                        <SidebarMenuButton asChild tooltip="Network Devices" isActive={pathname === '/dashboard/devices'}>
-                            <Link href="/dashboard/devices">
-                                <Network />
-                                <span>Network Devices</span>
-                            </Link>
-                        </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    <SidebarMenuItem>
-                        <SidebarMenuButton asChild tooltip="Quick Tools" isActive={pathname === '/dashboard/gpupdate'}>
-                            <Link href="/dashboard/gpupdate">
-                                <Zap />
-                                <span>Quick Tools</span>
-                            </Link>
-                        </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <SidebarMenuButton asChild tooltip="Network Devices" isActive={pathname === '/dashboard/devices'}>
+                        <Link href="/dashboard/devices">
+                            <Network />
+                            <span>Network Devices</span>
+                        </Link>
+                    </SidebarMenuButton>
+                    <SidebarMenuButton asChild tooltip="Quick Tools" isActive={pathname === '/dashboard/gpupdate'}>
+                        <Link href="/dashboard/gpupdate">
+                            <Zap />
+                            <span>Quick Tools</span>
+                        </Link>
+                    </SidebarMenuButton>
                 </SidebarMenu>
             </Sidebar>
             <SidebarInset>
