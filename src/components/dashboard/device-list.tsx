@@ -14,7 +14,10 @@ import {
   WifiOff,
   ChevronDown,
   Users,
-  Briefcase
+  Briefcase,
+  Zap,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,9 +37,12 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "../ui/badge";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
+import { Label } from "../ui/label";
+import { Textarea } from "../ui/textarea";
 
 const ICONS: Record<Device["type"], React.ElementType> = {
   laptop: Laptop,
@@ -52,11 +58,17 @@ type DeviceListProps = {
   onSelectDevice: (device: Device) => void;
 };
 
-// Polling interval for scan status (in milliseconds)
 const POLLING_INTERVAL = 2000;
+
+type GpUpdateStatus = 'idle' | 'loading' | 'success' | 'error';
+type GpUpdateResult = {
+    status: GpUpdateStatus;
+    output?: string;
+};
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isScanning, setIsScanning] = React.useState(false);
+  const [isGpUpdating, setIsGpUpdating] = React.useState(false);
   const [devices, setDevices] = React.useState<Device[]>([]);
   const [scanCount, setScanCount] = React.useState(0);
   const { toast } = useToast();
@@ -65,6 +77,10 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
   const [selectedInterface, setSelectedInterface] = React.useState<NetworkInterface | null>(null);
   const [networkError, setNetworkError] = React.useState<string | null>(null);
+
+  const [gpUpdateStatus, setGpUpdateStatus] = React.useState<Record<string, GpUpdateResult>>({});
+  const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, content: string}>({ isOpen: false, content: '' });
+
 
   React.useEffect(() => {
     const fetchInterfaces = async () => {
@@ -157,9 +173,9 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setIsScanning(true);
     setDevices([]);
     setScanCount(0);
+    setGpUpdateStatus({});
 
     try {
-      // Start polling immediately for user feedback
       if (pollingTimer.current) clearInterval(pollingTimer.current);
       pollingTimer.current = setInterval(pollScanStatus, POLLING_INTERVAL);
       
@@ -169,8 +185,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           body: JSON.stringify({ cidr: selectedInterface.cidr })
       });
       
-      // The backend now runs the scan async, so we don't need to check its response to start polling
-      // But we can check if it immediately errored out.
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Failed to start scan.");
@@ -193,13 +207,83 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   };
   
   React.useEffect(() => {
-    // Cleanup polling on component unmount
     return () => {
       if (pollingTimer.current) {
         clearInterval(pollingTimer.current);
       }
     };
   }, []);
+
+  const handleMassGpUpdate = async () => {
+    if (devices.length === 0) {
+        toast({ title: "No Devices", description: "There are no devices to update."});
+        return;
+    }
+
+    setIsGpUpdating(true);
+    toast({ title: "Starting Mass GpUpdate", description: `Updating ${devices.length} devices...`});
+
+    // Reset statuses and set all to loading
+    const initialStatus: Record<string, GpUpdateResult> = {};
+    devices.forEach(d => {
+        initialStatus[d.id] = { status: 'loading' };
+    });
+    setGpUpdateStatus(initialStatus);
+
+    await Promise.all(devices.map(async (device) => {
+        try {
+            const response = await fetch('/api/psexec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip: device.ipAddress, cmd: "gpupdate /force" }),
+            });
+            const result = await response.json();
+            
+            setGpUpdateStatus(prev => ({
+                ...prev,
+                [device.id]: {
+                    status: result.rc === 0 ? 'success' : 'error',
+                    output: result.stdout || result.stderr
+                }
+            }));
+        } catch (error: any) {
+            setGpUpdateStatus(prev => ({
+                ...prev,
+                [device.id]: {
+                    status: 'error',
+                    output: error.message || "A client-side error occurred."
+                }
+            }));
+        }
+    }));
+    
+    setIsGpUpdating(false);
+    toast({ title: "Mass GpUpdate Complete", description: "Finished updating all devices."});
+  };
+
+  const renderStatusIcon = (device: Device) => {
+      const status = gpUpdateStatus[device.id]?.status;
+
+      switch(status) {
+          case 'loading':
+              return <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />;
+          case 'success':
+              return <CheckCircle2 className="h-5 w-5 text-green-500" />;
+          case 'error':
+              return (
+                  <Button variant="ghost" size="icon" className="h-auto w-auto text-red-500 hover:text-red-500" onClick={(e) => {
+                      e.stopPropagation();
+                      setErrorDialog({ isOpen: true, content: gpUpdateStatus[device.id]?.output || "No error details available." });
+                  }}>
+                    <XCircle className="h-5 w-5" />
+                  </Button>
+              );
+          default:
+              const Icon = ICONS[device.type] || Laptop;
+              return <Icon className="h-5 w-5 text-muted-foreground" />;
+      }
+  }
+
 
   const renderContent = () => {
     if (networkError) {
@@ -253,7 +337,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     return (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {devices.map((device) => {
-          const Icon = ICONS[device.type] || Laptop;
           return (
             <Card
               key={device.id}
@@ -262,7 +345,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             >
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <CardTitle className="text-lg font-medium">{device.name}</CardTitle>
-                <Icon className="h-5 w-5 text-muted-foreground" />
+                {renderStatusIcon(device)}
               </CardHeader>
               <CardContent className="space-y-1 flex-grow">
                 <p className="text-sm text-muted-foreground">{device.ipAddress}</p>
@@ -297,6 +380,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   };
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
@@ -308,10 +392,10 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             }
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
              <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="h-11 min-w-[250px] justify-between" disabled={interfaces.length === 0}>
+                    <Button variant="outline" className="h-11 min-w-[250px] justify-between" disabled={interfaces.length === 0 || isScanning || isGpUpdating}>
                         <div className="flex items-center gap-2">
                            <Network className="h-4 w-4" />
                            {selectedInterface ? (
@@ -333,19 +417,48 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             </DropdownMenu>
 
             {isScanning ? (
-                <Button onClick={handleCancelScan} variant="destructive" size="lg">
+                <Button onClick={handleCancelScan} variant="destructive" size="lg" className="h-11">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Cancel Scan
                 </Button>
             ) : (
-                <Button onClick={handleScan} disabled={isScanning || !selectedInterface} size="lg">
+                <Button onClick={handleScan} disabled={isScanning || isGpUpdating || !selectedInterface} size="lg" className="h-11">
                     <Wifi className="mr-2 h-4 w-4" />
                     Discover Devices
                 </Button>
             )}
+
+            <Button onClick={handleMassGpUpdate} disabled={isScanning || isGpUpdating || devices.length === 0} size="lg" className="h-11">
+                {isGpUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
+                Mass GpUpdate
+            </Button>
         </div>
       </div>
       {renderContent()}
     </div>
+
+    <AlertDialog open={errorDialog.isOpen} onOpenChange={(open) => !open && setErrorDialog({isOpen: false, content:''})}>
+        <AlertDialogContent>
+            <AlertDialogHeader>
+                <AlertDialogTitle>GPUpdate Execution Failed</AlertDialogTitle>
+                <AlertDialogDescription>
+                    The `gpupdate /force` command failed. Here is the output from the remote machine.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="my-4">
+                <Label htmlFor="error-output">Error Log</Label>
+                <Textarea 
+                    id="error-output"
+                    readOnly 
+                    value={errorDialog.content}
+                    className="mt-2 h-60 font-mono text-xs bg-muted"
+                />
+            </div>
+            <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setErrorDialog({isOpen: false, content:''})}>Close</AlertDialogCancel>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

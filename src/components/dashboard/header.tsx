@@ -150,28 +150,6 @@ const UserMenu: React.FC = () => {
     )
 }
 
-const QuickToolsMenu: React.FC = () => {
-  const router = useRouter();
-  return (
-    <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-9">
-                <Zap className="mr-2 h-4 w-4" />
-                <span>Quick Tools</span>
-            </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56" align="end">
-            <DropdownMenuLabel>Mass Actions</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => router.push('/dashboard/gpupdate')}>
-                <Zap className="mr-2 h-4 w-4" />
-                <span>Mass GpUpdate</span>
-            </DropdownMenuItem>
-        </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
 export default function DashboardHeader() {
   const { user, isLoading } = useAuth();
   return (
@@ -191,7 +169,6 @@ export default function DashboardHeader() {
             <Loader2 className="animate-spin text-muted-foreground" />
         ) : user ? (
             <>
-              <QuickToolsMenu />
               <UserMenu />
             </>
         ) : (
