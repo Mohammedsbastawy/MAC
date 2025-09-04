@@ -205,29 +205,30 @@ export default function GpUpdatePage() {
                             devices.map(device => {
                                 const Icon = ICONS[device.type] || Laptop;
                                 return (
-                                <Label 
-                                    key={device.id}
-                                    htmlFor={`device-${device.id}`}
-                                    className={cn(
-                                        "block cursor-pointer rounded-lg border p-4 transition-all",
-                                        selectedDevices[device.ipAddress] && "ring-2 ring-primary border-primary"
-                                    )}
-                                >
-                                    <div className="flex items-start justify-between">
-                                        <div className="space-y-1">
-                                            <h4 className="font-semibold">{device.name}</h4>
-                                            <p className="text-sm text-muted-foreground font-mono">{device.ipAddress}</p>
+                                <div key={device.id}>
+                                    <Label 
+                                        htmlFor={`device-${device.id}`}
+                                        className={cn(
+                                            "block cursor-pointer rounded-lg border p-4 transition-all",
+                                            selectedDevices[device.ipAddress] && "ring-2 ring-primary border-primary"
+                                        )}
+                                    >
+                                        <div className="flex items-start justify-between">
+                                            <div className="space-y-1">
+                                                <h4 className="font-semibold">{device.name}</h4>
+                                                <p className="text-sm text-muted-foreground font-mono">{device.ipAddress}</p>
+                                            </div>
+                                             <Checkbox 
+                                                id={`device-${device.id}`} 
+                                                checked={!!selectedDevices[device.ipAddress]}
+                                                onCheckedChange={(checked) => setSelectedDevices(prev => ({...prev, [device.ipAddress]: !!checked}))}
+                                            />
                                         </div>
-                                         <Checkbox 
-                                            id={`device-${device.id}`} 
-                                            checked={!!selectedDevices[device.ipAddress]}
-                                            onCheckedChange={(checked) => setSelectedDevices(prev => ({...prev, [device.ipAddress]: !!checked}))}
-                                        />
-                                    </div>
-                                    <div className="flex items-center text-xs text-muted-foreground mt-2">
-                                        <Icon className="h-4 w-4 mr-2" /> {device.os}
-                                    </div>
-                                </Label>
+                                        <div className="flex items-center text-xs text-muted-foreground mt-2">
+                                            <Icon className="h-4 w-4 mr-2" /> {device.os}
+                                        </div>
+                                    </Label>
+                                </div>
                             )})
                         )}
                     </CardContent>
@@ -286,4 +287,5 @@ export default function GpUpdatePage() {
             )}
         </div>
     );
-}
+
+    
