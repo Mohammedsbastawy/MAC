@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { LifeBuoy, LogOut, Settings, ShieldCheck, User, Loader2 } from "lucide-react";
+import { LifeBuoy, LogOut, Settings, ShieldCheck, User, Loader2, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -150,16 +150,38 @@ const UserMenu: React.FC = () => {
     )
 }
 
+const QuickToolsMenu: React.FC = () => {
+  const router = useRouter();
+  return (
+    <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-9">
+                <Zap className="mr-2 h-4 w-4" />
+                <span>Quick Tools</span>
+            </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="w-56" align="end">
+            <DropdownMenuLabel>Mass Actions</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => router.push('/dashboard/gpupdate')}>
+                <Zap className="mr-2 h-4 w-4" />
+                <span>Mass GpUpdate</span>
+            </DropdownMenuItem>
+        </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export default function DashboardHeader() {
   const { user, isLoading } = useAuth();
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 sm:px-6">
-      <Link href="/dashboard" className="flex items-center gap-2 font-semibold">
+      <Link href="/dashboard/devices" className="flex items-center gap-2 font-semibold">
         <ShieldCheck className="h-6 w-6 text-primary" />
         <span className="font-headline text-lg text-foreground">Dominion</span>
       </Link>
       <div className="ml-auto flex items-center gap-4">
-         <Link href="/dashboard/help">
+        <Link href="/dashboard/help">
             <Button variant="outline" size="icon" className="h-9 w-9">
                 <LifeBuoy className="h-4 w-4" />
                 <span className="sr-only">Help & Support</span>
@@ -168,7 +190,10 @@ export default function DashboardHeader() {
         {isLoading ? (
             <Loader2 className="animate-spin text-muted-foreground" />
         ) : user ? (
-            <UserMenu />
+            <>
+              <QuickToolsMenu />
+              <UserMenu />
+            </>
         ) : (
             <InlineLoginForm />
         )}
