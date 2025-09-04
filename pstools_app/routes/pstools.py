@@ -51,8 +51,6 @@ def build_remote_args(user_email, pwd):
         args += ["-u", user_email]
     if pwd:
         args += ["-p", pwd]
-    else: # If password is not provided, send an empty string for pstool
-        args += ["-p", ""]
     return args
 
 def json_result(rc, out, err, structured_data=None):
@@ -546,6 +544,7 @@ def api_psping():
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
     return json_result(rc, out, err)
+
 
 
 
