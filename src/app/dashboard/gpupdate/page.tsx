@@ -188,7 +188,7 @@ export default function GpUpdatePage() {
                                 <Checkbox 
                                     id="select-all" 
                                     onCheckedChange={(checked) => handleSelectAll(!!checked)}
-                                    checked={selectedCount > 0 && selectedCount === devices.length}
+                                    checked={devices.length > 0 && selectedCount === devices.length}
                                 />
                                 <Label htmlFor="select-all">Select All</Label>
                              </div>
