@@ -118,15 +118,16 @@ def api_login():
     session.permanent = True
     session['user'] = username
     session['email'] = email
+    session['domain'] = domain
     # IMPORTANT: Store the password in the session for PsTools commands
     session['password'] = password
-    return jsonify({"ok": True, "user": username, "email": email})
+    return jsonify({"ok": True, "user": username, "email": email, "domain": domain})
 
 @auth_bp.route('/api/check-session', methods=['GET'])
 def api_check_session():
     if 'user' in session and 'email' in session:
         # Don't return the password to the client, but confirm session is ok
-        return jsonify({"ok": True, "user": session['user'], "email": session['email']})
+        return jsonify({"ok": True, "user": session['user'], "email": session['email'], "domain": session.get('domain')})
     return jsonify({"ok": False})
 
 @auth_bp.route('/api/logout', methods=['POST'])

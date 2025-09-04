@@ -3,9 +3,10 @@ import os
 import ipaddress
 import socket
 import threading
+import re
 from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pstools_app.utils.helpers import is_valid_ip, get_pstools_path
+from pstools_app.utils.helpers import is_valid_ip, get_pstools_path, run_ps_command, parse_psinfo_output
 
 try:
     from scapy.all import get_if_list, get_if_addr, get_if_hwaddr, conf, srp, Ether, ARP
@@ -110,11 +111,45 @@ def api_arp_scan_cancel():
         arp_scan_status["error"] = "تم إيقاف الفحص من قبل المستخدم."
     return jsonify({"ok": True, "message": "ARP scan cancelled."})
 
+def get_device_details(ip, email, pwd, user_domain):
+    """
+    Fetches detailed information for a single device using PsInfo.
+    """
+    device_details = { "domain": "WORKGROUP", "isDomainMember": False, "os": "Unknown" }
+    
+    try:
+        rc, out, err = run_ps_command("psinfo", ip, email, pwd, ["-d"])
+        if rc == 0 and out:
+            # Parse psinfo output
+            psinfo_data = parse_psinfo_output(out)
+            if psinfo_data and psinfo_data.get('psinfo'):
+                system_info = psinfo_data['psinfo'].get('system_info', [])
+                for item in system_info:
+                    key = item.get('key','').lower()
+                    value = item.get('value','')
+                    if key == 'domain':
+                        device_details['domain'] = value if value else "WORKGROUP"
+                    elif key == 'operating system':
+                        device_details['os'] = value
+
+                # Compare with the logged-in user's domain
+                if user_domain and device_details['domain'].lower() == user_domain.lower():
+                    device_details['isDomainMember'] = True
+
+    except Exception:
+        # Ignore errors for single devices to not fail the whole scan
+        pass
+
+    return device_details
+
 @network_bp.route('/api/arp-scan', methods=['POST'])
 def api_arp_scan():
     import concurrent.futures
     data = request.get_json() or {}
     scan_cidr = data.get("cidr", DEFAULT_SCAN_CIDR)
+    user_domain = session.get("domain") # Get domain from session
+    email = session.get("email")
+    pwd = session.get("password")
 
     devices = {}
     try:
@@ -124,18 +159,26 @@ def api_arp_scan():
             arp_scan_status["devices"] = []
             arp_scan_status["count"] = 0
             arp_scan_status["error"] = None
-        def ping(ip):
-            import os
+
+        def ping_and_detail(ip):
+            # 1. Ping the device
             result = os.system(f"ping -n 1 -w 200 {ip} >nul 2>&1")
             if result == 0:
+                # 2. Get base info
                 try:
                     hostname = socket.gethostbyaddr(str(ip))[0]
                 except:
                     hostname = "Unknown"
-                return {"ip": str(ip), "mac": "-", "hostname": hostname}
+                base_device = {"ip": str(ip), "mac": "-", "hostname": hostname}
+                
+                # 3. Get domain details
+                details = get_device_details(str(ip), email, pwd, user_domain)
+                base_device.update(details)
+                return base_device
             return None
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-            futures = {executor.submit(ping, ip): ip for ip in net.hosts()}
+            futures = {executor.submit(ping_and_detail, ip): ip for ip in net.hosts()}
             for f in concurrent.futures.as_completed(futures):
                 with arp_scan_lock:
                     if not arp_scan_status["running"]:
@@ -145,10 +188,13 @@ def api_arp_scan():
                 if res:
                     devices[res["ip"]] = res
                     with arp_scan_lock:
-                        if not any(d["ip"] == res["ip"] for d in arp_scan_status["devices"]):
-                            arp_scan_status["devices"].append(res)
-                            arp_scan_status["count"] = len(arp_scan_status["devices"])
+                        # Avoid duplicates
+                        arp_device_list = arp_scan_status["devices"]
+                        if not any(d["ip"] == res["ip"] for d in arp_device_list):
+                            arp_device_list.append(res)
+                            arp_scan_status["count"] = len(arp_device_list)
         
+        # Scapy as a secondary method to find MACs
         if SCAPY_AVAILABLE:
             try:
                 ether = Ether(dst="ff:ff:ff:ff:ff:ff")
@@ -157,22 +203,25 @@ def api_arp_scan():
                 for snd, rcv in ans:
                     ip = rcv.psrc
                     mac = rcv.hwsrc
-                    try:
-                        hostname = socket.gethostbyaddr(ip)[0]
-                    except:
-                        hostname = "Unknown"
-                    if ip not in devices:
-                        devices[ip] = {"ip": ip, "mac": mac, "hostname": hostname}
-                        with arp_scan_lock:
-                            if not any(d["ip"] == ip for d in arp_scan_status["devices"]):
-                                arp_scan_status["devices"].append({"ip": ip, "mac": mac, "hostname": hostname})
-                                arp_scan_status["count"] = len(arp_scan_status["devices"])
+                    if ip in devices:
+                        devices[ip]['mac'] = mac # Update MAC address
+                    else: # If scapy finds a device ping missed
+                        try:
+                            hostname = socket.gethostbyaddr(ip)[0]
+                        except:
+                            hostname = "Unknown"
+                        
+                        base_device = {"ip": str(ip), "mac": mac, "hostname": hostname}
+                        details = get_device_details(ip, email, pwd, user_domain)
+                        base_device.update(details)
+                        devices[ip] = base_device
+
             except Exception:
                 pass # Scapy might fail on some systems, ping sweep is a good fallback
         
         with arp_scan_lock:
             arp_scan_status["running"] = False
-            # Final sort of devices
+            # Final sort of devices and update the status list
             sorted_devices = sorted(list(devices.values()), key=lambda x: ipaddress.ip_address(x['ip']))
             arp_scan_status["devices"] = sorted_devices
 

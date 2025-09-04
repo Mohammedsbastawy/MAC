@@ -7,6 +7,8 @@ export type Device = {
   type: 'laptop' | 'server' | 'router' | 'mobile' | 'iot' | 'desktop' | 'unknown';
   os: string;
   lastSeen: string;
+  domain: string;
+  isDomainMember: boolean;
 };
 
 export type NetworkInterface = {

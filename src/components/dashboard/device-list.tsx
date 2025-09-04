@@ -12,13 +12,16 @@ import {
   ToyBrick,
   Wifi,
   WifiOff,
-  ChevronDown
+  ChevronDown,
+  Users,
+  Briefcase
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -33,6 +36,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "../ui/badge";
 
 const ICONS: Record<Device["type"], React.ElementType> = {
   laptop: Laptop,
@@ -118,8 +122,10 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             macAddress: d.mac,
             status: 'online',
             type: determineDeviceType(d.hostname),
-            os: 'Unknown',
-            lastSeen: 'Now'
+            os: d.os || "Unknown",
+            lastSeen: 'Now',
+            domain: d.domain,
+            isDomainMember: d.isDomainMember,
         }));
         setDevices(fetchedDevices);
 
@@ -223,6 +229,9 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <Skeleton className="h-5 w-24 mb-2" />
                 <Skeleton className="h-4 w-40" />
               </CardContent>
+              <CardFooter>
+                 <Skeleton className="h-5 w-20" />
+              </CardFooter>
             </Card>
           ))}
         </div>
@@ -249,13 +258,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             <Card
               key={device.id}
               onClick={() => onSelectDevice(device)}
-              className="cursor-pointer transition-all hover:shadow-md hover:-translate-y-1"
+              className="cursor-pointer transition-all hover:shadow-md hover:-translate-y-1 flex flex-col"
             >
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <CardTitle className="text-lg font-medium">{device.name}</CardTitle>
                 <Icon className="h-5 w-5 text-muted-foreground" />
               </CardHeader>
-              <CardContent className="space-y-1">
+              <CardContent className="space-y-1 flex-grow">
                 <p className="text-sm text-muted-foreground">{device.ipAddress}</p>
                  <div className="flex items-center pt-2">
                     <div className={cn(
@@ -267,6 +276,19 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                     </p>
                 </div>
               </CardContent>
+              <CardFooter>
+                {device.isDomainMember ? (
+                    <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">
+                        <Users className="mr-1 h-3 w-3" />
+                        Domain Member
+                    </Badge>
+                ) : (
+                    <Badge variant="secondary">
+                        <Briefcase className="mr-1 h-3 w-3" />
+                        Workgroup
+                    </Badge>
+                )}
+              </CardFooter>
             </Card>
           );
         })}
