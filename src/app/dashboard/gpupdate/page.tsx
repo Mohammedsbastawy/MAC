@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 
-const ICONS: Record<Device["type"], React.ElementType> = {
+const ICONS: Record<string, React.ElementType> = {
   laptop: Laptop,
   server: Server,
   router: Router,
@@ -64,6 +64,13 @@ export default function GpUpdatePage() {
         }
     }, [user]);
 
+    const handleToggleDeviceSelection = (ip: string) => {
+        setSelectedDevices(prev => ({
+            ...prev,
+            [ip]: !prev[ip]
+        }));
+    };
+
     const handleSelectAll = (checked: boolean) => {
         const newSelection: Record<string, boolean> = {};
         if (checked) {
@@ -72,7 +79,8 @@ export default function GpUpdatePage() {
         setSelectedDevices(newSelection);
     }
     const selectedCount = Object.values(selectedDevices).filter(Boolean).length;
-    
+    const allSelected = devices.length > 0 && selectedCount === devices.length;
+
     const handleRunGpUpdate = async () => {
         const targets = Object.keys(selectedDevices).filter(ip => selectedDevices[ip]);
         if (targets.length === 0) return;
@@ -171,7 +179,7 @@ export default function GpUpdatePage() {
                         </Alert>
                     </CardContent>
                     <CardFooter>
-                        <Button onClick={() => setResults([])}>Run Again</Button>
+                        <Button onClick={() => { setResults([]); setSelectedDevices({}); }}>Run Again</Button>
                     </CardFooter>
                 </Card>
             )}
@@ -188,7 +196,7 @@ export default function GpUpdatePage() {
                                 <Checkbox 
                                     id="select-all" 
                                     onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
-                                    checked={devices.length > 0 && selectedCount === devices.length}
+                                    checked={allSelected}
                                 />
                                 <Label htmlFor="select-all">Select All</Label>
                              </div>
@@ -204,13 +212,14 @@ export default function GpUpdatePage() {
                         ) : (
                             devices.map(device => {
                                 const Icon = ICONS[device.type] || Laptop;
+                                const isSelected = !!selectedDevices[device.ipAddress];
                                 return (
-                                <div key={device.id}>
-                                    <Label 
-                                        htmlFor={`device-${device.id}`}
+                                    <div
+                                        key={device.id}
+                                        onClick={() => handleToggleDeviceSelection(device.ipAddress)}
                                         className={cn(
                                             "block cursor-pointer rounded-lg border p-4 transition-all",
-                                            selectedDevices[device.ipAddress] && "ring-2 ring-primary border-primary"
+                                            isSelected && "ring-2 ring-primary border-primary bg-secondary"
                                         )}
                                     >
                                         <div className="flex items-start justify-between">
@@ -218,18 +227,18 @@ export default function GpUpdatePage() {
                                                 <h4 className="font-semibold">{device.name}</h4>
                                                 <p className="text-sm text-muted-foreground font-mono">{device.ipAddress}</p>
                                             </div>
-                                             <Checkbox 
-                                                id={`device-${device.id}`} 
-                                                checked={!!selectedDevices[device.ipAddress]}
-                                                onCheckedChange={(checked) => setSelectedDevices(prev => ({...prev, [device.ipAddress]: !!checked}))}
+                                            <Checkbox
+                                                checked={isSelected}
+                                                onCheckedChange={() => handleToggleDeviceSelection(device.ipAddress)}
+                                                aria-label={`Select ${device.name}`}
                                             />
                                         </div>
                                         <div className="flex items-center text-xs text-muted-foreground mt-2">
                                             <Icon className="h-4 w-4 mr-2" /> {device.os}
                                         </div>
-                                    </Label>
-                                </div>
-                            )})
+                                    </div>
+                                );
+                            })
                         )}
                     </CardContent>
                 </Card>
@@ -289,3 +298,4 @@ export default function GpUpdatePage() {
     );
 
     
+}
