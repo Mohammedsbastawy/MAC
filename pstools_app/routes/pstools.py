@@ -76,15 +76,14 @@ def build_target_arg(ip):
 @pstools_bp.route('/api/psexec', methods=['POST'])
 def api_psexec():
     data = request.get_json() or {}
-    ip, email, pwd, cmd = data.get("ip",""), session.get("email"), session.get("password"), data.get("cmd","")
+    ip, cmd = data.get("ip",""), data.get("cmd","")
     try:
         if not cmd:
             return json_result(2, "", "Command is required")
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
         # For commands with spaces, we need to handle them correctly
         cmd_args = ["cmd", "/c", cmd]
-        args = [get_pstools_path("PsExec.exe"), target_arg] + cred_args + cmd_args
+        args = [get_pstools_path("PsExec.exe"), target_arg] + cmd_args
     except Exception as e:
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=180)
@@ -544,6 +543,7 @@ def api_psping():
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
     return json_result(rc, out, err)
+
 
 
 
