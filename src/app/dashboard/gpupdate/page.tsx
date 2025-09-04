@@ -196,7 +196,7 @@ export default function GpUpdatePage() {
                     </CardHeader>
                     <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {isLoading ? (
-                            Array.from({length: 8}).map((_, i) => <Skeleton key={i} className="h-24 rounded-lg" />)
+                            [...Array(8)].map((_, i) => <Skeleton key={i} className="h-24 rounded-lg" />)
                         ) : devices.length === 0 ? (
                             <div className="col-span-full text-center text-muted-foreground py-10">
                                 No devices found. Please scan for devices on the Network Devices page first.
