@@ -44,11 +44,11 @@ def run_cmd(cmd_list, timeout=90):
     except Exception as e:
         return 1, "", f"Unexpected error: {e}"
 
-def build_remote_args(user_email, pwd):
+def build_remote_args(user_name, pwd):
     args = []
-    if user_email:
-        # Use the full email for domain authentication
-        args += ["-u", user_email]
+    if user_name:
+        # Use just the username part for domain authentication
+        args += ["-u", user_name]
     if pwd:
         args += ["-p", pwd]
     else: # If password is not provided, send an empty string for pstool
@@ -78,12 +78,12 @@ def build_target_arg(ip):
 @pstools_bp.route('/api/psexec', methods=['POST'])
 def api_psexec():
     data = request.get_json() or {}
-    ip, email, pwd, cmd = data.get("ip",""), session.get("email"), session.get("password"), data.get("cmd","")
+    ip, user, pwd, cmd = data.get("ip",""), session.get("user"), session.get("password"), data.get("cmd","")
     try:
         if not cmd:
             return json_result(2, "", "Command is required")
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         # For commands with spaces, we need to handle them correctly
         cmd_args = ["cmd", "/c", cmd]
         args = [get_pstools_path("PsExec.exe"), target_arg] + cred_args + cmd_args
@@ -108,7 +108,8 @@ def parse_psservice_output(output):
         state_match = re.search(r'STATE\s+:\s*\d+\s+([A-Z_]+)', block)
         type_match = re.search(r'TYPE\s+:\s*[\w\s]+\s+([A-Z_]+(?: [A-Z_]+)*)', block)
         
-        # Extract description which can be multi-line
+        # Extract description which can be multi-line. It comes after DISPLAY_NAME.
+        # It ends before the next structured line like TYPE or STATE.
         description_match = re.search(r'DISPLAY_NAME:\s*.+?\n((?:.|\n)*?)\n\s*(?:GROUP|TYPE|STATE)', block, re.DOTALL)
 
         if name_match: service_data['name'] = name_match.group(1).strip()
@@ -119,19 +120,18 @@ def parse_psservice_output(output):
         if description_match:
             # Clean up the description
             description = description_match.group(1).strip()
-            description = re.sub(r'\s{2,}', ' ', description).strip()
-            service_data['description'] = description
+            # The description itself is often the lines after display name, before the next key-value pair
+            desc_lines = []
+            for line in description.split('\n'):
+                # Stop if we hit another key like TYPE, STATE, etc.
+                if re.match(r'^\s*(?:TYPE|STATE|GROUP|WIN32_EXIT_CODE)\s*:', line):
+                    break
+                desc_lines.append(line.strip())
+            service_data['description'] = ' '.join(desc_lines).strip()
         else:
-            # Fallback for descriptions that are at the end of a block
-            fallback_desc_match = re.search(r'DISPLAY_NAME:\s*.+?\n((?:.|\n)*)', block, re.DOTALL)
-            if fallback_desc_match:
-                description = fallback_desc_match.group(1).strip()
-                description = re.sub(r'\s{2,}', ' ', description).strip()
-                service_data['description'] = description
-            else:
-                 service_data['description'] = "No description available."
-        
-        if all(k in service_data for k in ['name', 'display_name', 'state', 'type', 'description']):
+            service_data['description'] = "No description available."
+
+        if all(k in service_data for k in ['name', 'display_name', 'state', 'type']):
             data.append(service_data)
             
     return {"psservice": data} if data else None
@@ -139,13 +139,13 @@ def parse_psservice_output(output):
 @pstools_bp.route('/api/psservice', methods=['POST'])
 def api_psservice():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     svc, action = data.get("svc",""), data.get("action","query")
     if not svc and action != "query":
         return json_result(2, "", "Service name is required for start/stop/restart")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         base_args = [get_pstools_path("PsService.exe"), target_arg] + cred_args
 
         if action == "restart":
@@ -214,10 +214,10 @@ def parse_pslist_output(output):
 @pstools_bp.route('/api/pslist', methods=['POST'])
 def api_pslist():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsList.exe"), target_arg] + cred_args + ["-x"]
     except Exception as e:
         return json_result(2, "", str(e))
@@ -232,12 +232,12 @@ def api_pslist():
 @pstools_bp.route('/api/pskill', methods=['POST'])
 def api_pskill():
     data = request.get_json() or {}
-    ip, email, pwd, proc = data.get("ip",""), session.get("email"), session.get("password"), data.get("proc","")
+    ip, user, pwd, proc = data.get("ip",""), session.get("user"), session.get("password"), data.get("proc","")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsKill.exe"), target_arg] + cred_args + [proc]
     except Exception as e:
         return json_result(2, "", str(e))
@@ -299,10 +299,10 @@ def parse_psloglist_output(output):
 @pstools_bp.route('/api/psloglist', methods=['POST'])
 def api_psloglist():
     data = request.get_json() or {}
-    ip, email, pwd, kind = data.get("ip",""), session.get("email"), session.get("password"), data.get("kind","system")
+    ip, user, pwd, kind = data.get("ip",""), session.get("user"), session.get("password"), data.get("kind","system")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsLogList.exe"), target_arg] + cred_args + ["-d", "1", kind] # last day
     except Exception as e:
         return json_result(2, "", str(e))
@@ -367,10 +367,10 @@ def parse_psinfo_output(output):
 @pstools_bp.route('/api/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         # Use -d for disk info
         args = [get_pstools_path("PsInfo.exe"), target_arg] + cred_args + ["-d"]
     except Exception as e:
@@ -389,7 +389,7 @@ def parse_psloggedon_output(output):
     user_section = False
     for line in lines:
         line = line.strip()
-        if not line or "Users logged on locally" in line or "No one is logged on locally" in line:
+        if not line or "Users logged on locally" in line or "No one is logged on locally" in line or "Error" in line:
             continue
         # Section starts after the "Users logged on..." line
         if line.startswith("----"):
@@ -405,10 +405,10 @@ def parse_psloggedon_output(output):
 @pstools_bp.route('/api/psloggedon', methods=['POST'])
 def api_psloggedon():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         # Correct argument order for PsLoggedOn: exe, credentials, target
         args = [get_pstools_path("PsLoggedOn.exe")] + cred_args + [target_arg]
     except Exception as e:
@@ -424,13 +424,13 @@ def api_psloggedon():
 @pstools_bp.route('/api/psshutdown', methods=['POST'])
 def api_psshutdown():
     data = request.get_json() or {}
-    ip, email, pwd, action = data.get("ip",""), session.get("email"), session.get("password"), data.get("action","restart")
+    ip, user, pwd, action = data.get("ip",""), session.get("user"), session.get("password"), data.get("action","restart")
     flag = {"restart": "-r", "shutdown": "-s", "logoff": "-l"}.get(action)
     if not flag:
         return json_result(2, "", "Invalid power action")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsShutdown.exe"), target_arg] + cred_args + [flag, "-t", "0", "-n"]
     except Exception as e:
         return json_result(2, "", str(e))
@@ -468,10 +468,10 @@ def parse_psfile_output(output):
 @pstools_bp.route('/api/psfile', methods=['POST'])
 def api_psfile():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsFile.exe"), target_arg] + cred_args
     except Exception as e:
         return json_result(2, "", str(e))
@@ -486,10 +486,10 @@ def api_psfile():
 @pstools_bp.route('/api/psgetsid', methods=['POST'])
 def api_psgetsid():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsGetSid.exe"), target_arg] + cred_args
     except Exception as e:
         return json_result(2, "", str(e))
@@ -499,13 +499,13 @@ def api_psgetsid():
 @pstools_bp.route('/api/pspasswd', methods=['POST'])
 def api_pspasswd():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip, user, pwd = data.get("ip",""), session.get("user"), session.get("password")
     target_user, new_pass = data.get("targetUser",""), data.get("newpass","")
     if not target_user or not new_pass:
         return json_result(2, "", "Target user and new password are required")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsPasswd.exe"), target_arg] + cred_args + [target_user, new_pass]
     except Exception as e:
         return json_result(2, "", str(e))
@@ -515,12 +515,12 @@ def api_pspasswd():
 @pstools_bp.route('/api/pssuspend', methods=['POST'])
 def api_pssuspend():
     data = request.get_json() or {}
-    ip, email, pwd, proc = data.get("ip",""), session.get("email"), session.get("password"), data.get("proc","")
+    ip, user, pwd, proc = data.get("ip",""), session.get("user"), session.get("password"), data.get("proc","")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
     try:
         target_arg = build_target_arg(ip)
-        cred_args = build_remote_args(email, pwd)
+        cred_args = build_remote_args(user, pwd)
         args = [get_pstools_path("PsSuspend.exe"), target_arg] + cred_args + [proc]
     except Exception as e:
         return json_result(2, "", str(e))
@@ -530,7 +530,7 @@ def api_pssuspend():
 @pstools_bp.route('/api/psping', methods=['POST'])
 def api_psping():
     data = request.get_json() or {}
-    ip, email, pwd, extra = data.get('ip',''), session.get('email'), session.get('password'), data.get('extra','')
+    ip, user, pwd, extra = data.get('ip',''), session.get('user'), session.get('password'), data.get('extra','')
     try:
         # PsPing does not use -u/-p, it relies on the context. But we can target an IP.
         # It's better to run it locally and target the remote IP.
@@ -546,6 +546,7 @@ def api_psping():
         return json_result(2, "", str(e))
     rc, out, err = run_cmd(args, timeout=120)
     return json_result(rc, out, err)
+
 
 
 

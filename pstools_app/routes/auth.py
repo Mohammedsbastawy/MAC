@@ -20,8 +20,8 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
         # Fallback for non-windows environments - THIS WILL NOT WORK FOR PRODUCTION
         # We will assume success for local development if pywin32 is not installed
         if os.environ.get("FLASK_ENV") == "development":
-             return True, None, "pywin32 not found, assuming success for dev"
-        return False, "مكتبة pywin32 غير مثبتة على الخادم، لا يمكن التحقق من كلمة المرور.", password
+             return True, None
+        return False, "مكتبة pywin32 غير مثبتة على الخادم، لا يمكن التحقق من كلمة المرور."
 
     try:
         # 1. Authenticate user credentials
@@ -42,20 +42,20 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
 
         if error_msg:
              # The user is authenticated, but we couldn't check admin status
-             return False, f"تم التحقق من الحساب ولكن: {error_msg}", password
+             return False, f"تم التحقق من الحساب ولكن: {error_msg}"
         
         if not is_admin:
-            return False, "تم التحقق من الحساب بنجاح، ولكن المستخدم ليس لديه صلاحيات مسؤول على الشبكة (Domain Admin).", password
+            return False, "تم التحقق من الحساب بنجاح، ولكن المستخدم ليس لديه صلاحيات مسؤول على الشبكة (Domain Admin)."
 
-        return True, None, password
+        return True, None
 
     except win32security.error as e:
         # Common error code for bad username/password is 1326
         if e.winerror == 1326:
-            return False, "البريد الإلكتروني أو كلمة المرور غير صحيحة.", None
-        return False, f"حدث خطأ أثناء المصادقة: {e}", None
+            return False, "البريد الإلكتروني أو كلمة المرور غير صحيحة."
+        return False, f"حدث خطأ أثناء المصادقة: {e}"
     except Exception as e:
-        return False, f"An unexpected error occurred: {str(e)}", None
+        return False, f"An unexpected error occurred: {str(e)}"
 
 def check_is_domain_admin_group_member(username):
     """Checks if a user is a member of the Domain Admins group using 'net group'."""
@@ -108,7 +108,7 @@ def api_login():
     username = parts[0]
     domain = parts[1] if len(parts) > 1 else "." # Use current domain if not specified
 
-    is_admin, error_msg, stored_password = check_is_domain_admin_with_cred(username, password, domain)
+    is_admin, error_msg = check_is_domain_admin_with_cred(username, password, domain)
 
     if not is_admin:
         error_to_show = error_msg or "فشل تسجيل الدخول."
@@ -119,7 +119,7 @@ def api_login():
     session['user'] = username
     session['email'] = email
     # IMPORTANT: Store the password in the session for PsTools commands
-    session['password'] = stored_password
+    session['password'] = password
     return jsonify({"ok": True, "user": username, "email": email})
 
 @auth_bp.route('/api/check-session', methods=['GET'])
