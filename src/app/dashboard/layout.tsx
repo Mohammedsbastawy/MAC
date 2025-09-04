@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Devices, Zap } from "lucide-react";
+import { Network, Zap } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
 import {
@@ -32,7 +32,7 @@ export default function DashboardLayout({
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild tooltip="Network Devices" isActive>
                             <Link href="/dashboard/devices">
-                                <Devices />
+                                <Network />
                                 <span>Network Devices</span>
                             </Link>
                         </SidebarMenuButton>
