@@ -644,14 +644,22 @@ const CommandOutputDialog: React.FC<{
     
     const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist;
 
+    const isHackerTheme = !hasStructuredData;
+
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
-        <AlertDialogContent className="max-w-4xl">
+        <AlertDialogContent className={cn(
+            "max-w-4xl",
+            isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
+        )}>
             <AlertDialogHeader>
-                <AlertDialogTitle>{state.title}</AlertDialogTitle>
-                <AlertDialogDescription>{state.description}</AlertDialogDescription>
+                <AlertDialogTitle className={cn(isHackerTheme && "text-green-400")}>{state.title}</AlertDialogTitle>
+                <AlertDialogDescription className={cn(isHackerTheme && "text-green-400/80")}>
+                    {state.description}
+                </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
+                {/* Structured data views */}
                 {state.structuredData?.psinfo && <PsInfoResult data={state.structuredData.psinfo} />}
                 {state.structuredData?.pslist && onProcessKill && <PsListResult data={state.structuredData.pslist} onKill={onProcessKill} />}
                 {state.structuredData?.psloggedon && <PsLoggedOnResult data={state.structuredData.psloggedon} />}
@@ -665,23 +673,36 @@ const CommandOutputDialog: React.FC<{
                 }
                 {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
 
+                {/* Raw output for non-structured data (hacker theme) */}
                 {(!hasStructuredData) && (
                     <>
                     {state.output && (
                         <div>
-                            <Label>Output</Label>
-                            <Textarea readOnly value={state.output} className="mt-1 h-64 font-mono text-xs bg-muted" />
+                            <Label className={cn(isHackerTheme && "text-green-400")}>C:\&gt; Output</Label>
+                            <Textarea 
+                                readOnly 
+                                value={state.output} 
+                                className={cn("mt-1 h-64 font-mono text-xs", isHackerTheme && "bg-black text-green-400 border-green-500/30 focus-visible:ring-green-500")}
+                            />
                         </div>
                     )}
                     {state.error && (
                          <div>
-                            <Label className="text-destructive">Error</Label>
-                            <Textarea readOnly value={state.error} className="mt-1 h-32 font-mono text-xs bg-destructive/10 text-destructive" />
+                            <Label className={cn(isHackerTheme ? "text-red-400" : "text-destructive")}>C:\&gt; Error</Label>
+                            <Textarea 
+                                readOnly 
+                                value={state.error} 
+                                className={cn(
+                                    "mt-1 h-32 font-mono text-xs", 
+                                    isHackerTheme ? "bg-black text-red-400 border-red-500/30 focus-visible:ring-red-500" : "bg-destructive/10 text-destructive"
+                                )}
+                            />
                         </div>
                     )}
                     </>
                 )}
-                 {/* Show raw output for psinfo even with structured data, for debugging */}
+
+                {/* Raw output for structured data (collapsible) */}
                 {hasStructuredData && state.output && (
                     <details className="mt-4">
                         <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
@@ -691,7 +712,12 @@ const CommandOutputDialog: React.FC<{
                 )}
             </div>
             <AlertDialogFooter>
-                <AlertDialogCancel onClick={onClose}>Close</AlertDialogCancel>
+                <Button 
+                    variant="outline" 
+                    onClick={onClose} 
+                    className={cn(isHackerTheme && "text-green-400 border-green-500/50 hover:bg-green-900/50 hover:text-green-300")}>
+                    Close
+                </Button>
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
@@ -714,7 +740,7 @@ const ServiceInfoDialog: React.FC<{
                          <p className="font-mono text-xs mt-2">{service.name}</p>
                     </AlertDialogDescription>
                 </AlertDialogHeader>
-                <div className="text-sm text-muted-foreground my-4">
+                <div className="text-sm text-muted-foreground my-4 max-h-[40vh] overflow-y-auto">
                     {service.description}
                 </div>
                 <AlertDialogFooter>
