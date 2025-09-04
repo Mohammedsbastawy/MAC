@@ -1,5 +1,8 @@
+"use client";
+
 import type { Metadata } from "next";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Network, Zap } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
@@ -12,15 +15,18 @@ import {
   SidebarInset,
 } from "@/components/ui/sidebar";
 
-export const metadata: Metadata = {
-  title: "Dashboard - Dominion Control Panel",
-};
+// We can't have metadata in a client component.
+// export const metadata: Metadata = {
+//   title: "Dashboard - Dominion Control Panel",
+// };
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  
   return (
     <AuthProvider>
       <SidebarProvider>
@@ -30,7 +36,7 @@ export default function DashboardLayout({
             <Sidebar>
                 <SidebarMenu>
                     <SidebarMenuItem>
-                        <SidebarMenuButton asChild tooltip="Network Devices" isActive>
+                        <SidebarMenuButton asChild tooltip="Network Devices" isActive={pathname === '/dashboard/devices'}>
                             <Link href="/dashboard/devices">
                                 <Network />
                                 <span>Network Devices</span>
@@ -38,7 +44,7 @@ export default function DashboardLayout({
                         </SidebarMenuButton>
                     </SidebarMenuItem>
                     <SidebarMenuItem>
-                        <SidebarMenuButton asChild tooltip="Quick Tools">
+                        <SidebarMenuButton asChild tooltip="Quick Tools" isActive={pathname === '/dashboard/gpupdate'}>
                             <Link href="/dashboard/gpupdate">
                                 <Zap />
                                 <span>Quick Tools</span>
