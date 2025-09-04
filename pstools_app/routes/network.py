@@ -36,8 +36,9 @@ def get_domain_computers():
     It tries 'net group' first, then falls back to 'net view'.
     """
     computer_names = set()
+    error_log = []
+    # Method 1: 'net group "Domain Computers"' - Preferred
     try:
-        # This is generally more reliable for getting computer objects
         cmd = 'net group "Domain Computers" /domain'
         proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
         
@@ -49,39 +50,39 @@ def get_domain_computers():
                     user_section_started = True
                     continue
                 if user_section_started:
-                    # Usernames can be in columns, so we split by spaces and filter out empty strings
                     entries = filter(None, line.strip().split('  '))
                     for entry in entries:
-                         # Skip the "The command completed successfully." message
-                        if "The command completed successfully." not in entry:
+                        if "The command completed successfully." not in entry and entry:
                             computer_names.add(entry.strip())
             if computer_names:
-                return list(computer_names), None
+                return list(computer_names), None # Success, return results
+        else:
+            error_log.append(f"net group command failed: {proc.stderr or proc.stdout}")
 
-    except Exception:
-        # Ignore errors and fall through to the next method
-        pass
+    except Exception as e:
+        error_log.append(f"Exception with 'net group': {str(e)}")
 
-    # Fallback to 'net view' if the first method fails or returns nothing
+    # Method 2: 'net view' - Fallback
     try:
         cmd = 'net view'
         proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
-        if proc.returncode != 0:
-            return [], f"Failed to query network devices. Error: {proc.stderr or proc.stdout}"
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('\\\\'):
+                    computer_name = line[2:].split(' ')[0]
+                    computer_names.add(computer_name)
+            if computer_names:
+                return list(computer_names), None # Success, return results
+        else:
+            error_log.append(f"net view command failed: {proc.stderr or proc.stdout}")
 
-        for line in proc.stdout.splitlines():
-            line = line.strip()
-            if line.startswith('\\\\'):
-                # Remove leading slashes and stop at the first space
-                computer_name = line[2:].split(' ')[0]
-                computer_names.add(computer_name)
-        
-        return list(computer_names), None
-
-    except subprocess.TimeoutExpired:
-        return [], "Timeout expired while trying to discover domain computers."
     except Exception as e:
-        return [], f"An unexpected error occurred during discovery: {str(e)}"
+        error_log.append(f"Exception with 'net view': {str(e)}")
+
+    # If both methods failed, return an error
+    return [], f"Failed to discover devices using all available methods. Errors: {'; '.join(error_log)}"
+
 
 def get_device_info(hostname, email, pwd, user_domain):
     """
