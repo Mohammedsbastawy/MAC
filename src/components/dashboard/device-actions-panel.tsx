@@ -39,7 +39,8 @@ import {
   CheckCircle2,
   XCircle,
   InfoIcon,
-  Skull
+  Skull,
+  Search
 } from "lucide-react";
 import {
   Sheet,
@@ -245,70 +246,131 @@ const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
 )
 
 
-const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string) => void }> = ({ data, onKill }) => (
-    <Card>
-        <CardHeader>
-            <CardTitle className="flex items-center text-lg">
-                <Activity className="mr-2 h-5 w-5" /> Process List
-            </CardTitle>
-        </CardHeader>
-        <CardContent>
-            <TooltipProvider>
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>PID</TableHead>
-                            <TableHead>Threads</TableHead>
-                            <TableHead>Handles</TableHead>
-                            <TableHead>CPU Time</TableHead>
-                            <TableHead>Elapsed Time</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {data.map(proc => (
-                            <TableRow key={proc.pid}>
-                                <TableCell className="font-medium max-w-[200px] truncate" title={proc.name}>{proc.name}</TableCell>
-                                <TableCell>{proc.pid}</TableCell>
-                                <TableCell>{proc.thd}</TableCell>
-                                <TableCell>{proc.hnd}</TableCell>
-                                <TableCell className="font-mono text-xs">{proc.cpu_time}</TableCell>
-                                <TableCell className="font-mono text-xs">{proc.elapsed_time}</TableCell>
-                                <TableCell className="text-right">
-                                    <AlertDialog>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <AlertDialogTrigger asChild>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                                                        <Skull className="h-4 w-4" />
-                                                    </Button>
-                                                </AlertDialogTrigger>
-                                            </TooltipTrigger>
-                                            <TooltipContent><p>Kill Process</p></TooltipContent>
-                                        </Tooltip>
-                                        <AlertDialogContent>
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>
-                                                    This will forcefully terminate the process <strong className="font-mono">{proc.name}</strong> (PID: {proc.pid}). This action cannot be undone.
-                                                </AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => onKill(proc.pid)} className="bg-destructive hover:bg-destructive/90">Kill Process</AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                    </AlertDialog>
-                                </TableCell>
+const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string) => void }> = ({ data, onKill }) => {
+    const [searchTerm, setSearchTerm] = React.useState('');
+    type SortKey = keyof PsListProcess;
+    const [sortKey, setSortKey] = React.useState<SortKey>('name');
+    const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc');
+
+    const handleSort = (key: SortKey) => {
+        if (sortKey === key) {
+            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortKey(key);
+            setSortDirection('asc');
+        }
+    };
+    
+    const filteredData = React.useMemo(() => {
+        return data.filter(proc => proc.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    }, [data, searchTerm]);
+
+    const sortedData = React.useMemo(() => {
+        return [...filteredData].sort((a, b) => {
+            const valA = a[sortKey];
+            const valB = b[sortKey];
+
+            // Handle numeric sorting for relevant fields
+            if (['pid', 'pri', 'thd', 'hnd', 'priv'].includes(sortKey)) {
+                 const numA = parseFloat(valA);
+                 const numB = parseFloat(valB);
+                 if (numA < numB) return sortDirection === 'asc' ? -1 : 1;
+                 if (numA > numB) return sortDirection === 'asc' ? 1 : -1;
+                 return 0;
+            }
+
+            // Default string sort
+            if (valA.toLowerCase() < valB.toLowerCase()) return sortDirection === 'asc' ? -1 : 1;
+            if (valA.toLowerCase() > valB.toLowerCase()) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }, [filteredData, sortKey, sortDirection]);
+
+    const SortableHeader: React.FC<{ sortKey: SortKey, children: React.ReactNode }> = ({ children, sortKey: key }) => (
+         <TableHead>
+            <Button variant="ghost" onClick={() => handleSort(key)} className="px-2 py-1 h-auto">
+                {children}
+                <ArrowUpDown className="ml-2 h-4 w-4" />
+            </Button>
+        </TableHead>
+    );
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center justify-between text-lg">
+                    <div className="flex items-center">
+                        <Activity className="mr-2 h-5 w-5" /> Process List
+                    </div>
+                    <div className="relative w-full max-w-xs">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input 
+                            placeholder="Search processes..."
+                            className="pl-9"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                <TooltipProvider>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <SortableHeader sortKey="name">Name</SortableHeader>
+                                <SortableHeader sortKey="pid">PID</SortableHeader>
+                                <SortableHeader sortKey="thd">Threads</SortableHeader>
+                                <SortableHeader sortKey="hnd">Handles</SortableHeader>
+                                <SortableHeader sortKey="cpu_time">CPU Time</SortableHeader>
+                                <SortableHeader sortKey="elapsed_time">Elapsed Time</SortableHeader>
+                                <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </TooltipProvider>
-        </CardContent>
-    </Card>
-)
+                        </TableHeader>
+                        <TableBody>
+                            {sortedData.map(proc => (
+                                <TableRow key={proc.pid}>
+                                    <TableCell className="font-medium max-w-[200px] truncate" title={proc.name}>{proc.name}</TableCell>
+                                    <TableCell>{proc.pid}</TableCell>
+                                    <TableCell>{proc.thd}</TableCell>
+                                    <TableCell>{proc.hnd}</TableCell>
+                                    <TableCell className="font-mono text-xs">{proc.cpu_time}</TableCell>
+                                    <TableCell className="font-mono text-xs">{proc.elapsed_time}</TableCell>
+                                    <TableCell className="text-right">
+                                        <AlertDialog>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <AlertDialogTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">
+                                                            <Skull className="h-4 w-4" />
+                                                        </Button>
+                                                    </AlertDialogTrigger>
+                                                </TooltipTrigger>
+                                                <TooltipContent><p>Kill Process</p></TooltipContent>
+                                            </Tooltip>
+                                            <AlertDialogContent>
+                                                <AlertDialogHeader>
+                                                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                                    <AlertDialogDescription>
+                                                        This will forcefully terminate the process <strong className="font-mono">{proc.name}</strong> (PID: {proc.pid}). This action cannot be undone.
+                                                    </AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                    <AlertDialogAction onClick={() => onKill(proc.pid)} className="bg-destructive hover:bg-destructive/90">Kill Process</AlertDialogAction>
+                                                </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                        </AlertDialog>
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </TooltipProvider>
+            </CardContent>
+        </Card>
+    )
+}
 
 const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[] }> = ({ data }) => (
     <Card>
@@ -368,16 +430,17 @@ const PsFileResult: React.FC<{ data: PsFileData[] }> = ({ data }) => (
     </Card>
 );
 
-type SortKey = 'name' | 'display_name' | 'state';
+type ServiceSortKey = 'name' | 'display_name' | 'state';
 type SortDirection = 'asc' | 'desc';
 type ServiceFilter = 'all' | 'running' | 'stopped';
 
 const PsServiceResult: React.FC<{ data: PsServiceData[], onAction: (serviceName: string, action: 'start' | 'stop' | 'restart') => void, onInfo: (service: PsServiceData) => void }> = ({ data, onAction, onInfo }) => {
-    const [sortKey, setSortKey] = React.useState<SortKey>('display_name');
+    const [sortKey, setSortKey] = React.useState<ServiceSortKey>('display_name');
     const [sortDirection, setSortDirection] = React.useState<SortDirection>('asc');
     const [filter, setFilter] = React.useState<ServiceFilter>('all');
+    const [searchTerm, setSearchTerm] = React.useState('');
 
-    const handleSort = (key: SortKey) => {
+    const handleSort = (key: ServiceSortKey) => {
         if (sortKey === key) {
             setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
         } else {
@@ -388,12 +451,16 @@ const PsServiceResult: React.FC<{ data: PsServiceData[], onAction: (serviceName:
 
     const filteredData = React.useMemo(() => {
         return data.filter(service => {
-            if (filter === 'all') return true;
-            if (filter === 'running') return service.state.includes('RUNNING');
-            if (filter === 'stopped') return service.state.includes('STOPPED');
-            return true;
+            const matchesFilter = (filter === 'all') ||
+                (filter === 'running' && service.state.includes('RUNNING')) ||
+                (filter === 'stopped' && service.state.includes('STOPPED'));
+            
+            const matchesSearch = service.display_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                service.name.toLowerCase().includes(searchTerm.toLowerCase());
+
+            return matchesFilter && matchesSearch;
         });
-    }, [data, filter]);
+    }, [data, filter, searchTerm]);
 
     const sortedData = React.useMemo(() => {
         return [...filteredData].sort((a, b) => {
@@ -405,7 +472,7 @@ const PsServiceResult: React.FC<{ data: PsServiceData[], onAction: (serviceName:
         });
     }, [filteredData, sortKey, sortDirection]);
 
-    const SortableHeader: React.FC<{ sortKey: SortKey, children: React.ReactNode }> = ({ children, sortKey: key }) => (
+    const SortableHeader: React.FC<{ sortKey: ServiceSortKey, children: React.ReactNode }> = ({ children, sortKey: key }) => (
         <TableHead>
             <Button variant="ghost" onClick={() => handleSort(key)} className="px-2 py-1 h-auto">
                 {children}
@@ -420,10 +487,21 @@ const PsServiceResult: React.FC<{ data: PsServiceData[], onAction: (serviceName:
                 <CardTitle className="flex items-center text-lg">
                     <Settings2 className="mr-2 h-5 w-5" /> Services
                 </CardTitle>
-                <div className="flex items-center gap-2 pt-2">
-                    <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>All ({data.length})</Button>
-                    <Button size="sm" variant={filter === 'running' ? 'default' : 'outline'} onClick={() => setFilter('running')} className="bg-green-600 hover:bg-green-700 text-white">Running ({data.filter(s => s.state.includes("RUNNING")).length})</Button>
-                    <Button size="sm" variant={filter === 'stopped' ? 'default' : 'outline'} onClick={() => setFilter('stopped')}>Stopped ({data.filter(s => s.state.includes("STOPPED")).length})</Button>
+                 <div className="flex flex-col md:flex-row items-center gap-2 pt-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>All ({data.length})</Button>
+                        <Button size="sm" variant={filter === 'running' ? 'default' : 'outline'} onClick={() => setFilter('running')} className="bg-green-600 hover:bg-green-700 text-white">Running ({data.filter(s => s.state.includes("RUNNING")).length})</Button>
+                        <Button size="sm" variant={filter === 'stopped' ? 'default' : 'outline'} onClick={() => setFilter('stopped')}>Stopped ({data.filter(s => s.state.includes("STOPPED")).length})</Button>
+                    </div>
+                    <div className="relative w-full md:w-auto md:ml-auto">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input 
+                            placeholder="Search services..."
+                            className="pl-9"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
                 </div>
             </CardHeader>
             <CardContent>
