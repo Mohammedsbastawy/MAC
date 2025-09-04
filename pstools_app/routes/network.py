@@ -132,7 +132,7 @@ def get_device_details(ip, email, pwd, user_domain):
                     elif key == 'operating system':
                         device_details['os'] = value
 
-                # Compare with the logged-in user's domain
+                # Compare with the logged-in user's domain (case-insensitive)
                 if user_domain and device_details['domain'].lower() == user_domain.lower():
                     device_details['isDomainMember'] = True
 
