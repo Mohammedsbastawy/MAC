@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ExternalLink, ShieldAlert, ShieldCheck, Siren, DownloadCloud } from "lucide-react"
+import { DownloadCloud, ShieldAlert, ShieldCheck, Siren } from "lucide-react"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -51,16 +51,16 @@ export default function HelpPage() {
                 <CardContent className="space-y-4">
                     <p>Masscan is the world's fastest network port scanner. The application backend will call `masscan.exe` to find live hosts on your network.</p>
                      <a href="https://github.com/robertdavidgraham/masscan/releases" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2">
-                        Download Masscan from GitHub <DownloadCloud className="ml-2 h-4 w-4" />
+                        Download Masscan from GitHub Releases <DownloadCloud className="ml-2 h-4 w-4" />
                      </a>
                      <Alert>
                         <ShieldAlert className="h-4 w-4" />
                         <AlertTitle>Important Setup Instructions</AlertTitle>
                         <AlertDescription>
-                           1. On the releases page, download the latest `.zip` file for Windows (e.g., `masscan-2.0.5-win.zip`).<br/>
-                           2. Unzip the file.<br/>
-                           3. Find `masscan.exe` inside the `bin` directory.<br/>
-                           4. Copy `masscan.exe` and paste it into the `pstools_app` directory at the root of this project.
+                           1. On the GitHub releases page, find the latest version and download the `.zip` file for Windows (e.g., `masscan-2.0.5-win.zip`).<br/>
+                           2. Unzip the downloaded file.<br/>
+                           3. Find `masscan.exe` inside the `bin` directory within the unzipped folder.<br/>
+                           4. Copy `masscan.exe` and paste it directly into the `pstools_app` directory at the root of this project.
                         </AlertDescription>
                     </Alert>
                 </CardContent>
