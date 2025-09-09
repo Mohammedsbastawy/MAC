@@ -34,16 +34,19 @@ import type { Device, NetworkInterface } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "../ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+
 
 const ICONS: Record<Device["type"], React.ElementType> = {
   laptop: Laptop,
@@ -59,8 +62,6 @@ type DeviceListProps = {
   onSelectDevice: (device: Device) => void;
 };
 
-const POLLING_INTERVAL = 5000; // Increased polling interval
-
 type GpUpdateStatus = 'idle' | 'loading' | 'success' | 'error';
 type GpUpdateResult = {
     status: GpUpdateStatus;
@@ -74,7 +75,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const { toast } = useToast();
   
   const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
-  const [selectedInterface, setSelectedInterface] = React.useState<NetworkInterface | null>(null);
+  const [selectedCidr, setSelectedCidr] = React.useState<string | undefined>();
   const [networkError, setNetworkError] = React.useState<string | null>(null);
 
   const [gpUpdateStatus, setGpUpdateStatus] = React.useState<Record<string, GpUpdateResult>>({});
@@ -84,12 +85,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   React.useEffect(() => {
     const fetchInterfaces = async () => {
         try {
+            setIsScanning(true);
             setNetworkError(null);
             const res = await fetch("/api/network-interfaces", { method: 'POST' });
             const data = await res.json();
             if(data.ok && data.interfaces.length > 0) {
                 setInterfaces(data.interfaces);
-                setSelectedInterface(data.interfaces[0]);
+                setSelectedCidr(data.interfaces[0].cidr);
             } else {
                  const errorMsg = data.error || "Could not find any usable network interfaces.";
                  setNetworkError(errorMsg);
@@ -99,6 +101,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
              const errorMsg = err.message || "An unknown error occurred while fetching network interfaces.";
              setNetworkError(errorMsg);
              toast({ variant: "destructive", title: "Network Error", description: errorMsg});
+        } finally {
+            setIsScanning(false);
         }
     };
     fetchInterfaces();
@@ -127,6 +131,14 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         if (!res.ok) {
             // Don't toast error for single device detail failure to avoid spam
             console.error(`Failed to fetch details for ${ip}`);
+             const details = await res.json().catch(() => ({os: `Failed: ${res.statusText}`}));
+             setDevices(prev => 
+                prev.map(d => 
+                    d.ipAddress === ip 
+                    ? { ...d, isLoadingDetails: false, os: details.os || 'Fetch failed' } 
+                    : d
+                )
+            );
             return;
         }
         const details = await res.json();
@@ -143,7 +155,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
          setDevices(prev => 
             prev.map(d => 
                 d.ipAddress === ip 
-                ? { ...d, isLoadingDetails: false } 
+                ? { ...d, isLoadingDetails: false, os: "Error fetching" } 
                 : d
             )
         );
@@ -151,7 +163,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   }, []);
 
   const handleScan = async () => {
-    if (!selectedInterface) {
+    if (!selectedCidr) {
         toast({ variant: "destructive", title: "No Network Selected", description: "Please select a network to scan."});
         return;
     }
@@ -164,14 +176,16 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       const res = await fetch("/api/discover-devices", { 
           method: "POST",
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cidr: selectedInterface.cidr })
+          body: JSON.stringify({ cidr: selectedCidr })
       });
       
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.error || "Failed to start scan.");
+        // Try to parse error from JSON, otherwise use status text
+        const errorData = await res.json().catch(() => null);
+        throw new Error(errorData?.error || `Scan failed: ${res.statusText}`);
       }
+
+      const data = await res.json();
 
       const initialDevices: Device[] = data.devices.map((d: any) => ({
           id: d.ip,
@@ -187,8 +201,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           isLoadingDetails: true,
       }));
       
+      if (initialDevices.length === 0) {
+        toast({ title: "Scan Complete", description: "No online devices were found on this network."});
+      } else {
+        toast({ title: "Scan Initiated", description: `Found ${initialDevices.length} devices. Fetching details...`});
+      }
+      
       setDevices(initialDevices);
-      toast({ title: "Scan Initiated", description: `Found ${initialDevices.length} devices. Fetching details...`});
 
       // Now, fetch details for each device.
       for (const device of initialDevices) {
@@ -197,6 +216,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
     } catch (err: any) {
         toast({ variant: "destructive", title: "Scan Error", description: err.message });
+        console.error(err);
     } finally {
         setIsScanning(false);
     }
@@ -226,17 +246,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 body: JSON.stringify({ ip: device.ipAddress, cmd: "gpupdate /force" }),
             });
 
-            const responseText = await response.text();
-            let result;
-            try {
-                result = JSON.parse(responseText);
-            } catch (e) {
-                setGpUpdateStatus(prev => ({
-                    ...prev,
-                    [device.id]: { status: 'error', output: responseText }
-                }));
-                continue;
-            }
+            const result = await response.json();
             
             setGpUpdateStatus(prev => ({
                 ...prev,
@@ -282,12 +292,21 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               )
           case 'error':
               return (
-                  <Button variant="ghost" size="icon" className="h-auto w-auto text-red-500 hover:text-red-500" onClick={(e) => {
-                      e.stopPropagation();
-                      setErrorDialog({ isOpen: true, content: gpUpdateStatus[device.id]?.output || "No error details available." });
-                  }}>
-                    <HelpCircle className="h-5 w-5" />
-                  </Button>
+                 <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                         <Button variant="ghost" size="icon" className="h-auto w-auto text-red-500 hover:text-red-500" onClick={(e) => {
+                              e.stopPropagation();
+                              setErrorDialog({ isOpen: true, content: gpUpdateStatus[device.id]?.output || "No error details available." });
+                          }}>
+                            <HelpCircle className="h-5 w-5" />
+                          </Button>
+                    </TooltipTrigger>
+                     <TooltipContent>
+                        <p>GPUpdate Failed. Click for details.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               );
           default:
               const Icon = ICONS[device.type] || Laptop;
@@ -407,35 +426,28 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Network Devices</h1>
           <p className="text-muted-foreground">
             {isScanning 
-                ? `Scanning ${selectedInterface?.cidr}...`
+                ? `Scanning ${selectedCidr}...`
                 : `Discovered ${devices.length} devices on your network.`
             }
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-             <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="h-11 min-w-[250px] justify-between" disabled={interfaces.length === 0 || isScanning || isGpUpdating}>
-                        <div className="flex items-center gap-2">
-                           <Network className="h-4 w-4" />
-                           {selectedInterface ? (
-                               <span>{selectedInterface.name} ({selectedInterface.cidr})</span>
-                           ) : (
-                               <span>{networkError ? "No networks found" : "Select a Network"}</span>
-                           )}
-                        </div>
-                        <ChevronDown className="h-4 w-4" />
-                    </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-[300px]">
+             <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isScanning || isGpUpdating}>
+                <SelectTrigger className="h-11 min-w-[250px] justify-between">
+                    <div className="flex items-center gap-2">
+                        <Network className="h-4 w-4" />
+                        <SelectValue placeholder={networkError ? "No networks found" : "Select a Network"} />
+                    </div>
+                </SelectTrigger>
+                <SelectContent>
                     {interfaces.map(iface => (
-                        <DropdownMenuItem key={iface.id} onClick={() => setSelectedInterface(iface)}>
-                             {iface.name} ({iface.cidr})
-                        </DropdownMenuItem>
+                        <SelectItem key={iface.id} value={iface.cidr}>
+                             {iface.name}
+                        </SelectItem>
                     ))}
-                </DropdownMenuContent>
-            </DropdownMenu>
-            <Button onClick={handleScan} disabled={isScanning || isGpUpdating || !selectedInterface} size="lg" className="h-11">
+                </SelectContent>
+            </Select>
+            <Button onClick={handleScan} disabled={isScanning || isGpUpdating || !selectedCidr} size="lg" className="h-11">
                 {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wifi className="mr-2 h-4 w-4" />}
                 Discover Devices
             </Button>

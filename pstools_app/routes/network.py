@@ -4,6 +4,7 @@ import ipaddress
 import socket
 import threading
 import re
+import subprocess
 from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pstools_app.utils.helpers import is_valid_ip, get_pstools_path, run_ps_command, parse_psinfo_output
@@ -23,47 +24,33 @@ def api_network_interfaces():
     try:
         # Use a reliable method to get network interfaces
         hostname = socket.gethostname()
-        all_addrs = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_DGRAM)
+        # This will get all addresses, including IPv6, but we will filter for IPv4
+        all_addrs = socket.getaddrinfo(hostname, None)
         
-        for res in all_addrs:
-            ip_addr = res[4][0]
+        ipv4_addrs = [addr[4][0] for addr in all_addrs if addr[0] == socket.AF_INET]
+
+        for ip_addr in ipv4_addrs:
             if ip_addr.startswith('127.'):
                 continue
             
             try:
-                # Attempt to get a netmask to create a proper CIDR
-                # This is a bit of a hack for Windows, but often works
-                proc = subprocess.run(f'netsh interface ipv4 show addresses name="{ip_addr}"', capture_output=True, text=True, shell=True, timeout=5)
-                netmask_line = [line for line in proc.stdout.splitlines() if "Subnet Prefix" in line]
-                netmask = "255.255.255.0" # Default
-                if netmask_line:
-                    # e.g., "Subnet Prefix: 192.168.1.0/24 (mask 255.255.255.0)"
-                    match = re.search(r'mask ([\d\.]+)', netmask_line[0])
-                    if match:
-                        netmask = match.group(1)
-
-                net = ipaddress.ip_network(f"{ip_addr}/{netmask}", strict=False)
-                cidr = str(net.with_prefixlen)
+                # Use ipaddress module to get interface object, which can create the network object
+                iface = ipaddress.ip_interface(ip_addr + '/24') # Assume a /24 network for simplicity
+                net = iface.network
+                cidr = str(net)
                 
+                # Avoid adding duplicate networks
                 if not any(d['cidr'] == cidr for d in interfaces_list):
                     interfaces_list.append({
-                        "id": f"iface_{ip_addr}",
-                        "name": f"Network ({ip_addr})",
-                        "ip": ip_addr,
-                        "netmask": netmask,
-                        "cidr": cidr
-                    })
-            except Exception:
-                # Fallback for interfaces that we can't get a netmask for
-                cidr = f"{ip_addr.rsplit('.', 1)[0]}.0/24"
-                if not any(d['cidr'] == cidr for d in interfaces_list):
-                     interfaces_list.append({
-                        "id": f"fallback_{ip_addr}",
+                        "id": f"iface_{net.network_address}",
                         "name": f"Network ({cidr})",
                         "ip": ip_addr,
-                        "netmask": "255.255.255.0", # Assumption
+                        "netmask": str(net.netmask),
                         "cidr": cidr
                     })
+            except ValueError:
+                # Fallback for addresses that might not form a valid interface
+                continue
         
         return jsonify({"ok": True, "interfaces": interfaces_list})
     except Exception as e:
@@ -87,9 +74,22 @@ def api_discover_devices():
         ip_list = [str(ip) for ip in net.hosts()]
         
         def ping_ip(ip_str):
-            # The '>nul' part is for Windows to suppress output
-            result = os.system(f"ping -n 1 -w 200 {ip_str} >nul 2>&1")
-            return ip_str if result == 0 else None
+            # Use subprocess.run for better control and reliability
+            try:
+                result = subprocess.run(
+                    ["ping", "-n", "1", "-w", "200", ip_str],
+                    capture_output=True,
+                    text=True,
+                    check=False, # Don't raise exception on non-zero exit
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                return ip_str if result.returncode == 0 else None
+            except FileNotFoundError:
+                # This would happen if ping command is not in PATH, highly unlikely on Windows
+                return None
+            except Exception:
+                return None
+
 
         with ThreadPoolExecutor(max_workers=50) as executor:
             future_to_ip = {executor.submit(ping_ip, ip): ip for ip in ip_list}
