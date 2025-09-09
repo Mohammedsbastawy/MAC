@@ -150,7 +150,12 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             body: JSON.stringify({ ip: deviceToUpdate.ipAddress }),
         });
         
-        const details = await res.json().catch(() => ({ok: false, os: `Non-JSON response`}));
+        let details;
+        try {
+          details = await res.json();
+        } catch (e) {
+          details = {ok: false, os: `Non-JSON response from server.`};
+        }
         
         const updatedDevice = { 
             ...deviceToUpdate, 
@@ -167,7 +172,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 : d
             )
         );
-        // Pass the fully updated device to the selection handler
+        
         onSelectDevice(updatedDevice);
 
     } catch (e) {
@@ -275,7 +280,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
   const handleDeviceSelect = (device: Device) => {
     // If the device OS is N/A, it means we haven't fetched details yet.
-    if (device.os === 'N/A' || device.os === 'Loading...') {
+    if (device.os === 'N/A') {
       fetchDeviceDetails(device);
     } else {
       // Details are already loaded, just open the panel.
@@ -628,5 +633,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
+
+    
 
     
