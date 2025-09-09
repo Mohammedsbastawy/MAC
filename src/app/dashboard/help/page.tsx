@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search } from "lucide-react"
+import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog } from "lucide-react"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -103,11 +103,46 @@ export default function HelpPage() {
                     </div>
                 </CardContent>
             </Card>
+            
+             <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-2xl">
+                        <UserCog /> Prerequisite 3: User Rights Assignment
+                    </CardTitle>
+                    <CardDescription>
+                        Ensure the administrator account has the correct permissions to connect remotely. This is a critical security step.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                    <div className="flex flex-col gap-2">
+                         <Step number={1} title="Navigate to User Rights Assignment">
+                            <p>In the same GPO from the previous step, go to:</p>
+                            <CodeBlock>Computer Configuration &rarr; Policies &rarr; Windows Settings &rarr; Security Settings &rarr; Local Policies &rarr; User Rights Assignment</CodeBlock>
+                        </Step>
+                        <Step number={2} title="Configure 'Allow' Policies">
+                             <p>Edit the following policies to **include** your administrator user or an appropriate admin group (e.g., "Domain Admins"):</p>
+                            <ul className="list-disc pl-6 space-y-2 mt-2">
+                                <li><strong>Allow log on locally</strong></li>
+                                <li><strong>Log on as a service</strong></li>
+                                <li><strong>Allow log on through Remote Desktop Services</strong> (if you intend to use RDP alongside this tool)</li>
+                            </ul>
+                        </Step>
+                         <Step number={3} title="Configure 'Deny' Policies">
+                            <p>Crucially, ensure the same user or group is **NOT** present in the following "Deny" policies, as these policies override the "Allow" policies:</p>
+                            <ul className="list-disc pl-6 space-y-2 mt-2">
+                                <li><strong>Deny log on locally</strong></li>
+                                <li><strong>Deny log on as a service</strong></li>
+                                <li><strong>Deny log on through Remote Desktop Services</strong></li>
+                            </ul>
+                        </Step>
+                    </div>
+                </CardContent>
+            </Card>
 
             <Card>
                 <CardHeader>
                      <CardTitle className="flex items-center gap-2 text-2xl">
-                        <Siren /> Firewall Configuration
+                        <Siren /> Prerequisite 4: Firewall Configuration
                     </CardTitle>
                     <CardDescription>
                         Firewalls can block the communication needed for PsTools. You must ensure the required ports are open between this control panel and the target devices.
