@@ -165,3 +165,5 @@ def api_device_details():
     return jsonify(device_details)
 
     
+
+    
