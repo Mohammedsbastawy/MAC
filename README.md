@@ -14,18 +14,35 @@ Make sure you have the following software installed on your computer:
 
 ## Important Prerequisites for Target Machines
 
-For the application's tools to function correctly, you must enable and start the **Remote Registry** service on all computers you intend to manage.
+For the application's tools to function correctly, you must enable and configure the following services and policies on all computers you intend to manage. The recommended way to do this is via Group Policy for domain environments.
+
+### 1. Remote Registry Service
 
 This service allows tools like `PsInfo` to gather detailed system information.
 
 #### How to Enable via Group Policy (Recommended for Domains)
 
-You can enable this for all computers in your domain at once using Group Policy:
 1.  Open **Group Policy Management**.
 2.  Create or edit a Group Policy Object (GPO) that is linked to the Organizational Unit (OU) containing your computers.
 3.  Navigate to: `Computer Configuration` -> `Policies` -> `Windows Settings` -> `Security Settings` -> `System Services`.
 4.  Find **Remote Registry** in the list.
 5.  Define the policy setting and set the service startup mode to **Automatic**.
+
+### 2. User Rights Assignment
+
+Ensure the administrator account being used has the correct permissions to connect remotely.
+
+#### How to Configure via Group Policy
+
+1.  In your GPO, navigate to: `Computer Configuration` -> `Policies` -> `Windows Settings` -> `Security Settings` -> `Local Policies` -> `User Rights Assignment`.
+2.  Edit the following policies to include your administrator user or an appropriate admin group (e.g., "Domain Admins"):
+    *   **Allow log on locally**
+    *   **Log on as a service**
+    *   **Allow log on through Remote Desktop Services** (if you intend to use RDP alongside this tool).
+3.  Crucially, ensure the same user or group is **NOT** present in the following "Deny" policies:
+    *   **Deny log on locally**
+    *   **Deny log on as a service**
+    *   **Deny log on through Remote Desktop Services**
 
 ---
 
