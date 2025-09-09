@@ -20,6 +20,7 @@ import {
   XCircle,
   HelpCircle,
   ShieldAlert,
+  DownloadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -74,7 +75,7 @@ type ScanErrorState = {
     isError: boolean;
     title: string;
     message: string;
-    isScapyError?: boolean;
+    isSetupError?: boolean; // Generic setup error for masscan, npcap etc.
 }
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
@@ -176,7 +177,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setDevices([]);
     setGpUpdateStatus({});
     setScanError(null);
-    toast({ title: "Scan Initiated", description: `Performing ARP scan on ${selectedCidr}...` });
+    toast({ title: "Scan Initiated", description: `Performing Masscan on ${selectedCidr}...` });
 
     try {
         const res = await fetch("/api/discover-devices", { 
@@ -188,12 +189,12 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         const data = await res.json();
 
         if (!res.ok || !data.ok) {
-            if (data.error_code === 'SCAPY_SETUP_REQUIRED') {
+            if (data.error_code === 'MASSCAN_NOT_FOUND') {
                  setScanError({
                     isError: true,
-                    title: "Advanced Scan Failed: Configuration Required",
-                    message: data.details || "Scapy requires Npcap to be installed and the server to be run with Administrator privileges.",
-                    isScapyError: true
+                    title: "Action Required: Masscan Not Found",
+                    message: data.details || "masscan.exe was not found. Please download it and place it in the pstools_app directory.",
+                    isSetupError: true
                 });
             } else {
                  setScanError({
@@ -358,9 +359,9 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <AlertTitle className="mt-4 text-lg">{scanError.title}</AlertTitle>
                 <AlertDescription className="mt-2 max-w-md">
                     {scanError.message}
-                    {scanError.isScapyError && (
+                    {scanError.isSetupError && (
                          <Button asChild variant="link" className="text-destructive">
-                           <Link href="/dashboard/help">Click here for troubleshooting steps</Link>
+                           <Link href="/dashboard/help">Click here for setup instructions</Link>
                          </Button>
                     )}
                 </AlertDescription>
@@ -396,7 +397,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold text-foreground">No devices found</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Select a network and click "Discover Devices" to begin the ARP scan.
+            Select a network and click "Discover Devices" to begin the Masscan.
           </p>
         </div>
       );

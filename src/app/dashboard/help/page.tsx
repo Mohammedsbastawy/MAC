@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ExternalLink, ShieldAlert, ShieldCheck, Siren } from "lucide-react"
+import { ExternalLink, ShieldAlert, ShieldCheck, Siren, DownloadCloud } from "lucide-react"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -42,22 +42,25 @@ export default function HelpPage() {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <ShieldCheck /> Prerequisite 1: Npcap for Advanced Scanning
+                        <ShieldCheck /> Prerequisite 1: Masscan for Ultra-Fast Scanning
                     </CardTitle>
                     <CardDescription>
-                       This application uses advanced ARP scans for fast and reliable device discovery. This requires the Npcap packet capture library to be installed on the machine running the backend server.
+                       This application uses Masscan for extremely fast device discovery. This requires the `masscan.exe` binary to be placed in the `pstools_app` folder.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <p>Npcap is the Nmap Project's packet sniffing library for Windows. It is required for the `scapy` library to access network interfaces.</p>
-                     <a href="https://npcap.com/#download" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2">
-                        Download Npcap <ExternalLink className="ml-2 h-4 w-4" />
+                    <p>Masscan is the world's fastest network port scanner. The application backend will call `masscan.exe` to find live hosts on your network.</p>
+                     <a href="https://github.com/robertdavidgraham/masscan/releases" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2">
+                        Download Masscan from GitHub <DownloadCloud className="ml-2 h-4 w-4" />
                      </a>
                      <Alert>
                         <ShieldAlert className="h-4 w-4" />
-                        <AlertTitle>Important Installation Note</AlertTitle>
+                        <AlertTitle>Important Setup Instructions</AlertTitle>
                         <AlertDescription>
-                            During installation, ensure you check the box for **"Install Npcap in WinPcap API-compatible Mode"**. This is required for `scapy` to detect it correctly.
+                           1. On the releases page, download the latest `.zip` file for Windows (e.g., `masscan-2.0.5-win.zip`).<br/>
+                           2. Unzip the file.<br/>
+                           3. Find `masscan.exe` inside the `bin` directory.<br/>
+                           4. Copy `masscan.exe` and paste it into the `pstools_app` directory at the root of this project.
                         </AlertDescription>
                     </Alert>
                 </CardContent>

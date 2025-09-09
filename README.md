@@ -33,13 +33,19 @@ You can enable this for all computers in your domain at once using Group Policy:
 
 Follow these steps in order to get the application working correctly. All commands should be run from the main project folder.
 
-### Step 1: Set Up PsTools
+### Step 1: Set Up Essential Tools
 
-These are essential tools that allow the application to communicate with other computers on your network.
+These are external tools that give the application its core functionality.
 
-1.  Download **PsTools** from the official Microsoft website.
-2.  Unzip the downloaded file.
-3.  **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them directly into the `pstools_app` folder in this project.
+1.  **PsTools**:
+    *   Download **PsTools** from the official Microsoft website.
+    *   Unzip the downloaded file.
+    *   **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them directly into the `pstools_app` folder in this project.
+2.  **Masscan**:
+    *   Download the latest **Masscan** Windows binary from its official GitHub releases page. Look for a file named something like `masscan-version-win.zip`.
+    *   Unzip the downloaded file.
+    *   Find `masscan.exe` inside the `bin` subfolder.
+    *   **Important:** Copy `masscan.exe` and paste it directly into the `pstools_app` folder in this project.
 
 ### Step 2: Install Required Libraries
 

@@ -66,10 +66,63 @@ def api_network_interfaces():
         return jsonify({"ok": False, "error": f"An unexpected error occurred while fetching interfaces: {str(e)}"}), 500
 
 
+def run_masscan(target_range):
+    """Runs masscan and returns a list of IPs with open port 445."""
+    masscan_path = get_pstools_path("masscan.exe")
+    if not os.path.exists(masscan_path):
+        raise FileNotFoundError("masscan.exe not found")
+
+    # The --rate option is crucial for performance.
+    # The rate should be high, but not so high it overwhelms the network adapter.
+    # 10000 is a safe but very fast starting point.
+    command = [
+        masscan_path,
+        target_range,
+        "-p445",  # Port 445 (SMB) is a strong indicator of a Windows machine
+        "--rate", "10000",
+        "--open", # Only show open ports
+        "-oG", "-" # Grep-able output to stdout
+    ]
+
+    try:
+        # Use subprocess.run for better control and error handling
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=180, # 3-minute timeout, should be more than enough
+            check=True,  # This will raise CalledProcessError if masscan returns a non-zero exit code
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+
+        online_hosts = []
+        # Parse the grep-able output
+        for line in proc.stdout.strip().splitlines():
+            if line.startswith("#"):
+                continue # Skip comment lines
+            parts = line.split()
+            # Line format is typically "Host: 192.168.1.1 () Ports: 445/open/tcp////"
+            if len(parts) >= 2 and parts[0] == "Host:":
+                ip_address = parts[1]
+                if is_valid_ip(ip_address):
+                     online_hosts.append(ip_address)
+        
+        return online_hosts
+
+    except subprocess.CalledProcessError as e:
+        # This catches errors from masscan itself, e.g., invalid arguments
+        raise RuntimeError(f"Masscan execution failed: {e.stderr}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Masscan scan timed out after 3 minutes.")
+    except Exception as e:
+        # Catch-all for other unexpected errors
+        raise RuntimeError(f"An unexpected error occurred during masscan: {str(e)}")
+
+
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
-    Performs a fast ARP scan using Scapy to discover online devices.
+    Performs a fast port scan using Masscan to discover online devices.
     Returns immediately with the list of discovered devices.
     Details for each device are fetched separately by the frontend.
     """
@@ -79,46 +132,36 @@ def api_discover_devices():
     if not scan_cidr:
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
-    if not SCAPY_AVAILABLE:
-        return jsonify({
-            "ok": False, 
-            "error": "Scapy library not found",
-            "error_code": "SCAPY_SETUP_REQUIRED",
-            "details": "The scapy library is not installed on the server. Please run 'pip install scapy'."
-        }), 500
-
     try:
-        arp_request = ARP(pdst=scan_cidr)
-        broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
-        arp_request_broadcast = broadcast / arp_request
+        online_ips = run_masscan(scan_cidr)
         
-        # srp returns a tuple of (answered_packets, unanswered_packets)
-        answered_list = srp(arp_request_broadcast, timeout=5, verbose=False)[0]
-
         online_hosts = []
-        for sent, received in answered_list:
+        for ip in online_ips:
             hostname = "Unknown"
             try:
-                hostname = socket.gethostbyaddr(received.psrc)[0]
-            except socket.herror:
+                # Resolve hostname if possible, but don't let it slow us down too much.
+                # This is a quick check; detailed info comes later.
+                hostname = socket.gethostbyaddr(ip)[0]
+            except (socket.herror, socket.gaierror):
                 pass
-            online_hosts.append({"ip": received.psrc, "mac": received.hwsrc, "hostname": hostname})
+            online_hosts.append({"ip": ip, "mac": "-", "hostname": hostname}) # MAC is not provided by masscan
 
         sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})
 
-    except Exception as e:
-        # This is the crucial part. Scapy often fails on Windows without Npcap or admin rights.
-        error_message = str(e)
-        details = "An unexpected error occurred during the ARP scan."
-        if "No such device" in error_message or "dnet" in error_message.lower() or "WinPcap" in error_message or "Npcap" in error_message:
-             details = "Scapy failed. This usually means Npcap is not installed or the server was not run with Administrator privileges. Please install Npcap and try again."
-        
+    except FileNotFoundError:
         return jsonify({
             "ok": False, 
-            "error": "Advanced Scan Failed",
-            "error_code": "SCAPY_SETUP_REQUIRED",
-            "details": details
+            "error": "Masscan Not Found",
+            "error_code": "MASSCAN_NOT_FOUND",
+            "details": "masscan.exe was not found in the pstools_app directory. Please download it and place it there."
+        }), 500
+    except Exception as e:
+        return jsonify({
+            "ok": False, 
+            "error": "Masscan Scan Failed",
+            "error_code": "MASSCAN_FAILED",
+            "details": str(e)
         }), 500
 
 
