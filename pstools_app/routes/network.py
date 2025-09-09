@@ -20,6 +20,25 @@ def require_login():
         if 'user' not in session or 'email' not in session:
             return jsonify({'ok': False, 'error': 'يجب تسجيل الدخول أولاً'}), 401
 
+def get_source_ip_for_cidr(cidr_str):
+    """Finds a local IP address that belongs to the given CIDR network."""
+    try:
+        target_network = ipaddress.ip_network(cidr_str, strict=False)
+        hostname = socket.gethostname()
+        addr_info = socket.getaddrinfo(hostname, None)
+        
+        for item in addr_info:
+            # item[4][0] is the IP address
+            if item[0] == socket.AF_INET: # Check for IPv4
+                ip_addr_str = item[4][0]
+                ip_addr = ipaddress.ip_address(ip_addr_str)
+                if ip_addr in target_network:
+                    return ip_addr_str
+    except Exception:
+        # Return None if any error occurs
+        return None
+    return None
+
 @network_bp.route('/api/network-interfaces', methods=['POST'])
 def api_network_interfaces():
     interfaces_list = []
@@ -59,22 +78,27 @@ def api_network_interfaces():
         return jsonify({"ok": False, "error": f"An unexpected error occurred while fetching interfaces: {str(e)}"}), 500
 
 
-def run_masscan(target_range):
+def run_masscan(target_range, source_ip=None):
     """Runs masscan to discover devices and returns a list of IPs."""
     masscan_path = get_pstools_path("masscan.exe")
     if not os.path.exists(masscan_path):
         raise FileNotFoundError("masscan.exe not found.")
 
     output_file = "masscan_scan.json"
+    
     command = [
         masscan_path,
         target_range,
         "-p445",  # Port 445 (SMB) is a good indicator for Windows hosts
-        "--rate=1000",
+        "--rate", "1000",
         "--wait", "0",
         "--output-format", "json",
         "--output-file", output_file
     ]
+
+    # If a source IP is provided, add it to the command to ensure the correct interface is used.
+    if source_ip:
+        command.extend(["--source-ip", source_ip])
 
     proc = subprocess.run(
         command,
@@ -85,6 +109,7 @@ def run_masscan(target_range):
     )
 
     if proc.returncode != 0:
+        # Pass the stderr output for better error reporting in the UI
         raise RuntimeError("Masscan execution failed.", proc.stderr or proc.stdout)
 
     # Masscan outputs JSON objects on each line, not a valid single JSON array
@@ -95,6 +120,7 @@ def run_masscan(target_range):
             with open(output_file, 'r') as f:
                 for line in f:
                     line = line.strip()
+                    # Masscan might leave an empty "[]" at the end, so we check for actual objects
                     if line.startswith('{') and line.endswith('}'):
                         try:
                             data = json.loads(line)
@@ -134,7 +160,14 @@ def api_discover_devices():
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
     try:
-        online_ips = run_masscan(scan_cidr)
+        # Find the correct source IP for the selected network to avoid ARP issues
+        source_ip = get_source_ip_for_cidr(scan_cidr)
+        if not source_ip:
+            # Fallback or error if we can't find a suitable local IP.
+            # For now, we'll let masscan try without it, but we could error out.
+            pass
+
+        online_ips = run_masscan(scan_cidr, source_ip)
         
         # Now get details for each IP in parallel
         online_hosts = []
@@ -163,7 +196,7 @@ def api_discover_devices():
         return jsonify({
             "ok": False, 
             "error": "Masscan Scan Failed",
-            "message": e.args[0],
+            "message": "The network scan failed. This can happen if Masscan doesn't have the right permissions or can't find the network router.",
             "error_code": "MASSCAN_FAILED",
             "details": e.args[1] if len(e.args) > 1 else str(e)
         }), 500
@@ -172,7 +205,7 @@ def api_discover_devices():
             "ok": False, 
             "error": "Unexpected Scan Error",
             "message": "An unexpected error occurred during the scan.",
-            "error_code": "MASSCAN_FAILED",
+            "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
 
@@ -224,3 +257,6 @@ def api_device_details():
     
 
 
+
+
+    
