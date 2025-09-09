@@ -159,8 +159,14 @@ def api_psshutdown():
     flag = {"restart": "-r", "shutdown": "-s", "logoff": "-l"}.get(action)
     if not flag:
         return json_result(2, "", "Invalid power action")
+    
+    # Add force flag for shutdown and restart
+    args = [flag, "-t", "0"]
+    if action in ["restart", "shutdown"]:
+        args.append("-f")
+
     try:
-        rc, out, err = run_ps_command("psshutdown", ip, user, domain, pwd, [flag, "-t", "0", "-n"], timeout=60)
+        rc, out, err = run_ps_command("psshutdown", ip, user, domain, pwd, args, timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
