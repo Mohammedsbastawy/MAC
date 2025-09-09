@@ -4,6 +4,7 @@ from datetime import timedelta
 from .network import network_bp
 from .pstools import pstools_bp
 from .auth import auth_bp
+from .activedirectory import ad_bp
 import os
 
 def create_app():
@@ -13,6 +14,7 @@ def create_app():
     app.register_blueprint(network_bp)
     app.register_blueprint(pstools_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(ad_bp)
 
     @app.route("/")
     def index():
