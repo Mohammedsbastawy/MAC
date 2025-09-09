@@ -107,7 +107,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         }
     };
     fetchInterfaces();
-  }, [toast]); // Removed selectedCidr dependency to prevent re-fetching
+  }, [toast, selectedCidr]);
 
 
   const determineDeviceType = (hostname: string): Device["type"] => {
@@ -175,14 +175,16 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       });
       
       if (!res.ok) {
-        // Try to parse error from backend, otherwise show generic message
+        // IMPORTANT: Only read the body ONCE.
+        const responseBody = await res.text();
         let errorMsg = `Scan failed with status: ${res.status}`;
         try {
-            const errorData = await res.json();
+            // Try to parse it as JSON
+            const errorData = JSON.parse(responseBody);
             errorMsg = errorData.error || errorMsg;
         } catch (e) {
-             const textError = await res.text();
-             errorMsg = textError || errorMsg;
+             // If parsing fails, use the raw text
+             errorMsg = responseBody || errorMsg;
         }
         throw new Error(errorMsg);
       }
