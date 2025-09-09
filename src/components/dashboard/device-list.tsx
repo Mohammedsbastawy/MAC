@@ -52,6 +52,7 @@ import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import Link from "next/link";
+import { Input } from "../ui/input";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -95,6 +96,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
   const [gpUpdateStatus, setGpUpdateStatus] = React.useState<Record<string, GpUpdateResult>>({});
   const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, title: string, content: string}>({ isOpen: false, title: '', content: '' });
+  const [macPrompt, setMacPrompt] = React.useState<{isOpen: boolean, details: string}>({isOpen: false, details: ''});
 
 
   React.useEffect(() => {
@@ -171,7 +173,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     }
   }, []);
 
-  const handleScan = async () => {
+  const handleScan = async (manualRouterMac: string | null = null) => {
     if (!selectedCidr) {
         toast({ variant: "destructive", title: "No Network Selected", description: "Please select a network to scan."});
         return;
@@ -184,15 +186,38 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     toast({ title: "Scan Initiated", description: `Performing Masscan on ${selectedCidr}...` });
 
     try {
+        let router_mac = manualRouterMac;
+
+        // Step 1: Try to get router MAC automatically if not provided manually
+        if (!router_mac) {
+             const macRes = await fetch("/api/get-router-mac", {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cidr: selectedCidr })
+             });
+             const macData = await macRes.json();
+             if (macData.ok && macData.mac) {
+                router_mac = macData.mac;
+                toast({ title: "Router Detected", description: `Using router MAC: ${router_mac}`});
+             }
+        }
+
         const res = await fetch("/api/discover-devices", { 
             method: "POST",
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cidr: selectedCidr })
+            body: JSON.stringify({ cidr: selectedCidr, router_mac: router_mac })
         });
         
         const data = await res.json();
 
         if (!res.ok || !data.ok) {
+            // If the scan failed with a specific MASSCAN_FAILED error, prompt for MAC
+            if (data.error_code === 'MASSCAN_FAILED') {
+                setMacPrompt({isOpen: true, details: data.details || "The scan failed. Please provide the router MAC address."});
+                setIsScanning(false); // Stop the loading spinner
+                return;
+            }
+
             setScanError({
                 isError: true,
                 title: data.error || "Scan Error",
@@ -201,6 +226,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 errorCode: data.error_code
             });
             toast({ variant: "destructive", title: data.error || "Scan Failed", description: data.message });
+            setIsScanning(false);
             return; 
         }
 
@@ -476,6 +502,14 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       </div>
     );
   };
+  
+  const handleManualMacSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const mac = formData.get('mac') as string;
+    setMacPrompt({isOpen: false, details: ''});
+    handleScan(mac);
+  }
 
   return (
     <>
@@ -506,7 +540,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                     ))}
                 </SelectContent>
             </Select>
-            <Button onClick={handleScan} disabled={isScanning || isGpUpdating || !selectedCidr} size="lg" className="h-11">
+            <Button onClick={() => handleScan()} disabled={isScanning || isGpUpdating || !selectedCidr} size="lg" className="h-11">
                 {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
                 Discover Devices
             </Button>
@@ -540,6 +574,36 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <AlertDialogCancel onClick={() => setErrorDialog({isOpen: false, title:'', content:''})}>Close</AlertDialogCancel>
             </AlertDialogFooter>
         </AlertDialogContent>
+    </AlertDialog>
+     <AlertDialog open={macPrompt.isOpen} onOpenChange={(open) => !open && setMacPrompt({isOpen: false, details: ''})}>
+        <form onSubmit={handleManualMacSubmit}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Router MAC Address Required</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        Masscan failed to automatically resolve the router. Please provide the router's MAC address to continue.
+                        <p className="text-xs text-muted-foreground mt-2 font-mono bg-muted p-2 rounded-md">{macPrompt.details}</p>
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="my-4">
+                    <Label htmlFor="mac-input">Router MAC</Label>
+                    <Input
+                        id="mac-input"
+                        name="mac"
+                        placeholder="e.g., 00:1A:2B:3C:4D:5E"
+                        required
+                        className="mt-1 font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">
+                        You can find this on the router's label or by running `arp -a` in your command prompt and finding the entry for your router's IP.
+                    </p>
+                </div>
+                <AlertDialogFooter>
+                    <AlertDialogCancel type="button" onClick={() => setMacPrompt({isOpen: false, details: ''})}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction type="submit">Scan Again</AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </form>
     </AlertDialog>
     </>
   );

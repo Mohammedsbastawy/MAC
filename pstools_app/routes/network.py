@@ -39,6 +39,43 @@ def get_source_ip_for_cidr(cidr_str):
         return None
     return None
 
+def get_router_mac_address():
+    """
+    Attempts to find the default gateway's MAC address by parsing `route print`
+    and then using `arp -a`.
+    """
+    try:
+        # Get the default gateway IP
+        route_proc = subprocess.run(
+            ["route", "print", "0.0.0.0"],
+            capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if route_proc.returncode != 0:
+            return None
+
+        gateway_ip = None
+        for line in route_proc.stdout.splitlines():
+            # Look for the default route 0.0.0.0
+            if line.strip().startswith("0.0.0.0"):
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    # The gateway is usually the 3rd part
+                    if is_valid_ip(parts[2]):
+                        gateway_ip = parts[2]
+                        break
+        
+        if not gateway_ip:
+            return None
+
+        # Now that we have the gateway IP, get its MAC from the ARP table
+        return get_mac_address(gateway_ip)
+
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+        return None
+    except Exception:
+        return None
+
+
 @network_bp.route('/api/network-interfaces', methods=['POST'])
 def api_network_interfaces():
     interfaces_list = []
@@ -78,7 +115,7 @@ def api_network_interfaces():
         return jsonify({"ok": False, "error": f"An unexpected error occurred while fetching interfaces: {str(e)}"}), 500
 
 
-def run_masscan(target_range, source_ip=None):
+def run_masscan(target_range, source_ip=None, router_mac=None):
     """Runs masscan to discover devices and returns a list of IPs."""
     masscan_path = get_pstools_path("masscan.exe")
     if not os.path.exists(masscan_path):
@@ -96,8 +133,9 @@ def run_masscan(target_range, source_ip=None):
         "--output-file", output_file
     ]
 
-    # If a source IP is provided, add it to the command to ensure the correct interface is used.
-    if source_ip:
+    if router_mac:
+        command.extend(["--router-mac", router_mac])
+    elif source_ip:
         command.extend(["--source-ip", source_ip])
 
     proc = subprocess.run(
@@ -148,6 +186,15 @@ def get_device_info(ip):
         return {"ip": ip, "hostname": "Error", "mac": "Error"}
 
 
+@network_bp.route('/api/get-router-mac', methods=['POST'])
+def api_get_router_mac():
+    mac = get_router_mac_address()
+    if mac:
+        return jsonify({"ok": True, "mac": mac})
+    else:
+        return jsonify({"ok": False, "error": "Could not determine router MAC automatically."})
+
+
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
@@ -155,19 +202,14 @@ def api_discover_devices():
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
+    router_mac = data.get("router_mac")
 
     if not scan_cidr:
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
     try:
-        # Find the correct source IP for the selected network to avoid ARP issues
         source_ip = get_source_ip_for_cidr(scan_cidr)
-        if not source_ip:
-            # Fallback or error if we can't find a suitable local IP.
-            # For now, we'll let masscan try without it, but we could error out.
-            pass
-
-        online_ips = run_masscan(scan_cidr, source_ip)
+        online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
         # Now get details for each IP in parallel
         online_hosts = []
