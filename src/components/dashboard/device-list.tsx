@@ -23,6 +23,7 @@ import {
   DownloadCloud,
   Siren,
   FileText,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,7 +79,7 @@ type ScanErrorState = {
     title: string;
     message: string;
     details?: string;
-    errorCode?: 'BETTERCAP_NOT_FOUND' | 'BETTERCAP_FAILED';
+    errorCode?: 'MASSCAN_NOT_FOUND' | 'MASSCAN_FAILED';
 }
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
@@ -180,7 +181,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setDevices([]);
     setGpUpdateStatus({});
     setScanError(null);
-    toast({ title: "Scan Initiated", description: `Performing Bettercap scan on ${selectedCidr}...` });
+    toast({ title: "Scan Initiated", description: `Performing Masscan on ${selectedCidr}...` });
 
     try {
         const res = await fetch("/api/discover-devices", { 
@@ -204,7 +205,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         }
 
         const initialDevices: Device[] = data.devices.map((d: any) => ({
-            id: d.mac, // Use MAC address as a more stable ID
+            id: d.mac || d.ip, // Use MAC address as ID if available, else IP
             name: d.hostname === "Unknown" ? d.ip : d.hostname,
             ipAddress: d.ip,
             macAddress: d.mac || "-",
@@ -356,12 +357,12 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <AlertDescription className="mt-2 max-w-md space-y-4">
                     <p>{scanError.message}</p>
                     <div className="flex justify-center items-center gap-4">
-                        {scanError.errorCode === 'BETTERCAP_NOT_FOUND' && (
+                        {scanError.errorCode === 'MASSCAN_NOT_FOUND' && (
                              <>
                                 <Button asChild>
-                                <a href="https://github.com/bettercap/bettercap/releases" target="_blank" rel="noopener noreferrer">
+                                <a href="https://github.com/robertdavidgraham/masscan/releases" target="_blank" rel="noopener noreferrer">
                                     <DownloadCloud className="mr-2 h-4 w-4" />
-                                    Download Bettercap
+                                    Download Masscan
                                 </a>
                                 </Button>
                                 <Button asChild variant="secondary">
@@ -369,13 +370,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                                 </Button>
                              </>
                         )}
-                        {scanError.errorCode === 'BETTERCAP_FAILED' && (
+                        {scanError.errorCode === 'MASSCAN_FAILED' && (
                             <>
                                 <Button asChild variant="secondary">
                                     <Link href="/dashboard/help">Troubleshooting Guide</Link>
                                 </Button>
                                 {scanError.details && (
-                                    <Button onClick={() => setErrorDialog({isOpen: true, title: "Bettercap Error Log", content: scanError.details ?? "No details available."})}>
+                                    <Button onClick={() => setErrorDialog({isOpen: true, title: "Masscan Error Log", content: scanError.details ?? "No details available."})}>
                                         <FileText className="mr-2 h-4 w-4" />
                                         Show Error Log
                                     </Button>
@@ -416,7 +417,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold text-foreground">No devices found</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Select a network and click "Discover Devices" to begin the Bettercap scan.
+            Select a network and click "Discover Devices" to begin the Masscan.
           </p>
         </div>
       );
@@ -506,7 +507,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 </SelectContent>
             </Select>
             <Button onClick={handleScan} disabled={isScanning || isGpUpdating || !selectedCidr} size="lg" className="h-11">
-                {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wifi className="mr-2 h-4 w-4" />}
+                {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
                 Discover Devices
             </Button>
             <Button onClick={handleMassGpUpdate} disabled={isScanning || isGpUpdating || devices.length === 0} size="lg" className="h-11">

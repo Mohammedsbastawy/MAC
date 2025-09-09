@@ -41,13 +41,13 @@ These are external tools that give the application its core functionality.
     *   Download **PsTools** from the official Microsoft website.
     *   Unzip the downloaded file.
     *   **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them directly into the `pstools_app` folder in this project.
-2.  **Bettercap & Npcap (Required for Network Discovery)**:
-    *   **Bettercap:** The application uses `bettercap` for advanced network discovery.
-        *   Download the latest **Bettercap** Windows binary from its [official GitHub releases page](https://github.com/bettercap/bettercap/releases). Look for a file named `bettercap_windows_amd64_vX.X.X.zip`.
+2.  **Masscan (Required for Fast Network Discovery)**:
+    *   **Masscan:** The application uses `masscan` for extremely fast network discovery.
+        *   Download the latest **Masscan** Windows release from its [official GitHub releases page](https://github.com/robertdavidgraham/masscan/releases).
+        *   On the releases page, find the latest version and download the file named `masscan-*.zip` (e.g., `masscan-2.0.5-win.zip`).
         *   Unzip the downloaded file.
-        *   **Important:** Copy `bettercap.exe` and paste it directly into the `pstools_app` folder in this project.
-    *   **Npcap:** Bettercap requires `Npcap` to access network interfaces.
-        *   Download and install the latest version of [Npcap](https://npcap.com/#download) from its official website.
+        *   Find the `bin` directory, and inside it, you will find `masscan.exe`.
+        *   **Important:** Copy `masscan.exe` and paste it directly into the `pstools_app` folder in this project.
 
 ### Step 2: Install Required Libraries
 
@@ -69,7 +69,7 @@ Now, you will need to run the two parts of the application (backend and frontend
 
 **First Window: Run the Server (Backend)**
 
-1.  Open a **new** command window **with Administrator privileges** (`Run as administrator`). This is required for `bettercap` to function correctly.
+1.  Open a **new** command window.
 2.  Run the server with the following command. **Leave this window open.**
     ```bash
     python -m flask run --host=0.0.0.0 --port=5000

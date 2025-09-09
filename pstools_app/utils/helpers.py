@@ -3,6 +3,7 @@ import os
 import ipaddress
 import subprocess
 import re
+import socket
 
 def is_valid_ip(ip: str) -> bool:
     try:
@@ -11,26 +12,68 @@ def is_valid_ip(ip: str) -> bool:
     except Exception:
         return False
 
+def get_hostname_from_ip(ip):
+    try:
+        hostname, _, _ = socket.gethostbyaddr(ip)
+        return hostname
+    except socket.herror:
+        # Unable to resolve hostname
+        return None
+        
+def get_mac_address(ip):
+    """
+    Returns the MAC address of a device by parsing the ARP table.
+    This is more reliable than sending ARP requests for each device.
+    It works for devices on the local subnet.
+    """
+    if not is_valid_ip(ip):
+        return None
+        
+    try:
+        # Run the 'arp -a' command
+        output = subprocess.check_output(['arp', '-a', ip], text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        
+        # Regex to find a MAC address. Handles both '-' and ':' as separators.
+        mac_regex = r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}'
+        match = re.search(mac_regex, output)
+        
+        if match:
+            return match.group(0).upper().replace('-', ':')
+
+    except subprocess.CalledProcessError:
+        # This can happen if the IP is not in the ARP cache
+        # or if the command fails for other reasons.
+        pass
+    except Exception:
+        # Catch any other unexpected errors
+        pass
+        
+    return None # Return None if not found or an error occurred
+
+
 def get_pstools_path(exe_name: str) -> str:
     """
     Constructs the full path to a PsTools executable.
     It assumes the executables are in the 'pstools_app' directory.
     The executable name should include .exe
     """
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
+    # This assumes the script is in pstools_app/utils, so we go up two directories.
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    app_dir = os.path.join(project_root, 'pstools_app')
+
     # First, check in the root of pstools_app
-    candidate = os.path.join(base_dir, exe_name)
+    candidate = os.path.join(app_dir, exe_name)
     if os.path.isfile(candidate):
         return candidate
     
     # Fallback to checking inside pstools_app/Sysinternals
-    candidate_sys = os.path.join(base_dir, "Sysinternals", exe_name)
+    candidate_sys = os.path.join(app_dir, "Sysinternals", exe_name)
     if os.path.isfile(candidate_sys):
         return candidate_sys
 
-    # If not found, return just the name so the system can try to find it in the PATH.
-    return exe_name
+    # If not found, return the path relative to the app_dir, 
+    # allowing subprocess to potentially find it if the working directory is correct.
+    return os.path.join(app_dir, exe_name)
 
 def run_ps_command(tool_name, ip, user_email=None, pwd=None, extra_args=[], timeout=90):
     """
