@@ -72,9 +72,6 @@ def api_discover_devices():
     Performs a fast ARP scan to discover online devices and returns them immediately.
     Details for each device are fetched separately by the frontend.
     """
-    if not SCAPY_AVAILABLE:
-        return jsonify({"ok": False, "error": "Scapy library is not installed on the server, which is required for ARP scan."}), 500
-
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
     if not scan_cidr:
@@ -82,32 +79,43 @@ def api_discover_devices():
 
     online_hosts = []
     try:
-        # Create ARP request packet
-        arp_request = ARP(pdst=scan_cidr)
-        broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
-        arp_request_broadcast = broadcast / arp_request
+        network = ipaddress.ip_network(scan_cidr)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Invalid CIDR format."}), 400
 
-        # Send the packet and capture the results
-        answered_list = srp(arp_request_broadcast, timeout=5, verbose=False)[0]
+    # Fallback to Ping Sweep - it's more reliable without external dependencies/permissions.
+    def ping_ip(ip):
+        try:
+            ip_str = str(ip)
+            # Use subprocess.run for better control and reliability
+            result = subprocess.run(
+                ["ping", "-n", "1", "-w", "200", ip_str],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            # Check for TTL in the output, which is a reliable indicator of a successful ping
+            if "TTL=" in result.stdout:
+                return ip_str
+        except (subprocess.TimeoutExpired, Exception):
+            pass
+        return None
 
-        for sent, received in answered_list:
-            hostname = "Unknown"
-            try:
-                # Try to resolve hostname, but don't fail if it doesn't work
-                hostname = socket.gethostbyaddr(received.psrc)[0]
-            except socket.herror:
-                pass # Keep hostname as "Unknown"
-            online_hosts.append({"ip": received.psrc, "mac": received.hwsrc, "hostname": hostname})
+    with ThreadPoolExecutor(max_workers=100) as executor:
+        future_to_ip = {executor.submit(ping_ip, ip): ip for ip in network.hosts()}
+        for future in as_completed(future_to_ip):
+            result_ip = future.result()
+            if result_ip:
+                hostname = "Unknown"
+                try:
+                    hostname = socket.gethostbyaddr(result_ip)[0]
+                except socket.herror:
+                    pass
+                online_hosts.append({"ip": result_ip, "mac": "N/A", "hostname": hostname})
 
-        # Sort the hosts by IP address
-        sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
-        return jsonify({"ok": True, "devices": sorted_hosts})
-
-    except Exception as e:
-        # Provide a more specific error if it's permission related (common on Windows)
-        if "WinPcap is not installed" in str(e) or "NPCAP" in str(e):
-             return jsonify({"ok": False, "error": "Scanning Error: Npcap/WinPcap is not installed or not running. Please install Npcap with 'WinPcap API-compatible Mode' enabled."}), 500
-        return jsonify({"ok": False, "error": f"An unexpected error occurred during scan: {str(e)}", "devices": []}), 500
+    sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
+    return jsonify({"ok": True, "devices": sorted_hosts})
 
 
 @network_bp.route('/api/device-details', methods=['POST'])

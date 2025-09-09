@@ -107,7 +107,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         }
     };
     fetchInterfaces();
-  }, [toast, selectedCidr]);
+  }, [toast]); // Removed selectedCidr dependency to prevent re-fetching
 
 
   const determineDeviceType = (hostname: string): Device["type"] => {
@@ -165,7 +165,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setIsScanning(true);
     setDevices([]);
     setGpUpdateStatus({});
-    toast({ title: "Scan Initiated", description: `Performing ARP scan on ${selectedCidr}...`});
+    toast({ title: "Scan Initiated", description: `Performing scan on ${selectedCidr}...`});
 
     try {
       const res = await fetch("/api/discover-devices", { 
@@ -174,11 +174,20 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           body: JSON.stringify({ cidr: selectedCidr })
       });
       
-      const data = await res.json();
-
-      if (!data.ok) {
-        throw new Error(data.error || `Scan failed with status: ${res.status}`);
+      if (!res.ok) {
+        // Try to parse error from backend, otherwise show generic message
+        let errorMsg = `Scan failed with status: ${res.status}`;
+        try {
+            const errorData = await res.json();
+            errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+             const textError = await res.text();
+             errorMsg = textError || errorMsg;
+        }
+        throw new Error(errorMsg);
       }
+
+      const data = await res.json();
 
       const initialDevices: Device[] = data.devices.map((d: any) => ({
           id: d.ip,
