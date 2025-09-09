@@ -41,11 +41,13 @@ These are external tools that give the application its core functionality.
     *   Download **PsTools** from the official Microsoft website.
     *   Unzip the downloaded file.
     *   **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them directly into the `pstools_app` folder in this project.
-2.  **Masscan**:
-    *   Download the latest **Masscan** Windows binary from its official GitHub releases page. Look for a file named something like `masscan-version-win.zip`.
-    *   Unzip the downloaded file.
-    *   Find `masscan.exe` inside the `bin` subfolder.
-    *   **Important:** Copy `masscan.exe` and paste it directly into the `pstools_app` folder in this project.
+2.  **Bettercap & Npcap (Required for Network Discovery)**:
+    *   **Bettercap:** The application uses `bettercap` for advanced network discovery.
+        *   Download the latest **Bettercap** Windows binary from its [official GitHub releases page](https://github.com/bettercap/bettercap/releases). Look for a file named `bettercap_windows_amd64_vX.X.X.zip`.
+        *   Unzip the downloaded file.
+        *   **Important:** Copy `bettercap.exe` and paste it directly into the `pstools_app` folder in this project.
+    *   **Npcap:** Bettercap requires `Npcap` to access network interfaces.
+        *   Download and install the latest version of [Npcap](httpss://npcap.com/#download) from its official website.
 
 ### Step 2: Install Required Libraries
 
@@ -67,7 +69,7 @@ Now, you will need to run the two parts of the application (backend and frontend
 
 **First Window: Run the Server (Backend)**
 
-1.  Open a **new** command window in the main project folder.
+1.  Open a **new** command window **with Administrator privileges** (`Run as administrator`). This is required for `bettercap` to function correctly.
 2.  Run the server with the following command. **Leave this window open.**
     ```bash
     python -m flask run --host=0.0.0.0 --port=5000

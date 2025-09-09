@@ -5,6 +5,8 @@ import socket
 import threading
 import re
 import subprocess
+import time
+import json
 from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pstools_app.utils.helpers import is_valid_ip, get_pstools_path, run_ps_command, parse_psinfo_output
@@ -66,65 +68,94 @@ def api_network_interfaces():
         return jsonify({"ok": False, "error": f"An unexpected error occurred while fetching interfaces: {str(e)}"}), 500
 
 
-def run_masscan(target_range):
-    """Runs masscan and returns a list of IPs with open port 445."""
-    masscan_path = get_pstools_path("masscan.exe")
-    if not os.path.exists(masscan_path):
-        raise FileNotFoundError("masscan.exe not found")
+def parse_bettercap_output(output):
+    """Parses the table-like output from bettercap's net.show command."""
+    hosts = []
+    # Regex to capture the fields from the net.show table
+    # It looks for lines starting with a pipe and captures the content of each column
+    line_regex = re.compile(
+        r"^\s*\|\s*(?P<ip>[\d\.]+)\s*\|\s*(?P<mac>[\w:]+)\s*\|\s*(?P<hostname>.*?)\s*\|.*"
+    )
+    
+    for line in output.splitlines():
+        match = line_regex.match(line)
+        if match:
+            host_data = match.groupdict()
+            # Clean up default/empty values from bettercap
+            if host_data['mac'] == "00:00:00:00:00:00": continue
+            if not is_valid_ip(host_data['ip']): continue
 
-    # The --rate option is crucial for performance.
-    # The rate should be high, but not so high it overwhelms the network adapter.
-    # 10000 is a safe but very fast starting point.
+            hosts.append({
+                "ip": host_data['ip'].strip(),
+                "mac": host_data['mac'].strip().upper(),
+                "hostname": host_data['hostname'].strip() if host_data['hostname'].strip() else "Unknown"
+            })
+            
+    return hosts
+
+def run_bettercap(target_range):
+    """Runs bettercap to discover devices and returns a list of hosts."""
+    bettercap_path = get_pstools_path("bettercap.exe")
+    if not os.path.exists(bettercap_path):
+        raise FileNotFoundError("bettercap.exe not found")
+
+    # Command to start network probing, wait, show results, and quit.
+    # The output is saved to a temp json file.
+    temp_output_file = "bettercap_scan.json"
     command = [
-        masscan_path,
-        target_range,
-        "-p445",  # Port 445 (SMB) is a strong indicator of a Windows machine
-        "--rate", "10000",
-        "--open", # Only show open ports
-        "-oG", "-" # Grep-able output to stdout
+        bettercap_path,
+        "-no-colors",
+        "-eval",
+        f"set net.probe.targets {target_range}; net.probe on; sleep 5; net.show -json-file {temp_output_file}; q"
     ]
 
     try:
-        # Use subprocess.run for better control and error handling
         proc = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            timeout=180, # 3-minute timeout, should be more than enough
-            check=True,  # This will raise CalledProcessError if masscan returns a non-zero exit code
+            timeout=180, # 3 minute timeout
+            check=True,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
 
-        online_hosts = []
-        # Parse the grep-able output
-        for line in proc.stdout.strip().splitlines():
-            if line.startswith("#"):
-                continue # Skip comment lines
-            parts = line.split()
-            # Line format is typically "Host: 192.168.1.1 () Ports: 445/open/tcp////"
-            if len(parts) >= 2 and parts[0] == "Host:":
-                ip_address = parts[1]
-                if is_valid_ip(ip_address):
-                     online_hosts.append(ip_address)
-        
-        return online_hosts
+        if os.path.exists(temp_output_file):
+            with open(temp_output_file, 'r') as f:
+                scan_data = json.load(f)
+            os.remove(temp_output_file) # Clean up the file
+            
+            online_hosts = []
+            for host in scan_data.get('hosts', []):
+                 if host['ip'] and host['mac']: # Ensure essential data exists
+                     online_hosts.append({
+                        "ip": host['ip'],
+                        "mac": host['mac'],
+                        "hostname": host.get('hostname', 'Unknown') or 'Unknown'
+                     })
+            return online_hosts
+        else:
+             # Fallback parsing in case json output fails for some reason
+            return parse_bettercap_output(proc.stdout)
 
+    except FileNotFoundError:
+        # This is redundant due to the check above, but good practice
+        raise
     except subprocess.CalledProcessError as e:
-        # This catches errors from masscan itself, e.g., invalid arguments
-        raise RuntimeError(f"Masscan execution failed: {e.stderr}")
+        # This can happen if bettercap can't find npcap
+        stderr = e.stderr.lower()
+        if "could not find any pcap" in stderr or "npcap" in stderr:
+            raise RuntimeError("Bettercap requires Npcap to be installed. Please install it and try again.")
+        raise RuntimeError(f"Bettercap execution failed: {e.stderr}")
     except subprocess.TimeoutExpired:
-        raise RuntimeError("Masscan scan timed out after 3 minutes.")
+        raise RuntimeError("Bettercap scan timed out after 3 minutes.")
     except Exception as e:
-        # Catch-all for other unexpected errors
-        raise RuntimeError(f"An unexpected error occurred during masscan: {str(e)}")
+        raise RuntimeError(f"An unexpected error occurred during Bettercap scan: {str(e)}")
 
 
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
-    Performs a fast port scan using Masscan to discover online devices.
-    Returns immediately with the list of discovered devices.
-    Details for each device are fetched separately by the frontend.
+    Performs a fast network discovery using Bettercap.
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
@@ -133,34 +164,22 @@ def api_discover_devices():
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
     try:
-        online_ips = run_masscan(scan_cidr)
-        
-        online_hosts = []
-        for ip in online_ips:
-            hostname = "Unknown"
-            try:
-                # Resolve hostname if possible, but don't let it slow us down too much.
-                # This is a quick check; detailed info comes later.
-                hostname = socket.gethostbyaddr(ip)[0]
-            except (socket.herror, socket.gaierror):
-                pass
-            online_hosts.append({"ip": ip, "mac": "-", "hostname": hostname}) # MAC is not provided by masscan
-
+        online_hosts = run_bettercap(scan_cidr)
         sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})
 
     except FileNotFoundError:
         return jsonify({
             "ok": False, 
-            "error": "Masscan Not Found",
-            "error_code": "MASSCAN_NOT_FOUND",
-            "details": "masscan.exe was not found in the pstools_app directory. Please download it and place it there."
+            "error": "Bettercap Not Found",
+            "error_code": "BETTERCAP_NOT_FOUND",
+            "details": "bettercap.exe was not found in the pstools_app directory. Please download it and place it there."
         }), 500
     except Exception as e:
         return jsonify({
             "ok": False, 
-            "error": "Masscan Scan Failed",
-            "error_code": "MASSCAN_FAILED",
+            "error": "Bettercap Scan Failed",
+            "error_code": "BETTERCAP_FAILED",
             "details": str(e)
         }), 500
 

@@ -21,6 +21,7 @@ import {
   HelpCircle,
   ShieldAlert,
   DownloadCloud,
+  Siren,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,12 +76,8 @@ type ScanErrorState = {
     isError: boolean;
     title: string;
     message: string;
-    isSetupError?: boolean;
+    errorCode?: 'BETTERCAP_NOT_FOUND' | 'BETTERCAP_FAILED';
 }
-
-// Direct link to the latest known Windows release of Masscan
-const MASSCAN_DOWNLOAD_URL = "https://github.com/robertdavidgraham/masscan/archive/refs/heads/master.zip";
-
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isScanning, setIsScanning] = React.useState(false);
@@ -181,7 +178,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setDevices([]);
     setGpUpdateStatus({});
     setScanError(null);
-    toast({ title: "Scan Initiated", description: `Performing Masscan on ${selectedCidr}...` });
+    toast({ title: "Scan Initiated", description: `Performing Bettercap scan on ${selectedCidr}...` });
 
     try {
         const res = await fetch("/api/discover-devices", { 
@@ -193,26 +190,18 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         const data = await res.json();
 
         if (!res.ok || !data.ok) {
-            if (data.error_code === 'MASSCAN_NOT_FOUND') {
-                 setScanError({
-                    isError: true,
-                    title: "Action Required: Masscan Not Found",
-                    message: data.details || "masscan.exe was not found. Please download it and place it in the pstools_app directory.",
-                    isSetupError: true
-                });
-            } else {
-                 setScanError({
-                    isError: true,
-                    title: data.error || "Scan Error",
-                    message: data.details || `The scan failed due to an unexpected server error.`
-                });
-            }
+            setScanError({
+                isError: true,
+                title: data.error || "Scan Error",
+                message: data.details || `The scan failed due to an unexpected server error.`,
+                errorCode: data.error_code
+            });
             toast({ variant: "destructive", title: data.error || "Scan Failed", description: data.details });
             return; 
         }
 
         const initialDevices: Device[] = data.devices.map((d: any) => ({
-            id: d.ip,
+            id: d.mac, // Use MAC address as a more stable ID
             name: d.hostname === "Unknown" ? d.ip : d.hostname,
             ipAddress: d.ip,
             macAddress: d.mac || "-",
@@ -359,20 +348,27 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     if (scanError?.isError) {
          return (
              <Alert variant="destructive" className="h-80 flex flex-col items-center justify-center text-center">
-                <ShieldAlert className="h-12 w-12" />
+                <Siren className="h-12 w-12" />
                 <AlertTitle className="mt-4 text-lg">{scanError.title}</AlertTitle>
                 <AlertDescription className="mt-2 max-w-md space-y-4">
                     <p>{scanError.message}</p>
-                    {scanError.isSetupError && (
+                    {scanError.errorCode === 'BETTERCAP_NOT_FOUND' && (
                          <div className="flex justify-center items-center gap-4">
                              <Button asChild>
-                               <a href={MASSCAN_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+                               <a href="https://github.com/bettercap/bettercap/releases" target="_blank" rel="noopener noreferrer">
                                    <DownloadCloud className="mr-2 h-4 w-4" />
-                                   Download Masscan
+                                   Download Bettercap
                                </a>
                              </Button>
                              <Button asChild variant="secondary">
                                 <Link href="/dashboard/help">View Instructions</Link>
+                             </Button>
+                         </div>
+                    )}
+                     {scanError.errorCode === 'BETTERCAP_FAILED' && (
+                         <div className="flex justify-center items-center gap-4">
+                             <Button asChild variant="secondary">
+                                <Link href="/dashboard/help">Troubleshooting Guide</Link>
                              </Button>
                          </div>
                     )}
@@ -409,7 +405,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold text-foreground">No devices found</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Select a network and click "Discover Devices" to begin the Masscan.
+            Select a network and click "Discover Devices" to begin the Bettercap scan.
           </p>
         </div>
       );
@@ -536,7 +532,3 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
-
-    
-
-    

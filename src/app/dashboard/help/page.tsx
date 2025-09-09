@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { DownloadCloud, ShieldAlert, ShieldCheck, Siren } from "lucide-react"
+import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network } from "lucide-react"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -39,30 +39,58 @@ export default function HelpPage() {
                 </p>
             </div>
 
-            <Card>
+             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <ShieldCheck /> Prerequisite 1: Masscan for Ultra-Fast Scanning
+                        <Network /> Prerequisite 1: Bettercap for Network Discovery
                     </CardTitle>
                     <CardDescription>
-                       This application uses Masscan for extremely fast device discovery. This requires the `masscan.exe` binary to be placed in the `pstools_app` folder.
+                       This application now uses Bettercap for powerful and accurate device discovery. This requires the `bettercap.exe` binary and the `Npcap` driver.
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                    <p>Masscan is the world's fastest network port scanner. The application backend will call `masscan.exe` to find live hosts on your network.</p>
-                     <a href="https://github.com/robertdavidgraham/masscan/releases" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2">
-                        Download Masscan from GitHub Releases <DownloadCloud className="ml-2 h-4 w-4" />
-                     </a>
-                     <Alert>
+                <CardContent className="space-y-6">
+                    <Alert>
                         <ShieldAlert className="h-4 w-4" />
-                        <AlertTitle>Important Setup Instructions</AlertTitle>
+                        <AlertTitle>Important: Two-Part Setup</AlertTitle>
                         <AlertDescription>
-                           1. On the GitHub releases page, find the latest version and download the `.zip` file for Windows (e.g., `masscan-2.0.5-win.zip`).<br/>
-                           2. Unzip the downloaded file.<br/>
-                           3. Find `masscan.exe` inside the `bin` directory within the unzipped folder.<br/>
-                           4. Copy `masscan.exe` and paste it directly into the `pstools_app` directory at the root of this project.
+                          Bettercap needs two components to work: the Bettercap executable itself, and the Npcap packet capture library.
                         </AlertDescription>
                     </Alert>
+                    
+                    <div>
+                        <h4 className="font-semibold text-lg">Part A: Install Npcap</h4>
+                        <p className="text-muted-foreground mt-1">Npcap is a required driver that allows Bettercap to access your network card. It must be installed on the machine running the Dominion Control Panel.</p>
+                         <a href="https://npcap.com/#download" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 mt-3">
+                            Download Npcap Installer <DownloadCloud className="ml-2 h-4 w-4" />
+                         </a>
+                    </div>
+
+                    <div>
+                        <h4 className="font-semibold text-lg">Part B: Download Bettercap</h4>
+                        <p className="text-muted-foreground mt-1">You need to place the Bettercap executable in the application's `pstools_app` directory.</p>
+                         <a href="https://github.com/bettercap/bettercap/releases" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 mt-3">
+                            Download Bettercap from GitHub Releases <DownloadCloud className="ml-2 h-4 w-4" />
+                         </a>
+                         <Alert className="mt-4">
+                            <ShieldAlert className="h-4 w-4" />
+                            <AlertTitle>Important Setup Instructions</AlertTitle>
+                            <AlertDescription>
+                               1. On the GitHub releases page, find the latest version and download the `.zip` file for Windows (e.g., `bettercap_windows_amd64_vX.X.X.zip`).<br/>
+                               2. Unzip the downloaded file.<br/>
+                               3. Find `bettercap.exe` inside the folder.<br/>
+                               4. Copy `bettercap.exe` and paste it directly into the `pstools_app` directory at the root of this project.
+                            </AlertDescription>
+                        </Alert>
+                    </div>
+
+                     <Alert>
+                        <Siren className="h-4 w-4" />
+                        <AlertTitle>Run as Administrator</AlertTitle>
+                        <AlertDescription>
+                           For Bettercap to work correctly, you MUST run the Python backend server from a command prompt that was started with "Run as administrator" privileges.
+                        </AlertDescription>
+                    </Alert>
+
                 </CardContent>
             </Card>
 
