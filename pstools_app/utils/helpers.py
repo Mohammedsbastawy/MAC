@@ -75,7 +75,7 @@ def get_pstools_path(exe_name: str) -> str:
     # allowing subprocess to potentially find it if the working directory is correct.
     return os.path.join(app_dir, exe_name)
 
-def run_ps_command(tool_name, ip, user_email=None, pwd=None, extra_args=[], timeout=90):
+def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90):
     """
     A centralized function to build and run any PsTools command.
     tool_name should be 'psexec', 'psinfo', etc. (without .exe)
@@ -91,8 +91,13 @@ def run_ps_command(tool_name, ip, user_email=None, pwd=None, extra_args=[], time
 
         # Build credential args
         cred_args = []
-        if user_email:
-            cred_args += ["-u", user_email]
+        if username and domain:
+             # Use the domain\user format
+            cred_args += ["-u", f"{domain}\\{username}"]
+        elif username:
+            # Fallback for local admin
+             cred_args += ["-u", username]
+
         if pwd:
             cred_args += ["-p", pwd]
 

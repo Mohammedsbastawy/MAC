@@ -29,13 +29,14 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
             username,
             domain,
             password,
-            win32con.LOGON32_LOGON_NETWORK_CLEARTEXT, # Use this for network credentials
+            win32con.LOGON32_LOGON_NETWORK, # Use this for domain authentication
             win32con.LOGON32_PROVIDER_DEFAULT
         )
         # If LogonUser succeeds, credentials are valid.
         
         # 2. Check if the user is a member of the "Domain Admins" group.
-        is_admin, error_msg = check_is_domain_admin_group_member(username)
+        # Use the combined domain\user format for checking group membership
+        is_admin, error_msg = check_is_domain_admin_group_member(f"{domain}\\{username}")
         
         # Close the handle from LogonUser
         hUser.Close()
@@ -57,10 +58,13 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
     except Exception as e:
         return False, f"An unexpected error occurred: {str(e)}"
 
-def check_is_domain_admin_group_member(username):
+def check_is_domain_admin_group_member(full_username):
     """Checks if a user is a member of the Domain Admins group using 'net group'."""
     try:
         # Use 'net group' which is reliable for checking domain group membership.
+        # The full_username should be in "DOMAIN\user" format
+        user_to_check = full_username.split('\\')[-1]
+
         cmd = f'net group "Domain Admins" /domain'
         proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
 
@@ -83,7 +87,7 @@ def check_is_domain_admin_group_member(username):
                 # Users can be in columns, so we split by spaces and filter out empty strings
                 user_list.extend(filter(None, line.strip().split('  ')))
         
-        return any(username.lower() == admin.lower() for admin in user_list), None
+        return any(user_to_check.lower() == admin.lower() for admin in user_list), None
 
     except subprocess.TimeoutExpired:
         return False, "انتهت مهلة أمر التحقق من صلاحيات المدير."

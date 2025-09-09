@@ -263,14 +263,14 @@ def api_device_details():
     if not ip:
         return jsonify({"ok": False, "error": "IP address is required."}), 400
         
-    email = session.get("email")
+    username = session.get("user")
     pwd = session.get("password")
     user_domain = session.get("domain")
 
     device_details = { "domain": "WORKGROUP", "isDomainMember": False, "os": "Unknown" }
     
     try:
-        rc, out, err = run_ps_command("psinfo", ip, email, pwd, ["-d"], timeout=20) # 20s timeout for single device
+        rc, out, err = run_ps_command("psinfo", ip, username, user_domain, pwd, ["-d"], timeout=20) # 20s timeout for single device
         if rc == 0 and out:
             psinfo_data = parse_psinfo_output(out)
             if psinfo_data and psinfo_data.get('psinfo'):
@@ -302,3 +302,4 @@ def api_device_details():
 
 
     
+

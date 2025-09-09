@@ -24,13 +24,14 @@ def require_login():
 def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     try:
         if not cmd:
             return json_result(2, "", "Command is required")
         # For commands with spaces, we need to handle them correctly
         cmd_args = ["cmd", "/c", cmd]
         # PsExec doesn't need auth args if the server is running with domain admin rights
-        rc, out, err = run_ps_command("psexec", ip, None, None, cmd_args, timeout=180)
+        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     except Exception as e:
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
@@ -39,26 +40,27 @@ def api_psexec():
 @pstools_bp.route('/api/psservice', methods=['POST'])
 def api_psservice():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip = data.get("ip","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     svc, action = data.get("svc",""), data.get("action","query")
     if not svc and action != "query":
         return json_result(2, "", "Service name is required for start/stop/restart")
     try:
         if action == "restart":
             # First stop
-            rc1, out1, err1 = run_ps_command("psservice", ip, email, pwd, ["stop", svc], timeout=60)
+            rc1, out1, err1 = run_ps_command("psservice", ip, user, domain, pwd, ["stop", svc], timeout=60)
             # Then start, regardless of stop result
-            rc, out, err = run_ps_command("psservice", ip, email, pwd, ["start", svc], timeout=60)
+            rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, ["start", svc], timeout=60)
             out = f"--- STOP ATTEMPT ---\n{out1}\n\n--- START ATTEMPT ---\n{out}"
             err = f"--- STOP ATTEMPT ---\n{err1}\n\n--- START ATTEMPT ---\n{err}"
             structured_data = None # No structured data for actions
         elif action in ("start", "stop"):
              final_args = [action, svc]
-             rc, out, err = run_ps_command("psservice", ip, email, pwd, final_args, timeout=60)
+             rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, final_args, timeout=60)
              structured_data = None
         elif action == "query":
             final_args = [action] + ([svc] if svc else [])
-            rc, out, err = run_ps_command("psservice", ip, email, pwd, final_args, timeout=120)
+            rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, final_args, timeout=120)
             structured_data = None
             if rc == 0 and out:
                 structured_data = parse_psservice_output(out)
@@ -73,9 +75,10 @@ def api_psservice():
 @pstools_bp.route('/api/pslist', methods=['POST'])
 def api_pslist():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip = data.get("ip","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     try:
-        rc, out, err = run_ps_command("pslist", ip, email, pwd, ["-x"], timeout=120)
+        rc, out, err = run_ps_command("pslist", ip, user, domain, pwd, ["-x"], timeout=120)
     except Exception as e:
         return json_result(2, "", str(e))
 
@@ -88,11 +91,12 @@ def api_pslist():
 @pstools_bp.route('/api/pskill', methods=['POST'])
 def api_pskill():
     data = request.get_json() or {}
-    ip, email, pwd, proc = data.get("ip",""), session.get("email"), session.get("password"), data.get("proc","")
+    ip, proc = data.get("ip",""), data.get("proc","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
     try:
-        rc, out, err = run_ps_command("pskill", ip, email, pwd, [proc], timeout=60)
+        rc, out, err = run_ps_command("pskill", ip, user, domain, pwd, [proc], timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
@@ -101,9 +105,10 @@ def api_pskill():
 @pstools_bp.route('/api/psloglist', methods=['POST'])
 def api_psloglist():
     data = request.get_json() or {}
-    ip, email, pwd, kind = data.get("ip",""), session.get("email"), session.get("password"), data.get("kind","system")
+    ip, kind = data.get("ip",""), data.get("kind","system")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     try:
-        rc, out, err = run_ps_command("psloglist", ip, email, pwd, ["-d", "1", kind], timeout=120)
+        rc, out, err = run_ps_command("psloglist", ip, user, domain, pwd, ["-d", "1", kind], timeout=120)
     except Exception as e:
         return json_result(2, "", str(e))
 
@@ -117,9 +122,10 @@ def api_psloglist():
 @pstools_bp.route('/api/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip = data.get("ip","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     try:
-        rc, out, err = run_ps_command("psinfo", ip, email, pwd, ["-d"], timeout=120)
+        rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
     except Exception as e:
         return json_result(2, "", str(e))
     
@@ -132,9 +138,10 @@ def api_psinfo():
 @pstools_bp.route('/api/psloggedon', methods=['POST'])
 def api_psloggedon():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip = data.get("ip","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     try:
-        rc, out, err = run_ps_command("psloggedon", ip, email, pwd, [], timeout=60)
+        rc, out, err = run_ps_command("psloggedon", ip, user, domain, pwd, [], timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
 
@@ -147,12 +154,13 @@ def api_psloggedon():
 @pstools_bp.route('/api/psshutdown', methods=['POST'])
 def api_psshutdown():
     data = request.get_json() or {}
-    ip, email, pwd, action = data.get("ip",""), session.get("email"), session.get("password"), data.get("action","restart")
+    ip, action = data.get("ip",""), data.get("action","restart")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     flag = {"restart": "-r", "shutdown": "-s", "logoff": "-l"}.get(action)
     if not flag:
         return json_result(2, "", "Invalid power action")
     try:
-        rc, out, err = run_ps_command("psshutdown", ip, email, pwd, [flag, "-t", "0", "-n"], timeout=60)
+        rc, out, err = run_ps_command("psshutdown", ip, user, domain, pwd, [flag, "-t", "0", "-n"], timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
@@ -160,9 +168,10 @@ def api_psshutdown():
 @pstools_bp.route('/api/psfile', methods=['POST'])
 def api_psfile():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip = data.get("ip","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     try:
-        rc, out, err = run_ps_command("psfile", ip, email, pwd, [], timeout=60)
+        rc, out, err = run_ps_command("psfile", ip, user, domain, pwd, [], timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
     
@@ -175,9 +184,10 @@ def api_psfile():
 @pstools_bp.route('/api/psgetsid', methods=['POST'])
 def api_psgetsid():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip = data.get("ip","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     try:
-        rc, out, err = run_ps_command("psgetsid", ip, email, pwd, [], timeout=60)
+        rc, out, err = run_ps_command("psgetsid", ip, user, domain, pwd, [], timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
@@ -185,12 +195,13 @@ def api_psgetsid():
 @pstools_bp.route('/api/pspasswd', methods=['POST'])
 def api_pspasswd():
     data = request.get_json() or {}
-    ip, email, pwd = data.get("ip",""), session.get("email"), session.get("password")
+    ip = data.get("ip","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     target_user, new_pass = data.get("targetUser",""), data.get("newpass","")
     if not target_user or not new_pass:
         return json_result(2, "", "Target user and new password are required")
     try:
-        rc, out, err = run_ps_command("pspasswd", ip, email, pwd, [target_user, new_pass], timeout=60)
+        rc, out, err = run_ps_command("pspasswd", ip, user, domain, pwd, [target_user, new_pass], timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
@@ -198,11 +209,12 @@ def api_pspasswd():
 @pstools_bp.route('/api/pssuspend', methods=['POST'])
 def api_pssuspend():
     data = request.get_json() or {}
-    ip, email, pwd, proc = data.get("ip",""), session.get("email"), session.get("password"), data.get("proc","")
+    ip, proc = data.get("ip",""), data.get("proc","")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
     try:
-        rc, out, err = run_ps_command("pssuspend", ip, email, pwd, [proc], timeout=60)
+        rc, out, err = run_ps_command("pssuspend", ip, user, domain, pwd, [proc], timeout=60)
     except Exception as e:
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
@@ -210,7 +222,7 @@ def api_pssuspend():
 @pstools_bp.route('/api/psping', methods=['POST'])
 def api_psping():
     data = request.get_json() or {}
-    ip, user, pwd, extra = data.get('ip',''), session.get('user'), session.get('password'), data.get('extra','')
+    ip, extra = data.get('ip',''), data.get('extra','')
     try:
         # PsPing does not use -u/-p, it relies on the context. But we can target an IP.
         # It's better to run it locally and target the remote IP.
