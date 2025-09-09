@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   DownloadCloud,
   Siren,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,7 +46,7 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "../ui/badge";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../ui/alert-dialog";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -76,6 +77,7 @@ type ScanErrorState = {
     isError: boolean;
     title: string;
     message: string;
+    details?: string;
     errorCode?: 'BETTERCAP_NOT_FOUND' | 'BETTERCAP_FAILED';
 }
 
@@ -91,7 +93,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [scanError, setScanError] = React.useState<ScanErrorState | null>(null);
 
   const [gpUpdateStatus, setGpUpdateStatus] = React.useState<Record<string, GpUpdateResult>>({});
-  const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, content: string}>({ isOpen: false, content: '' });
+  const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, title: string, content: string}>({ isOpen: false, title: '', content: '' });
 
 
   React.useEffect(() => {
@@ -193,10 +195,11 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             setScanError({
                 isError: true,
                 title: data.error || "Scan Error",
-                message: data.details || `The scan failed due to an unexpected server error.`,
+                message: data.message || `The scan failed due to an unexpected server error.`,
+                details: data.details,
                 errorCode: data.error_code
             });
-            toast({ variant: "destructive", title: data.error || "Scan Failed", description: data.details });
+            toast({ variant: "destructive", title: data.error || "Scan Failed", description: data.message });
             return; 
         }
 
@@ -312,7 +315,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                     <TooltipTrigger asChild>
                          <Button variant="ghost" size="icon" className="h-auto w-auto text-red-500 hover:text-red-500" onClick={(e) => {
                               e.stopPropagation();
-                              setErrorDialog({ isOpen: true, content: gpUpdateStatus[device.id]?.output || "No error details available." });
+                              setErrorDialog({ isOpen: true, title: "GPUpdate Execution Failed", content: gpUpdateStatus[device.id]?.output || "No error details available." });
                           }}>
                             <HelpCircle className="h-5 w-5" />
                           </Button>
@@ -352,26 +355,34 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <AlertTitle className="mt-4 text-lg">{scanError.title}</AlertTitle>
                 <AlertDescription className="mt-2 max-w-md space-y-4">
                     <p>{scanError.message}</p>
-                    {scanError.errorCode === 'BETTERCAP_NOT_FOUND' && (
-                         <div className="flex justify-center items-center gap-4">
-                             <Button asChild>
-                               <a href="https://github.com/bettercap/bettercap/releases" target="_blank" rel="noopener noreferrer">
-                                   <DownloadCloud className="mr-2 h-4 w-4" />
-                                   Download Bettercap
-                               </a>
-                             </Button>
-                             <Button asChild variant="secondary">
-                                <Link href="/dashboard/help">View Instructions</Link>
-                             </Button>
-                         </div>
-                    )}
-                     {scanError.errorCode === 'BETTERCAP_FAILED' && (
-                         <div className="flex justify-center items-center gap-4">
-                             <Button asChild variant="secondary">
-                                <Link href="/dashboard/help">Troubleshooting Guide</Link>
-                             </Button>
-                         </div>
-                    )}
+                    <div className="flex justify-center items-center gap-4">
+                        {scanError.errorCode === 'BETTERCAP_NOT_FOUND' && (
+                             <>
+                                <Button asChild>
+                                <a href="https://github.com/bettercap/bettercap/releases" target="_blank" rel="noopener noreferrer">
+                                    <DownloadCloud className="mr-2 h-4 w-4" />
+                                    Download Bettercap
+                                </a>
+                                </Button>
+                                <Button asChild variant="secondary">
+                                    <Link href="/dashboard/help">View Instructions</Link>
+                                </Button>
+                             </>
+                        )}
+                        {scanError.errorCode === 'BETTERCAP_FAILED' && (
+                            <>
+                                <Button asChild variant="secondary">
+                                    <Link href="/dashboard/help">Troubleshooting Guide</Link>
+                                </Button>
+                                {scanError.details && (
+                                    <Button onClick={() => setErrorDialog({isOpen: true, title: "Bettercap Error Log", content: scanError.details ?? "No details available."})}>
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        Show Error Log
+                                    </Button>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </AlertDescription>
             </Alert>
         )
@@ -507,12 +518,12 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       {renderContent()}
     </div>
 
-    <AlertDialog open={errorDialog.isOpen} onOpenChange={(open) => !open && setErrorDialog({isOpen: false, content:''})}>
-        <AlertDialogContent>
+    <AlertDialog open={errorDialog.isOpen} onOpenChange={(open) => !open && setErrorDialog({isOpen: false, title:'', content:''})}>
+        <AlertDialogContent className="max-w-2xl">
             <AlertDialogHeader>
-                <AlertDialogTitle>GPUpdate Execution Failed</AlertDialogTitle>
+                <AlertDialogTitle>{errorDialog.title}</AlertDialogTitle>
                 <AlertDialogDescription>
-                    The `gpupdate /force` command failed. Here is the output from the remote machine. Common issues include firewall blocks or incorrect permissions.
+                    This is the raw error output. This information can help diagnose issues with permissions, firewalls, or application setup.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="my-4">
@@ -525,7 +536,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 />
             </div>
             <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setErrorDialog({isOpen: false, content:''})}>Close</AlertDialogCancel>
+                <AlertDialogCancel onClick={() => setErrorDialog({isOpen: false, title:'', content:''})}>Close</AlertDialogCancel>
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>

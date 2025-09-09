@@ -97,7 +97,7 @@ def run_bettercap(target_range):
     """Runs bettercap to discover devices and returns a list of hosts."""
     bettercap_path = get_pstools_path("bettercap.exe")
     if not os.path.exists(bettercap_path):
-        raise FileNotFoundError("bettercap.exe not found")
+        raise FileNotFoundError("bettercap.exe not found in the application directory.")
 
     # Command to start network probing, wait, show results, and quit.
     # The output is saved to a temp json file.
@@ -106,50 +106,59 @@ def run_bettercap(target_range):
         bettercap_path,
         "-no-colors",
         "-eval",
+        # Set target, turn on probing, wait 5s for discovery, output to JSON, then quit.
         f"set net.probe.targets {target_range}; net.probe on; sleep 5; net.show -json-file {temp_output_file}; q"
     ]
 
-    try:
-        proc = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=180, # 3 minute timeout
-            check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
+    # Use subprocess.run to execute the command
+    proc = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=180, # 3 minute timeout
+        creationflags=subprocess.CREATE_NO_WINDOW
+    )
 
-        if os.path.exists(temp_output_file):
+    # Check for errors during execution
+    if proc.returncode != 0:
+        stderr = proc.stderr.lower()
+        if "could not find any pcap" in stderr or "npcap" in stderr:
+            raise RuntimeError("Bettercap requires Npcap to be installed. Please install it and try again.", stderr)
+        # For any other error, raise a generic error with the stderr content
+        raise RuntimeError(f"Bettercap execution failed.", stderr or proc.stdout)
+
+    # Process the JSON output if it exists
+    if os.path.exists(temp_output_file):
+        try:
             with open(temp_output_file, 'r') as f:
                 scan_data = json.load(f)
             os.remove(temp_output_file) # Clean up the file
             
             online_hosts = []
             for host in scan_data.get('hosts', []):
-                 if host['ip'] and host['mac']: # Ensure essential data exists
-                     online_hosts.append({
+                    if host.get('ip') and host.get('mac'): # Ensure essential data exists
+                        online_hosts.append({
                         "ip": host['ip'],
                         "mac": host['mac'],
                         "hostname": host.get('hostname', 'Unknown') or 'Unknown'
-                     })
+                        })
             return online_hosts
-        else:
-             # Fallback parsing in case json output fails for some reason
-            return parse_bettercap_output(proc.stdout)
-
-    except FileNotFoundError:
-        # This is redundant due to the check above, but good practice
-        raise
-    except subprocess.CalledProcessError as e:
-        # This can happen if bettercap can't find npcap
-        stderr = e.stderr.lower()
-        if "could not find any pcap" in stderr or "npcap" in stderr:
-            raise RuntimeError("Bettercap requires Npcap to be installed. Please install it and try again.")
-        raise RuntimeError(f"Bettercap execution failed: {e.stderr}")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("Bettercap scan timed out after 3 minutes.")
-    except Exception as e:
-        raise RuntimeError(f"An unexpected error occurred during Bettercap scan: {str(e)}")
+        except json.JSONDecodeError:
+            # If the JSON is malformed, fall back to parsing stdout if available
+            if proc.stdout:
+                return parse_bettercap_output(proc.stdout)
+            raise RuntimeError("Bettercap produced a malformed JSON output file.", proc.stdout)
+        finally:
+            if os.path.exists(temp_output_file):
+                os.remove(temp_output_file)
+    else:
+        # Fallback to parsing stdout if JSON file wasn't created
+        if proc.stdout:
+            parsed_hosts = parse_bettercap_output(proc.stdout)
+            if parsed_hosts:
+                return parsed_hosts
+        # If we reach here, the command ran but produced no usable output
+        raise RuntimeError("Bettercap ran but did not produce any output.", proc.stderr or proc.stdout)
 
 
 @network_bp.route('/api/discover-devices', methods=['POST'])
@@ -172,13 +181,26 @@ def api_discover_devices():
         return jsonify({
             "ok": False, 
             "error": "Bettercap Not Found",
+            "message": "bettercap.exe was not found in the pstools_app directory.",
             "error_code": "BETTERCAP_NOT_FOUND",
-            "details": "bettercap.exe was not found in the pstools_app directory. Please download it and place it there."
+            "details": "Please download the Bettercap Windows binary from the official GitHub releases page and place the 'bettercap.exe' file in the 'pstools_app' folder."
         }), 500
-    except Exception as e:
+    except RuntimeError as e:
+        # This will now catch our custom errors from run_bettercap
+        details = e.args[1] if len(e.args) > 1 else str(e)
         return jsonify({
             "ok": False, 
             "error": "Bettercap Scan Failed",
+            "message": e.args[0], # The main error message
+            "error_code": "BETTERCAP_FAILED",
+            "details": details
+        }), 500
+    except Exception as e:
+        # Catch any other unexpected errors
+        return jsonify({
+            "ok": False, 
+            "error": "Unexpected Scan Error",
+            "message": "An unexpected error occurred during the scan.",
             "error_code": "BETTERCAP_FAILED",
             "details": str(e)
         }), 500
@@ -229,3 +251,4 @@ def api_device_details():
     
 
     
+
