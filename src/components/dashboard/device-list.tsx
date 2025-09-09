@@ -75,8 +75,12 @@ type ScanErrorState = {
     isError: boolean;
     title: string;
     message: string;
-    isSetupError?: boolean; // Generic setup error for masscan, npcap etc.
+    isSetupError?: boolean;
 }
+
+// Direct link to the latest known Windows release of Masscan
+const MASSCAN_DOWNLOAD_URL = "https://github.com/robertdavidgraham/masscan/archive/refs/heads/master.zip";
+
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isScanning, setIsScanning] = React.useState(false);
@@ -357,12 +361,20 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
              <Alert variant="destructive" className="h-80 flex flex-col items-center justify-center text-center">
                 <ShieldAlert className="h-12 w-12" />
                 <AlertTitle className="mt-4 text-lg">{scanError.title}</AlertTitle>
-                <AlertDescription className="mt-2 max-w-md">
-                    {scanError.message}
+                <AlertDescription className="mt-2 max-w-md space-y-4">
+                    <p>{scanError.message}</p>
                     {scanError.isSetupError && (
-                         <Button asChild variant="link" className="text-destructive">
-                           <Link href="/dashboard/help">Click here for setup instructions</Link>
-                         </Button>
+                         <div className="flex justify-center items-center gap-4">
+                             <Button asChild>
+                               <a href={MASSCAN_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+                                   <DownloadCloud className="mr-2 h-4 w-4" />
+                                   Download Masscan
+                               </a>
+                             </Button>
+                             <Button asChild variant="secondary">
+                                <Link href="/dashboard/help">View Instructions</Link>
+                             </Button>
+                         </div>
                     )}
                 </AlertDescription>
             </Alert>
@@ -524,5 +536,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
+
+    
 
     
