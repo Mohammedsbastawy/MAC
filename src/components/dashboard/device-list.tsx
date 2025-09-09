@@ -139,39 +139,50 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   };
 
 
-  const fetchDeviceDetails = React.useCallback(async (ip: string) => {
+  const fetchDeviceDetails = React.useCallback(async (deviceToUpdate: Device) => {
+    // Set loading state for the specific device
+    setDevices(prev => prev.map(d => d.id === deviceToUpdate.id ? { ...d, isLoadingDetails: true } : d));
+
     try {
         const res = await fetch('/api/device-details', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip }),
+            body: JSON.stringify({ ip: deviceToUpdate.ipAddress }),
         });
         
         const details = await res.json().catch(() => ({ok: false, os: `Non-JSON response`}));
         
+        const updatedDevice = { 
+            ...deviceToUpdate, 
+            isLoadingDetails: false, 
+            os: details.os || 'Fetch failed', 
+            domain: details.domain, 
+            isDomainMember: details.isDomainMember 
+        };
+
         setDevices(prev => 
             prev.map(d => 
-                d.ipAddress === ip 
-                ? { ...d, 
-                    isLoadingDetails: false, 
-                    os: details.os || 'Fetch failed', 
-                    domain: details.domain, 
-                    isDomainMember: details.isDomainMember 
-                  } 
+                d.id === deviceToUpdate.id 
+                ? updatedDevice
                 : d
             )
         );
+        // Pass the fully updated device to the selection handler
+        onSelectDevice(updatedDevice);
+
     } catch (e) {
-        console.error(`Error fetching details for ${ip}:`, e);
+        console.error(`Error fetching details for ${deviceToUpdate.ipAddress}:`, e);
+         const updatedDevice = { ...deviceToUpdate, isLoadingDetails: false, os: "Error fetching details" };
          setDevices(prev => 
             prev.map(d => 
-                d.ipAddress === ip 
-                ? { ...d, isLoadingDetails: false, os: "Error fetching details" } 
+                d.id === deviceToUpdate.id 
+                ? updatedDevice
                 : d
             )
         );
+        onSelectDevice(updatedDevice);
     }
-  }, []);
+  }, [onSelectDevice]);
 
   const handleScan = async (manualRouterMac: string | null = null) => {
     if (!selectedCidr) {
@@ -237,25 +248,20 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             macAddress: d.mac || "-",
             status: 'online',
             type: determineDeviceType(d.hostname),
-            os: "Loading...",
+            os: "N/A",
             lastSeen: 'Now',
-            domain: "Loading...",
+            domain: "N/A",
             isDomainMember: false,
-            isLoadingDetails: true,
+            isLoadingDetails: false, // Set to false initially
         }));
         
         if (initialDevices.length === 0) {
             toast({ title: "Scan Complete", description: "No online devices were found on this network."});
         } else {
-            toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices. Now fetching details...`});
+            toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices.`});
         }
         
         setDevices(initialDevices);
-
-        // Now, fetch details for each device.
-        initialDevices.forEach(device => {
-            fetchDeviceDetails(device.ipAddress);
-        });
 
     } catch (err: any) {
         const errorMessage = err.message || "An unknown client-side error occurred.";
@@ -264,6 +270,16 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         console.error(err);
     } finally {
         setIsScanning(false);
+    }
+  };
+
+  const handleDeviceSelect = (device: Device) => {
+    // If the device OS is N/A, it means we haven't fetched details yet.
+    if (device.os === 'N/A' || device.os === 'Loading...') {
+      fetchDeviceDetails(device);
+    } else {
+      // Details are already loaded, just open the panel.
+      onSelectDevice(device);
     }
   };
   
@@ -455,7 +471,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           return (
             <Card
               key={device.id}
-              onClick={() => onSelectDevice(device)}
+              onClick={() => handleDeviceSelect(device)}
               className="cursor-pointer transition-all hover:shadow-md hover:-translate-y-1 flex flex-col"
             >
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
@@ -490,8 +506,12 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                         </Badge>
                     ) : (
                         <Badge variant="secondary">
-                            <Briefcase className="mr-1 h-3 w-3" />
-                            Workgroup
+                             {device.domain === 'WORKGROUP' || device.domain === 'N/A' ? (
+                                <Briefcase className="mr-1 h-3 w-3" />
+                             ) : (
+                                <ShieldAlert className="mr-1 h-3 w-3" />
+                             )}
+                            {device.domain}
                         </Badge>
                     )
                 )}
@@ -608,3 +628,5 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
+
+    
