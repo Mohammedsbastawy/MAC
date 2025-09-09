@@ -12,7 +12,7 @@ from pstools_app.utils.helpers import is_valid_ip, get_pstools_path, run_ps_comm
 # Try to import scapy, but don't fail if it's not there.
 # We will check for its availability in the route.
 try:
-    from scapy.all import ARP, Ether, srp
+    from scapy.all import ARP, Ether, srp, conf
     SCAPY_AVAILABLE = True
 except ImportError:
     SCAPY_AVAILABLE = False
@@ -69,53 +69,60 @@ def api_network_interfaces():
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
-    Performs a fast ARP scan to discover online devices and returns them immediately.
+    Performs a fast ARP scan using Scapy to discover online devices.
+    Returns immediately with the list of discovered devices.
     Details for each device are fetched separately by the frontend.
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
+
     if not scan_cidr:
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
-    online_hosts = []
+    if not SCAPY_AVAILABLE:
+        return jsonify({
+            "ok": False, 
+            "error": "Scapy library not found",
+            "error_code": "SCAPY_SETUP_REQUIRED",
+            "details": "The scapy library is not installed on the server. Please run 'pip install scapy'."
+        }), 500
+
     try:
-        network = ipaddress.ip_network(scan_cidr)
-    except ValueError:
-        return jsonify({"ok": False, "error": "Invalid CIDR format."}), 400
+        # Configure scapy to use Npcap/WinPcap for Windows
+        conf.use_pcap = True
+        
+        arp_request = ARP(pdst=scan_cidr)
+        broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
+        arp_request_broadcast = broadcast / arp_request
+        
+        # srp returns a tuple of (answered_packets, unanswered_packets)
+        answered_list = srp(arp_request_broadcast, timeout=5, verbose=False)[0]
 
-    # Fallback to Ping Sweep - it's more reliable without external dependencies/permissions.
-    def ping_ip(ip):
-        try:
-            ip_str = str(ip)
-            # Use subprocess.run for better control and reliability
-            result = subprocess.run(
-                ["ping", "-n", "1", "-w", "200", ip_str],
-                capture_output=True,
-                text=True,
-                timeout=1,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            # Check for TTL in the output, which is a reliable indicator of a successful ping
-            if "TTL=" in result.stdout:
-                return ip_str
-        except (subprocess.TimeoutExpired, Exception):
-            pass
-        return None
+        online_hosts = []
+        for sent, received in answered_list:
+            hostname = "Unknown"
+            try:
+                hostname = socket.gethostbyaddr(received.psrc)[0]
+            except socket.herror:
+                pass
+            online_hosts.append({"ip": received.psrc, "mac": received.hwsrc, "hostname": hostname})
 
-    with ThreadPoolExecutor(max_workers=100) as executor:
-        future_to_ip = {executor.submit(ping_ip, ip): ip for ip in network.hosts()}
-        for future in as_completed(future_to_ip):
-            result_ip = future.result()
-            if result_ip:
-                hostname = "Unknown"
-                try:
-                    hostname = socket.gethostbyaddr(result_ip)[0]
-                except socket.herror:
-                    pass
-                online_hosts.append({"ip": result_ip, "mac": "N/A", "hostname": hostname})
+        sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
+        return jsonify({"ok": True, "devices": sorted_hosts})
 
-    sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
-    return jsonify({"ok": True, "devices": sorted_hosts})
+    except Exception as e:
+        # This is the crucial part. Scapy often fails on Windows without Npcap or admin rights.
+        error_message = str(e)
+        details = "An unexpected error occurred during the ARP scan."
+        if "No such device" in error_message or "dnet" in error_message.lower() or "WinPcap" in error_message:
+             details = "Scapy failed. This usually means Npcap is not installed or the server was not run with Administrator privileges. Please install Npcap and try again."
+        
+        return jsonify({
+            "ok": False, 
+            "error": "Advanced Scan Failed",
+            "error_code": "SCAPY_SETUP_REQUIRED",
+            "details": details
+        }), 500
 
 
 @network_bp.route('/api/device-details', methods=['POST'])

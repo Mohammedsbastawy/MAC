@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   XCircle,
   HelpCircle,
+  ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +47,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import Link from "next/link";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -68,6 +70,13 @@ type GpUpdateResult = {
     output?: string;
 };
 
+type ScanErrorState = {
+    isError: boolean;
+    title: string;
+    message: string;
+    isScapyError?: boolean;
+}
+
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isScanning, setIsScanning] = React.useState(false);
   const [isGpUpdating, setIsGpUpdating] = React.useState(false);
@@ -77,6 +86,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
   const [selectedCidr, setSelectedCidr] = React.useState<string | undefined>();
   const [networkError, setNetworkError] = React.useState<string | null>(null);
+  const [scanError, setScanError] = React.useState<ScanErrorState | null>(null);
 
   const [gpUpdateStatus, setGpUpdateStatus] = React.useState<Record<string, GpUpdateResult>>({});
   const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, content: string}>({ isOpen: false, content: '' });
@@ -165,61 +175,68 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setIsScanning(true);
     setDevices([]);
     setGpUpdateStatus({});
-    toast({ title: "Scan Initiated", description: `Performing scan on ${selectedCidr}...`});
+    setScanError(null);
+    toast({ title: "Scan Initiated", description: `Performing ARP scan on ${selectedCidr}...` });
 
     try {
-      const res = await fetch("/api/discover-devices", { 
-          method: "POST",
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cidr: selectedCidr })
-      });
-      
-      if (!res.ok) {
-        // IMPORTANT: Only read the body ONCE.
-        const responseBody = await res.text();
-        let errorMsg = `Scan failed with status: ${res.status}`;
-        try {
-            // Try to parse it as JSON
-            const errorData = JSON.parse(responseBody);
-            errorMsg = errorData.error || errorMsg;
-        } catch (e) {
-             // If parsing fails, use the raw text
-             errorMsg = responseBody || errorMsg;
+        const res = await fetch("/api/discover-devices", { 
+            method: "POST",
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cidr: selectedCidr })
+        });
+        
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+            if (data.error_code === 'SCAPY_SETUP_REQUIRED') {
+                 setScanError({
+                    isError: true,
+                    title: "Advanced Scan Failed: Configuration Required",
+                    message: data.details || "Scapy requires Npcap to be installed and the server to be run with Administrator privileges.",
+                    isScapyError: true
+                });
+            } else {
+                 setScanError({
+                    isError: true,
+                    title: data.error || "Scan Error",
+                    message: data.details || `The scan failed due to an unexpected server error.`
+                });
+            }
+            toast({ variant: "destructive", title: data.error || "Scan Failed", description: data.details });
+            return; 
         }
-        throw new Error(errorMsg);
-      }
 
-      const data = await res.json();
+        const initialDevices: Device[] = data.devices.map((d: any) => ({
+            id: d.ip,
+            name: d.hostname === "Unknown" ? d.ip : d.hostname,
+            ipAddress: d.ip,
+            macAddress: d.mac || "-",
+            status: 'online',
+            type: determineDeviceType(d.hostname),
+            os: "Loading...",
+            lastSeen: 'Now',
+            domain: "Loading...",
+            isDomainMember: false,
+            isLoadingDetails: true,
+        }));
+        
+        if (initialDevices.length === 0) {
+            toast({ title: "Scan Complete", description: "No online devices were found on this network."});
+        } else {
+            toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices. Now fetching details...`});
+        }
+        
+        setDevices(initialDevices);
 
-      const initialDevices: Device[] = data.devices.map((d: any) => ({
-          id: d.ip,
-          name: d.hostname === "Unknown" ? d.ip : d.hostname,
-          ipAddress: d.ip,
-          macAddress: d.mac || "-",
-          status: 'online',
-          type: determineDeviceType(d.hostname),
-          os: "Loading...",
-          lastSeen: 'Now',
-          domain: "Loading...",
-          isDomainMember: false,
-          isLoadingDetails: true,
-      }));
-      
-      if (initialDevices.length === 0) {
-        toast({ title: "Scan Complete", description: "No online devices were found on this network."});
-      } else {
-        toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices. Now fetching details...`});
-      }
-      
-      setDevices(initialDevices);
-
-      // Now, fetch details for each device.
-      initialDevices.forEach(device => {
-        fetchDeviceDetails(device.ipAddress);
-      });
+        // Now, fetch details for each device.
+        initialDevices.forEach(device => {
+            fetchDeviceDetails(device.ipAddress);
+        });
 
     } catch (err: any) {
-        toast({ variant: "destructive", title: "Scan Error", description: err.message });
+        const errorMessage = err.message || "An unknown client-side error occurred.";
+        setScanError({ isError: true, title: "Client Error", message: errorMessage });
+        toast({ variant: "destructive", title: "Scan Error", description: errorMessage });
         console.error(err);
     } finally {
         setIsScanning(false);
@@ -334,6 +351,23 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         )
     }
 
+    if (scanError?.isError) {
+         return (
+             <Alert variant="destructive" className="h-80 flex flex-col items-center justify-center text-center">
+                <ShieldAlert className="h-12 w-12" />
+                <AlertTitle className="mt-4 text-lg">{scanError.title}</AlertTitle>
+                <AlertDescription className="mt-2 max-w-md">
+                    {scanError.message}
+                    {scanError.isScapyError && (
+                         <Button asChild variant="link" className="text-destructive">
+                           <Link href="/dashboard/help">Click here for troubleshooting steps</Link>
+                         </Button>
+                    )}
+                </AlertDescription>
+            </Alert>
+        )
+    }
+
     if (isScanning && devices.length === 0) {
       return (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -362,7 +396,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold text-foreground">No devices found</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Select a network and click "Discover Devices" to begin scanning.
+            Select a network and click "Discover Devices" to begin the ARP scan.
           </p>
         </div>
       );
@@ -489,5 +523,3 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
-
-    

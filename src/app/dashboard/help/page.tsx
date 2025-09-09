@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ShieldAlert, ShieldCheck, Siren } from "lucide-react"
+import { ExternalLink, ShieldAlert, ShieldCheck, Siren } from "lucide-react"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -42,7 +42,31 @@ export default function HelpPage() {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <ShieldCheck /> Enabling Remote Registry
+                        <ShieldCheck /> Prerequisite 1: Npcap for Advanced Scanning
+                    </CardTitle>
+                    <CardDescription>
+                       This application uses advanced ARP scans for fast and reliable device discovery. This requires the Npcap packet capture library to be installed on the machine running the backend server.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <p>Npcap is the Nmap Project's packet sniffing library for Windows. It is required for the `scapy` library to access network interfaces.</p>
+                     <a href="https://npcap.com/#download" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2">
+                        Download Npcap <ExternalLink className="ml-2 h-4 w-4" />
+                     </a>
+                     <Alert>
+                        <ShieldAlert className="h-4 w-4" />
+                        <AlertTitle>Important Installation Note</AlertTitle>
+                        <AlertDescription>
+                            During installation, ensure you check the box for **"Install Npcap in WinPcap API-compatible Mode"**. This is required for `scapy` to detect it correctly.
+                        </AlertDescription>
+                    </Alert>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-2xl">
+                        <ShieldCheck /> Prerequisite 2: Enabling Remote Registry
                     </CardTitle>
                     <CardDescription>
                         This service is essential for PsInfo and other tools to gather system information.
