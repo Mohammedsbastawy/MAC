@@ -88,9 +88,6 @@ def api_discover_devices():
         }), 500
 
     try:
-        # Configure scapy to use Npcap/WinPcap for Windows
-        conf.use_pcap = True
-        
         arp_request = ARP(pdst=scan_cidr)
         broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
         arp_request_broadcast = broadcast / arp_request
@@ -114,7 +111,7 @@ def api_discover_devices():
         # This is the crucial part. Scapy often fails on Windows without Npcap or admin rights.
         error_message = str(e)
         details = "An unexpected error occurred during the ARP scan."
-        if "No such device" in error_message or "dnet" in error_message.lower() or "WinPcap" in error_message:
+        if "No such device" in error_message or "dnet" in error_message.lower() or "WinPcap" in error_message or "Npcap" in error_message:
              details = "Scapy failed. This usually means Npcap is not installed or the server was not run with Administrator privileges. Please install Npcap and try again."
         
         return jsonify({
