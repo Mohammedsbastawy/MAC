@@ -9,6 +9,7 @@ export type Device = {
   lastSeen: string;
   domain: string;
   isDomainMember: boolean;
+  isLoadingDetails?: boolean;
 };
 
 export type NetworkInterface = {

@@ -18,6 +18,7 @@ import {
   Zap,
   CheckCircle2,
   XCircle,
+  HelpCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,7 +59,7 @@ type DeviceListProps = {
   onSelectDevice: (device: Device) => void;
 };
 
-const POLLING_INTERVAL = 2000;
+const POLLING_INTERVAL = 5000; // Increased polling interval
 
 type GpUpdateStatus = 'idle' | 'loading' | 'success' | 'error';
 type GpUpdateResult = {
@@ -70,10 +71,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isScanning, setIsScanning] = React.useState(false);
   const [isGpUpdating, setIsGpUpdating] = React.useState(false);
   const [devices, setDevices] = React.useState<Device[]>([]);
-  const [scanCount, setScanCount] = React.useState(0);
   const { toast } = useToast();
-  const pollingTimer = React.useRef<NodeJS.Timeout | null>(null);
-
+  
   const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
   const [selectedInterface, setSelectedInterface] = React.useState<NetworkInterface | null>(null);
   const [networkError, setNetworkError] = React.useState<string | null>(null);
@@ -117,52 +116,39 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     return "unknown";
   };
 
-  const stopPolling = React.useCallback(() => {
-    if (pollingTimer.current) {
-      clearInterval(pollingTimer.current);
-      pollingTimer.current = null;
-    }
-    setIsScanning(false);
-  }, []);
 
-  const pollScanStatus = React.useCallback(async () => {
+  const fetchDeviceDetails = React.useCallback(async (ip: string) => {
     try {
-      const res = await fetch("/api/arp-scan-status", { method: "POST" });
-      const data = await res.json();
-      if (data.ok) {
-        setScanCount(data.count);
-        const fetchedDevices: Device[] = data.devices.map((d: any, i: number) => ({
-            id: d.ip,
-            name: d.hostname === "Unknown" ? d.ip : d.hostname,
-            ipAddress: d.ip,
-            macAddress: d.mac,
-            status: 'online',
-            type: determineDeviceType(d.hostname),
-            os: d.os || "Unknown",
-            lastSeen: 'Now',
-            domain: d.domain,
-            isDomainMember: d.isDomainMember,
-        }));
-        setDevices(fetchedDevices);
-
-        if (!data.running) {
-          stopPolling();
-          if (data.error) {
-              toast({ variant: "destructive", title: "Scan Finished with Error", description: data.error });
-          } else {
-              toast({ title: "Scan Complete", description: `Found ${data.devices.length} devices.` });
-          }
+        const res = await fetch('/api/device-details', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip }),
+        });
+        if (!res.ok) {
+            // Don't toast error for single device detail failure to avoid spam
+            console.error(`Failed to fetch details for ${ip}`);
+            return;
         }
-      } else {
-        stopPolling();
-        toast({ variant: "destructive", title: "Scan Error", description: data.error });
-      }
-    } catch (err) {
-      stopPolling();
-      toast({ variant: "destructive", title: "Scan Error", description: "Could not get scan status." });
+        const details = await res.json();
+        
+        setDevices(prev => 
+            prev.map(d => 
+                d.ipAddress === ip 
+                ? { ...d, ...details, isLoadingDetails: false, os: details.os, domain: details.domain, isDomainMember: details.isDomainMember } 
+                : d
+            )
+        );
+    } catch (e) {
+        console.error(`Error fetching details for ${ip}:`, e);
+         setDevices(prev => 
+            prev.map(d => 
+                d.ipAddress === ip 
+                ? { ...d, isLoadingDetails: false } 
+                : d
+            )
+        );
     }
-  }, [toast, stopPolling]);
-
+  }, []);
 
   const handleScan = async () => {
     if (!selectedInterface) {
@@ -172,65 +158,67 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
     setIsScanning(true);
     setDevices([]);
-    setScanCount(0);
     setGpUpdateStatus({});
 
     try {
-      if (pollingTimer.current) clearInterval(pollingTimer.current);
-      pollingTimer.current = setInterval(pollScanStatus, POLLING_INTERVAL);
-      
-      const res = await fetch("/api/arp-scan", { 
+      const res = await fetch("/api/discover-devices", { 
           method: "POST",
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cidr: selectedInterface.cidr })
       });
       
+      const data = await res.json();
+
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Failed to start scan.");
+      }
+
+      const initialDevices: Device[] = data.devices.map((d: any) => ({
+          id: d.ip,
+          name: d.hostname === "Unknown" ? d.ip : d.hostname,
+          ipAddress: d.ip,
+          macAddress: d.mac || "-",
+          status: 'online',
+          type: determineDeviceType(d.hostname),
+          os: "Loading...",
+          lastSeen: 'Now',
+          domain: "Loading...",
+          isDomainMember: false,
+          isLoadingDetails: true,
+      }));
+      
+      setDevices(initialDevices);
+      toast({ title: "Scan Initiated", description: `Found ${initialDevices.length} devices. Fetching details...`});
+
+      // Now, fetch details for each device.
+      for (const device of initialDevices) {
+          fetchDeviceDetails(device.ipAddress);
       }
 
     } catch (err: any) {
         toast({ variant: "destructive", title: "Scan Error", description: err.message });
-        stopPolling();
-    }
-  };
-
-  const handleCancelScan = async () => {
-    stopPolling();
-    try {
-        await fetch("/api/arp-scan-cancel", { method: "POST"});
-        toast({ title: "Scan Cancelled", description: "The network scan has been stopped." });
-    } catch (err) {
-        toast({ variant: "destructive", title: "Error", description: "Could not cancel scan." });
+    } finally {
+        setIsScanning(false);
     }
   };
   
-  React.useEffect(() => {
-    return () => {
-      if (pollingTimer.current) {
-        clearInterval(pollingTimer.current);
-      }
-    };
-  }, []);
-
   const handleMassGpUpdate = async () => {
-    if (devices.length === 0) {
-      toast({ title: "No Devices", description: "There are no devices to update." });
+    const onlineDevices = devices.filter(d => d.status === 'online');
+    if (onlineDevices.length === 0) {
+      toast({ title: "No Online Devices", description: "There are no online devices to update." });
       return;
     }
 
     setIsGpUpdating(true);
-    toast({ title: "Starting Mass GpUpdate", description: `Updating ${devices.length} devices...` });
+    toast({ title: "Starting Mass GpUpdate", description: `Updating ${onlineDevices.length} devices...` });
 
-    // Reset statuses and set all to loading
     const initialStatus: Record<string, GpUpdateResult> = {};
-    devices.forEach(d => {
+    onlineDevices.forEach(d => {
       initialStatus[d.id] = { status: 'loading' };
     });
     setGpUpdateStatus(initialStatus);
 
-    for (const device of devices) {
+    for (const device of onlineDevices) {
         try {
             const response = await fetch('/api/psexec', {
                 method: 'POST',
@@ -238,21 +226,16 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 body: JSON.stringify({ ip: device.ipAddress, cmd: "gpupdate /force" }),
             });
 
-            // Check if the response is JSON, otherwise handle as text
             const responseText = await response.text();
             let result;
             try {
                 result = JSON.parse(responseText);
             } catch (e) {
-                // If parsing fails, it's not JSON. Treat it as an error.
                 setGpUpdateStatus(prev => ({
                     ...prev,
-                    [device.id]: {
-                        status: 'error',
-                        output: responseText // Show the raw non-JSON response
-                    }
+                    [device.id]: { status: 'error', output: responseText }
                 }));
-                continue; // Move to the next device
+                continue;
             }
             
             setGpUpdateStatus(prev => ({
@@ -279,20 +262,31 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   };
 
   const renderStatusIcon = (device: Device) => {
-      const status = gpUpdateStatus[device.id]?.status;
+      const gpStatus = gpUpdateStatus[device.id]?.status;
 
-      switch(status) {
+      switch(gpStatus) {
           case 'loading':
               return <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />;
           case 'success':
-              return <CheckCircle2 className="h-5 w-5 text-green-500" />;
+              return (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger>
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>GPUpdate successful!</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )
           case 'error':
               return (
                   <Button variant="ghost" size="icon" className="h-auto w-auto text-red-500 hover:text-red-500" onClick={(e) => {
                       e.stopPropagation();
                       setErrorDialog({ isOpen: true, content: gpUpdateStatus[device.id]?.output || "No error details available." });
                   }}>
-                    <XCircle className="h-5 w-5" />
+                    <HelpCircle className="h-5 w-5" />
                   </Button>
               );
           default:
@@ -366,27 +360,36 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               </CardHeader>
               <CardContent className="space-y-1 flex-grow">
                 <p className="text-sm text-muted-foreground">{device.ipAddress}</p>
-                 <div className="flex items-center pt-2">
-                    <div className={cn(
-                        "h-2.5 w-2.5 rounded-full mr-2",
-                        device.status === 'online' ? "bg-green-500" : "bg-gray-400"
-                    )} />
-                    <p className="text-xs text-muted-foreground">
-                      {device.status === 'online' ? 'Online' : `Offline - ${device.lastSeen}`}
-                    </p>
-                </div>
+                {device.isLoadingDetails ? (
+                     <div className="flex items-center pt-2">
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">Loading details...</span>
+                     </div>
+                ) : (
+                     <div className="flex items-center pt-2">
+                        <div className={cn(
+                            "h-2.5 w-2.5 rounded-full mr-2",
+                            device.status === 'online' ? "bg-green-500" : "bg-gray-400"
+                        )} />
+                        <p className="text-xs text-muted-foreground">
+                        {device.status === 'online' ? 'Online' : `Offline`}
+                        </p>
+                    </div>
+                )}
               </CardContent>
               <CardFooter>
-                {device.isDomainMember ? (
-                    <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">
-                        <Users className="mr-1 h-3 w-3" />
-                        Domain Member
-                    </Badge>
-                ) : (
-                    <Badge variant="secondary">
-                        <Briefcase className="mr-1 h-3 w-3" />
-                        Workgroup
-                    </Badge>
+                {device.isLoadingDetails ? <Skeleton className="h-5 w-24" /> : (
+                    device.isDomainMember ? (
+                        <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">
+                            <Users className="mr-1 h-3 w-3" />
+                            Domain Member
+                        </Badge>
+                    ) : (
+                        <Badge variant="secondary">
+                            <Briefcase className="mr-1 h-3 w-3" />
+                            Workgroup
+                        </Badge>
+                    )
                 )}
               </CardFooter>
             </Card>
@@ -404,7 +407,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Network Devices</h1>
           <p className="text-muted-foreground">
             {isScanning 
-                ? `Scanning ${selectedInterface?.cidr}... Found ${scanCount} device(s) so far.`
+                ? `Scanning ${selectedInterface?.cidr}...`
                 : `Discovered ${devices.length} devices on your network.`
             }
           </p>
@@ -427,24 +430,15 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <DropdownMenuContent className="w-[300px]">
                     {interfaces.map(iface => (
                         <DropdownMenuItem key={iface.id} onClick={() => setSelectedInterface(iface)}>
-                            {iface.name} ({iface.cidr})
+                             {iface.name} ({iface.cidr})
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>
             </DropdownMenu>
-
-            {isScanning ? (
-                <Button onClick={handleCancelScan} variant="destructive" size="lg" className="h-11">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Cancel Scan
-                </Button>
-            ) : (
-                <Button onClick={handleScan} disabled={isScanning || isGpUpdating || !selectedInterface} size="lg" className="h-11">
-                    <Wifi className="mr-2 h-4 w-4" />
-                    Discover Devices
-                </Button>
-            )}
-
+            <Button onClick={handleScan} disabled={isScanning || isGpUpdating || !selectedInterface} size="lg" className="h-11">
+                {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wifi className="mr-2 h-4 w-4" />}
+                Discover Devices
+            </Button>
             <Button onClick={handleMassGpUpdate} disabled={isScanning || isGpUpdating || devices.length === 0} size="lg" className="h-11">
                 {isGpUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
                 Mass GpUpdate
@@ -459,7 +453,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             <AlertDialogHeader>
                 <AlertDialogTitle>GPUpdate Execution Failed</AlertDialogTitle>
                 <AlertDialogDescription>
-                    The `gpupdate /force` command failed. Here is the output from the remote machine.
+                    The `gpupdate /force` command failed. Here is the output from the remote machine. Common issues include firewall blocks or incorrect permissions.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="my-4">
