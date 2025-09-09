@@ -45,7 +45,7 @@ export default function HelpPage() {
                         <Network /> Prerequisite 1: Bettercap for Network Discovery
                     </CardTitle>
                     <CardDescription>
-                       This application now uses Bettercap for powerful and accurate device discovery. This requires the `bettercap.exe` binary and the `Npcap` driver.
+                       This application uses Bettercap for powerful and accurate device discovery. This requires the `bettercap.exe` binary and the `Npcap` driver.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -58,7 +58,7 @@ export default function HelpPage() {
                     </Alert>
                     
                     <div>
-                        <h4 className="font-semibold text-lg">Part A: Install Npcap</h4>
+                        <h4 className="font-semibold text-lg">Part A: Install Npcap Driver</h4>
                         <p className="text-muted-foreground mt-1">Npcap is a required driver that allows Bettercap to access your network card. It must be installed on the machine running the Dominion Control Panel.</p>
                          <a href="https://npcap.com/#download" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 mt-3">
                             Download Npcap Installer <DownloadCloud className="ml-2 h-4 w-4" />
@@ -66,8 +66,8 @@ export default function HelpPage() {
                     </div>
 
                     <div>
-                        <h4 className="font-semibold text-lg">Part B: Download Bettercap</h4>
-                        <p className="text-muted-foreground mt-1">You need to place the Bettercap executable in the application's `pstools_app` directory.</p>
+                        <h4 className="font-semibold text-lg">Part B: Download Bettercap Executable</h4>
+                        <p className="text-muted-foreground mt-1">You need to place the Bettercap executable (`bettercap.exe`) in the application's `pstools_app` directory.</p>
                          <a href="https://github.com/bettercap/bettercap/releases" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 mt-3">
                             Download Bettercap from GitHub Releases <DownloadCloud className="ml-2 h-4 w-4" />
                          </a>
@@ -75,9 +75,9 @@ export default function HelpPage() {
                             <ShieldAlert className="h-4 w-4" />
                             <AlertTitle>Important Setup Instructions</AlertTitle>
                             <AlertDescription>
-                               1. On the GitHub releases page, find the latest version and download the `.zip` file for Windows (e.g., `bettercap_windows_amd64_vX.X.X.zip`).<br/>
+                               1. On the GitHub releases page, find the latest version and look for a file named something like `bettercap_windows_amd64_vX.X.X.zip`. This is the correct file.<br/>
                                2. Unzip the downloaded file.<br/>
-                               3. Find `bettercap.exe` inside the folder.<br/>
+                               3. Find `bettercap.exe` inside the unzipped folder.<br/>
                                4. Copy `bettercap.exe` and paste it directly into the `pstools_app` directory at the root of this project.
                             </AlertDescription>
                         </Alert>

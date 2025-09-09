@@ -47,7 +47,7 @@ These are external tools that give the application its core functionality.
         *   Unzip the downloaded file.
         *   **Important:** Copy `bettercap.exe` and paste it directly into the `pstools_app` folder in this project.
     *   **Npcap:** Bettercap requires `Npcap` to access network interfaces.
-        *   Download and install the latest version of [Npcap](httpss://npcap.com/#download) from its official website.
+        *   Download and install the latest version of [Npcap](https://npcap.com/#download) from its official website.
 
 ### Step 2: Install Required Libraries
 
