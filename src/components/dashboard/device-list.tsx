@@ -85,13 +85,16 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   React.useEffect(() => {
     const fetchInterfaces = async () => {
         try {
-            setIsScanning(true);
+            // Don't set scanning true here, it's just a background fetch
             setNetworkError(null);
             const res = await fetch("/api/network-interfaces", { method: 'POST' });
             const data = await res.json();
             if(data.ok && data.interfaces.length > 0) {
                 setInterfaces(data.interfaces);
-                setSelectedCidr(data.interfaces[0].cidr);
+                // Automatically select the first interface
+                if (!selectedCidr) {
+                    setSelectedCidr(data.interfaces[0].cidr);
+                }
             } else {
                  const errorMsg = data.error || "Could not find any usable network interfaces.";
                  setNetworkError(errorMsg);
@@ -101,12 +104,10 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
              const errorMsg = err.message || "An unknown error occurred while fetching network interfaces.";
              setNetworkError(errorMsg);
              toast({ variant: "destructive", title: "Network Error", description: errorMsg});
-        } finally {
-            setIsScanning(false);
         }
     };
     fetchInterfaces();
-  }, [toast]);
+  }, [toast, selectedCidr]);
 
 
   const determineDeviceType = (hostname: string): Device["type"] => {
@@ -128,25 +129,18 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ip }),
         });
-        if (!res.ok) {
-            // Don't toast error for single device detail failure to avoid spam
-            console.error(`Failed to fetch details for ${ip}`);
-             const details = await res.json().catch(() => ({os: `Failed: ${res.statusText}`}));
-             setDevices(prev => 
-                prev.map(d => 
-                    d.ipAddress === ip 
-                    ? { ...d, isLoadingDetails: false, os: details.os || 'Fetch failed' } 
-                    : d
-                )
-            );
-            return;
-        }
-        const details = await res.json();
+        
+        const details = await res.json().catch(() => ({ok: false, os: `Non-JSON response`}));
         
         setDevices(prev => 
             prev.map(d => 
                 d.ipAddress === ip 
-                ? { ...d, ...details, isLoadingDetails: false, os: details.os, domain: details.domain, isDomainMember: details.isDomainMember } 
+                ? { ...d, 
+                    isLoadingDetails: false, 
+                    os: details.os || 'Fetch failed', 
+                    domain: details.domain, 
+                    isDomainMember: details.isDomainMember 
+                  } 
                 : d
             )
         );
@@ -155,7 +149,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
          setDevices(prev => 
             prev.map(d => 
                 d.ipAddress === ip 
-                ? { ...d, isLoadingDetails: false, os: "Error fetching" } 
+                ? { ...d, isLoadingDetails: false, os: "Error fetching details" } 
                 : d
             )
         );
@@ -171,6 +165,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setIsScanning(true);
     setDevices([]);
     setGpUpdateStatus({});
+    toast({ title: "Scan Initiated", description: `Performing ARP scan on ${selectedCidr}...`});
 
     try {
       const res = await fetch("/api/discover-devices", { 
@@ -179,13 +174,11 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           body: JSON.stringify({ cidr: selectedCidr })
       });
       
-      if (!res.ok) {
-        // Try to parse error from JSON, otherwise use status text
-        const errorData = await res.json().catch(() => null);
-        throw new Error(errorData?.error || `Scan failed: ${res.statusText}`);
-      }
-
       const data = await res.json();
+
+      if (!data.ok) {
+        throw new Error(data.error || `Scan failed with status: ${res.status}`);
+      }
 
       const initialDevices: Device[] = data.devices.map((d: any) => ({
           id: d.ip,
@@ -204,15 +197,15 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       if (initialDevices.length === 0) {
         toast({ title: "Scan Complete", description: "No online devices were found on this network."});
       } else {
-        toast({ title: "Scan Initiated", description: `Found ${initialDevices.length} devices. Fetching details...`});
+        toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices. Now fetching details...`});
       }
       
       setDevices(initialDevices);
 
       // Now, fetch details for each device.
-      for (const device of initialDevices) {
-          fetchDeviceDetails(device.ipAddress);
-      }
+      initialDevices.forEach(device => {
+        fetchDeviceDetails(device.ipAddress);
+      });
 
     } catch (err: any) {
         toast({ variant: "destructive", title: "Scan Error", description: err.message });
@@ -316,7 +309,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
 
   const renderContent = () => {
-    if (networkError) {
+    if (networkError && interfaces.length === 0) {
         return (
              <Alert variant="destructive" className="h-80 flex flex-col items-center justify-center text-center">
                 <WifiOff className="h-12 w-12" />
@@ -324,7 +317,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <AlertDescription className="mt-2">
                     {networkError}
                     <br/>
-                    Please ensure the backend is running and the user has appropriate permissions.
+                    Please ensure the backend is running and has the necessary permissions.
                 </AlertDescription>
             </Alert>
         )
@@ -358,7 +351,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-semibold text-foreground">No devices found</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Select a network and click "Discover Devices" to scan.
+            Select a network and click "Discover Devices" to begin scanning.
           </p>
         </div>
       );
@@ -379,22 +372,22 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               </CardHeader>
               <CardContent className="space-y-1 flex-grow">
                 <p className="text-sm text-muted-foreground">{device.ipAddress}</p>
-                {device.isLoadingDetails ? (
-                     <div className="flex items-center pt-2">
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">Loading details...</span>
-                     </div>
-                ) : (
-                     <div className="flex items-center pt-2">
-                        <div className={cn(
-                            "h-2.5 w-2.5 rounded-full mr-2",
-                            device.status === 'online' ? "bg-green-500" : "bg-gray-400"
-                        )} />
-                        <p className="text-xs text-muted-foreground">
-                        {device.status === 'online' ? 'Online' : `Offline`}
+                 <div className="flex items-center pt-2">
+                    <div className={cn(
+                        "h-2.5 w-2.5 rounded-full mr-2",
+                        device.status === 'online' ? "bg-green-500" : "bg-gray-400"
+                    )} />
+                     {device.isLoadingDetails ? (
+                        <div className="flex items-center">
+                            <Loader2 className="h-3 w-3 mr-1.5 animate-spin text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">Loading details...</span>
+                        </div>
+                     ) : (
+                        <p className="text-xs text-muted-foreground truncate" title={device.os}>
+                            {device.os}
                         </p>
-                    </div>
-                )}
+                    )}
+                </div>
               </CardContent>
               <CardFooter>
                 {device.isLoadingDetails ? <Skeleton className="h-5 w-24" /> : (
@@ -427,7 +420,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           <p className="text-muted-foreground">
             {isScanning 
                 ? `Scanning ${selectedCidr}...`
-                : `Discovered ${devices.length} devices on your network.`
+                : `Discovered ${devices.length} online devices.`
             }
           </p>
         </div>
@@ -485,3 +478,5 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
+
+    

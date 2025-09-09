@@ -9,6 +9,15 @@ from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pstools_app.utils.helpers import is_valid_ip, get_pstools_path, run_ps_command, parse_psinfo_output
 
+# Try to import scapy, but don't fail if it's not there.
+# We will check for its availability in the route.
+try:
+    from scapy.all import ARP, Ether, srp
+    SCAPY_AVAILABLE = True
+except ImportError:
+    SCAPY_AVAILABLE = False
+
+
 network_bp = Blueprint('network', __name__)
 
 @network_bp.before_request
@@ -35,7 +44,7 @@ def api_network_interfaces():
             
             try:
                 # Use ipaddress module to get interface object, which can create the network object
-                iface = ipaddress.ip_interface(ip_addr + '/24') # Assume a /24 network for simplicity
+                iface = ipaddress.ip_interface(f"{ip_addr}/24") # Assume a /24 network for simplicity
                 net = iface.network
                 cidr = str(net)
                 
@@ -60,9 +69,12 @@ def api_network_interfaces():
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
-    Performs a fast ping sweep to discover online devices and returns them immediately.
+    Performs a fast ARP scan to discover online devices and returns them immediately.
     Details for each device are fetched separately by the frontend.
     """
+    if not SCAPY_AVAILABLE:
+        return jsonify({"ok": False, "error": "Scapy library is not installed on the server, which is required for ARP scan."}), 500
+
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
     if not scan_cidr:
@@ -70,43 +82,32 @@ def api_discover_devices():
 
     online_hosts = []
     try:
-        net = ipaddress.ip_network(scan_cidr)
-        ip_list = [str(ip) for ip in net.hosts()]
-        
-        def ping_ip(ip_str):
-            # Use subprocess.run for better control and reliability
+        # Create ARP request packet
+        arp_request = ARP(pdst=scan_cidr)
+        broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
+        arp_request_broadcast = broadcast / arp_request
+
+        # Send the packet and capture the results
+        answered_list = srp(arp_request_broadcast, timeout=5, verbose=False)[0]
+
+        for sent, received in answered_list:
+            hostname = "Unknown"
             try:
-                result = subprocess.run(
-                    ["ping", "-n", "1", "-w", "200", ip_str],
-                    capture_output=True,
-                    text=True,
-                    check=False, # Don't raise exception on non-zero exit
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                return ip_str if result.returncode == 0 else None
-            except FileNotFoundError:
-                # This would happen if ping command is not in PATH, highly unlikely on Windows
-                return None
-            except Exception:
-                return None
+                # Try to resolve hostname, but don't fail if it doesn't work
+                hostname = socket.gethostbyaddr(received.psrc)[0]
+            except socket.herror:
+                pass # Keep hostname as "Unknown"
+            online_hosts.append({"ip": received.psrc, "mac": received.hwsrc, "hostname": hostname})
 
-
-        with ThreadPoolExecutor(max_workers=50) as executor:
-            future_to_ip = {executor.submit(ping_ip, ip): ip for ip in ip_list}
-            for future in as_completed(future_to_ip):
-                result = future.result()
-                if result:
-                    try:
-                        hostname = socket.gethostbyaddr(result)[0]
-                    except socket.herror:
-                        hostname = "Unknown"
-                    online_hosts.append({"ip": result, "hostname": hostname})
-
+        # Sort the hosts by IP address
         sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})
 
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e), "devices": []}), 500
+        # Provide a more specific error if it's permission related (common on Windows)
+        if "WinPcap is not installed" in str(e) or "NPCAP" in str(e):
+             return jsonify({"ok": False, "error": "Scanning Error: Npcap/WinPcap is not installed or not running. Please install Npcap with 'WinPcap API-compatible Mode' enabled."}), 500
+        return jsonify({"ok": False, "error": f"An unexpected error occurred during scan: {str(e)}", "devices": []}), 500
 
 
 @network_bp.route('/api/device-details', methods=['POST'])
@@ -150,3 +151,5 @@ def api_device_details():
         device_details['os'] = f"Error: {str(e)}"
 
     return jsonify(device_details)
+
+    
