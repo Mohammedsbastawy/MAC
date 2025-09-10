@@ -74,6 +74,7 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
     """
     A centralized function to build and run any PsTools command.
     tool_name should be 'psexec', 'psinfo', etc. (without .exe)
+    ip can be a hostname or an IP address.
     """
     exe_name = tool_name.capitalize() + ".exe" if not tool_name.lower().endswith('.exe') else tool_name
     
@@ -99,9 +100,11 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
         # Build target arg
         target_arg = []
         if ip:
-             if not is_valid_ip(ip):
-                raise ValueError("Invalid or missing IP address for target.")
              target_arg = [f"\\\\{ip}"]
+        else:
+            # Most PsTools commands require a target
+            if tool_name.lower() not in ['psping']:
+                 raise ValueError("Invalid or missing IP address for target.")
 
         # PsLoggedOn requires credentials to come first
         if tool_name.lower() == 'psloggedon':
