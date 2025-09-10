@@ -27,6 +27,7 @@ import { LifeBuoy, LogOut, Settings, ShieldCheck, User, Loader2, Zap, PanelLeft 
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "../ui/sidebar";
+import { ThemeToggle } from "../theme-toggle";
 
 
 const formSchema = z.object({
@@ -163,6 +164,7 @@ export default function DashboardHeader() {
         </Button>
       )}
       <div className="ml-auto flex items-center gap-4">
+        <ThemeToggle />
         {isLoading ? (
             <Loader2 className="animate-spin text-muted-foreground" />
         ) : user ? (
