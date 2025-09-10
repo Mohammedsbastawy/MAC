@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { ADComputer, ADUser, ADGroup } from "@/lib/types";
+import type { ADComputer, ADUser, ADGroup, ADOu } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -619,12 +619,102 @@ const GroupTabContent: React.FC<{ groups: ADGroup[] }> = ({ groups }) => {
     );
 };
 
+const OuTabContent: React.FC<{ ous: ADOu[] }> = ({ ous }) => {
+    const [sorting, setSorting] = React.useState<SortingState>([]);
+    const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+
+    const ouColumns: ColumnDef<ADOu>[] = [
+        { accessorKey: "name", header: "OU Name" },
+        { 
+            accessorKey: "path", 
+            header: "Distinguished Name (Path)",
+            cell: ({ row }) => <span className="text-xs font-mono">{row.original.path}</span>
+        },
+        { accessorKey: "created", header: "Date Created" },
+    ];
+
+    const table = useReactTable({
+        data: ous,
+        columns: ouColumns,
+        getCoreRowModel: getCoreRowModel(),
+        getPaginationRowModel: getPaginationRowModel(),
+        onSortingChange: setSorting,
+        getSortedRowModel: getSortedRowModel(),
+        onColumnFiltersChange: setColumnFilters,
+        getFilteredRowModel: getFilteredRowModel(),
+        state: {
+            sorting,
+            columnFilters,
+        },
+    });
+
+    return (
+        <Card>
+            <CardHeader>
+                <div className="flex justify-between items-center">
+                    <div>
+                        <CardTitle className="flex items-center gap-2">
+                            <Folder /> Organizational Units (OUs)
+                        </CardTitle>
+                        <CardDescription>
+                            A list of all OUs found in the domain. Found {table.getRowModel().rows.length} OUs.
+                        </CardDescription>
+                    </div>
+                    <Input
+                        placeholder="Filter OU name..."
+                        value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
+                        onChange={(event) => table.getColumn("name")?.setFilterValue(event.target.value)}
+                        className="max-w-sm"
+                    />
+                </div>
+            </CardHeader>
+            <CardContent>
+                <div className="rounded-md border">
+                    <Table>
+                        <TableHeader>
+                            {table.getHeaderGroups().map((headerGroup) => (
+                                <TableRow key={headerGroup.id}>
+                                    {headerGroup.headers.map((header) => (
+                                        <TableHead key={header.id} onClick={() => header.column.toggleSorting(header.column.getIsSorted() === "asc")}>
+                                            {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                                        </TableHead>
+                                    ))}
+                                </TableRow>
+                            ))}
+                        </TableHeader>
+                        <TableBody>
+                            {table.getRowModel().rows?.length ? (
+                                table.getRowModel().rows.map((row) => (
+                                    <TableRow key={row.id}>
+                                        {row.getVisibleCells().map((cell) => (
+                                            <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                                        ))}
+                                    </TableRow>
+                                ))
+                            ) : (
+                                <TableRow>
+                                    <TableCell colSpan={ouColumns.length} className="h-24 text-center">No results.</TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
+                </div>
+                <div className="flex items-center justify-end space-x-2 py-4">
+                    <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>Previous</Button>
+                    <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
+                </div>
+            </CardContent>
+        </Card>
+    );
+};
+
 
 export default function ActiveDirectoryPage() {
   const { user } = useAuth();
   const [computers, setComputers] = React.useState<ADComputer[]>([]);
   const [users, setUsers] = React.useState<ADUser[]>([]);
   const [groups, setGroups] = React.useState<ADGroup[]>([]);
+  const [ous, setOus] = React.useState<ADOu[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<ADError | null>(null);
   const [showErrorDetails, setShowErrorDetails] = React.useState(false);
@@ -638,14 +728,15 @@ export default function ActiveDirectoryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [computersRes, usersRes, groupsRes] = await Promise.all([
+      const [computersRes, usersRes, groupsRes, ousRes] = await Promise.all([
         fetch("/api/ad/get-computers", { method: "POST" }),
         fetch("/api/ad/get-users", { method: "POST" }),
         fetch("/api/ad/get-groups", { method: "POST" }),
+        fetch("/api/ad/get-ous", { method: "POST" }),
       ]);
 
-      const results = await Promise.all([computersRes.json(), usersRes.json(), groupsRes.json()]);
-      const [computersData, usersData, groupsData] = results;
+      const results = await Promise.all([computersRes.json(), usersRes.json(), groupsRes.json(), ousRes.json()]);
+      const [computersData, usersData, groupsData, ousData] = results;
 
       if (computersData.ok) setComputers(computersData.computers);
       else throw computersData;
@@ -654,7 +745,10 @@ export default function ActiveDirectoryPage() {
       else throw usersData;
 
       if (groupsData.ok) setGroups(groupsData.groups);
-       else throw groupsData;
+      else throw groupsData;
+
+      if (ousData.ok) setOus(ousData.ous);
+      else throw ousData;
 
 
     } catch (err: any) {
@@ -766,7 +860,7 @@ export default function ActiveDirectoryPage() {
                 </TabsTrigger>
                  <TabsTrigger value="ous">
                     <Folder className="mr-2 h-4 w-4" />
-                    OUs
+                    OUs ({ous.length})
                 </TabsTrigger>
             </TabsList>
             <TabsContent value="computers" className="mt-4">
@@ -779,7 +873,7 @@ export default function ActiveDirectoryPage() {
                  <GroupTabContent groups={groups} />
             </TabsContent>
             <TabsContent value="ous" className="mt-4">
-                 <PlaceholderTab title="Organizational Units" icon={Folder} />
+                 <OuTabContent ous={ous} />
             </TabsContent>
         </Tabs>
     </div>

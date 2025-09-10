@@ -495,3 +495,46 @@ def get_group_members():
     finally:
         if conn:
             conn.unbind()
+            
+@ad_bp.route('/api/ad/get-ous', methods=['POST'])
+def get_ad_ous():
+    """
+    API endpoint to fetch all Organizational Units (OUs) from Active Directory.
+    """
+    logger.info("Received request for /api/ad/get-ous.")
+    conn, error, status = get_ldap_connection()
+    if error:
+        return jsonify(error), status
+
+    try:
+        base_dn = conn.server.info.other.get('defaultNamingContext')[0]
+        
+        search_filter = "(objectCategory=organizationalUnit)"
+        attributes = ["ou", "distinguishedName", "whenCreated"]
+        
+        logger.info(f"Searching AD for OUs with base DN '{base_dn}'.")
+        conn.search(search_base=base_dn, search_filter=search_filter, attributes=attributes)
+        
+        ou_list = []
+        for entry in conn.entries:
+            ou_list.append({
+                "name": str(entry.ou.value) if entry.ou.value else "",
+                "path": str(entry.distinguishedName.value) if entry.distinguishedName.value else "",
+                "created": format_datetime(entry.whenCreated.value),
+            })
+        
+        logger.info(f"Found {len(ou_list)} OU objects in AD.")
+        return jsonify({"ok": True, "ous": ou_list}), 200
+
+    except Exception as e:
+        logger.error(f"Unexpected error during AD OU query: {e}", exc_info=True)
+        return jsonify({
+            "ok": False, 
+            "error": "Unexpected LDAP Query Error",
+            "message": "An unexpected error occurred during the Active Directory OU query.",
+            "error_code": "AD_QUERY_UNEXPECTED_ERROR",
+            "details": str(e)
+        }), 500
+    finally:
+        if conn:
+            conn.unbind()

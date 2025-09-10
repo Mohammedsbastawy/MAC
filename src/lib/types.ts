@@ -45,3 +45,9 @@ export type ADGroup = {
   created: string;
   members?: string[];
 };
+
+export type ADOu = {
+  name: string;
+  path: string;
+  created: string;
+};
