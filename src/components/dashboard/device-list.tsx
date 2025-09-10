@@ -239,6 +239,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       // Start: Set all devices to loading state
       updateDevicesState(d => ({ ...d, isLoadingDetails: true, status: 'unknown' }));
 
+      let onlineIps = new Set<string>();
+
       try {
           // --- Phase 1: Ping Scan ---
           const pingRes = await fetch("/api/network/check-status-ping", {
@@ -246,14 +248,21 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ ips: ipsToCheck })
           });
-          const pingData = await pingRes.json();
-          if (!pingData.ok) throw new Error(pingData.error || "Ping scan failed.");
+          
+          let pingData;
+          try {
+            pingData = await pingRes.json();
+          } catch(e) {
+             throw new Error("Received an invalid response from the server during ping scan. Is it running?");
+          }
+          
+          if (!pingData.ok) throw new Error(pingData.error || "Ping scan failed on the server.");
 
-          const onlineByPing = new Set<string>(pingData.online_ips);
+          onlineIps = new Set<string>(pingData.online_ips);
           
           // Update UI immediately after ping scan
           updateDevicesState(d => {
-              const isOnline = onlineByPing.has(d.ipAddress) || onlineByPing.has(d.name);
+              const isOnline = onlineIps.has(d.ipAddress) || onlineIps.has(d.name);
               return {
                   ...d,
                   status: isOnline ? 'online' : 'unknown',
@@ -261,8 +270,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               };
           });
 
-          const ipsForPsInfo = ipsToCheck.filter(ip => !onlineByPing.has(ip));
-          toast({ title: "Ping Scan Complete", description: `Found ${onlineByPing.size} devices. Now checking ${ipsForPsInfo.length} more.` });
+          const ipsForPsInfo = ipsToCheck.filter(ip => !onlineIps.has(ip));
+          toast({ title: "Ping Scan Complete", description: `Found ${onlineIps.size} devices. Now checking ${ipsForPsInfo.length} more.` });
 
           if (ipsForPsInfo.length > 0) {
               // --- Phase 2: PsInfo Scan ---
@@ -271,27 +280,32 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ ips: ipsForPsInfo })
               });
-              const psinfoData = await psinfoRes.json();
-              if (!psinfoData.ok) throw new Error(psinfoData.error || "PsInfo scan failed.");
               
-              const onlineByPsInfo = new Set<string>(psinfoData.online_ips);
-              const finalOnlineIps = new Set([...onlineByPing, ...onlineByPsInfo]);
+              let psinfoData;
+              try {
+                  psinfoData = await psinfoRes.json();
+              } catch(e) {
+                 const textError = await psinfoRes.text();
+                 throw new Error(`Received an invalid response from the server during PsInfo scan. Details: ${textError}`);
+              }
               
-              updateDevicesState(d => ({
-                  ...d,
-                  status: (finalOnlineIps.has(d.ipAddress) || finalOnlineIps.has(d.name)) ? 'online' : 'offline',
-                  isLoadingDetails: false
-              }));
+              if (!psinfoData.ok) throw new Error(psinfoData.error || "PsInfo scan failed on the server.");
               
-              toast({ title: "Status Refresh Complete", description: `Total online: ${finalOnlineIps.size}.` });
+              psinfoData.online_ips.forEach((ip: string) => onlineIps.add(ip));
+              
+              toast({ title: "Status Refresh Complete", description: `Total online: ${onlineIps.size}.` });
           } else {
-              // No more devices to check, finalize state
-              updateDevicesState(d => ({...d, isLoadingDetails: false, status: d.status === 'unknown' ? 'offline' : d.status }));
               toast({ title: "Status Refresh Complete", description: "All responsive devices found by ping." });
           }
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
-          updateDevicesState(d => ({ ...d, isLoadingDetails: false, status: 'unknown' }));
+      } finally {
+          // Final update for all devices
+          updateDevicesState(d => ({
+              ...d,
+              status: (onlineIps.has(d.ipAddress) || onlineIps.has(d.name)) ? 'online' : 'offline',
+              isLoadingDetails: false
+          }));
       }
   };
 

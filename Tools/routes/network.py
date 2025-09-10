@@ -171,8 +171,11 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
                             ip_to_add = None
                             if isinstance(result, dict) and result.get("ip"):
                                 ip_to_add = result.get("ip")
-                            elif isinstance(result, list) and len(result) > 0 and 'ip' in result[0]:
-                                ip_to_add = result[0].get('ip')
+                            elif isinstance(result, list) and len(result) > 0:
+                                # Check the first element of the inner list
+                                inner_item = result[0]
+                                if isinstance(inner_item, dict) and 'ip' in inner_item:
+                                     ip_to_add = inner_item.get('ip')
                             
                             if ip_to_add:
                                 found_hosts.append(ip_to_add)
@@ -276,6 +279,7 @@ def check_host_status_ping(ip):
 def check_host_status_psinfo(ip, user, domain, pwd):
     """Checks if a host is responsive by trying a basic psinfo command. Returns True on success."""
     try:
+        # Correctly call run_ps_command with proper arguments
         rc, _, _ = run_ps_command("psinfo", ip, user, domain, pwd, [], timeout=30, suppress_errors=True)
         return rc == 0
     except Exception as e:
@@ -392,3 +396,4 @@ def api_check_status_psinfo():
 
     logger.info(f"PsInfo-Only check complete. Found {len(online_by_psinfo)} additional hosts online.")
     return jsonify({"ok": True, "online_ips": list(online_by_psinfo)})
+
