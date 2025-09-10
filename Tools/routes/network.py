@@ -339,3 +339,56 @@ def api_check_status():
     
     return jsonify({"ok": True, "online_ips": final_online_ips})
     
+@network_bp.route('/api/network/check-status-ping', methods=['POST'])
+def api_check_status_ping():
+    """Checks online status for a list of IPs using only ping."""
+    data = request.get_json() or {}
+    ips = data.get("ips", [])
+    if not ips:
+        return jsonify({"ok": True, "online_ips": []})
+
+    logger.info(f"Starting Ping-Only check for {len(ips)} hosts.")
+    online_by_ping = set()
+    
+    with ThreadPoolExecutor(max_workers=50, thread_name_prefix="ping_worker") as executor:
+        future_to_ip = {executor.submit(check_host_status_ping, ip): ip for ip in ips}
+        for future in as_completed(future_to_ip):
+            ip = future_to_ip[future]
+            try:
+                if future.result():
+                    online_by_ping.add(ip)
+            except Exception:
+                pass
+    
+    logger.info(f"Ping-Only check complete. Found {len(online_by_ping)} hosts online.")
+    return jsonify({"ok": True, "online_ips": list(online_by_ping)})
+
+
+@network_bp.route('/api/network/check-status-psinfo', methods=['POST'])
+def api_check_status_psinfo():
+    """Checks online status for a list of IPs using only PsInfo."""
+    data = request.get_json() or {}
+    ips = data.get("ips", [])
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
+    
+    if not ips:
+        return jsonify({"ok": True, "online_ips": []})
+
+    logger.info(f"Starting PsInfo-Only check for {len(ips)} hosts.")
+    online_by_psinfo = set()
+    
+    with ThreadPoolExecutor(max_workers=20, thread_name_prefix="psinfo_worker") as executor:
+        future_to_ip = {
+            executor.submit(check_host_status_psinfo, ip, user, domain, pwd): ip
+            for ip in ips
+        }
+        for future in as_completed(future_to_ip):
+            ip = future_to_ip[future]
+            try:
+                if future.result():
+                    online_by_psinfo.add(ip)
+            except Exception:
+                pass
+
+    logger.info(f"PsInfo-Only check complete. Found {len(online_by_psinfo)} additional hosts online.")
+    return jsonify({"ok": True, "online_ips": list(online_by_psinfo)})
