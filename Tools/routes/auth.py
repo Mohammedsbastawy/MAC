@@ -130,7 +130,7 @@ def api_check_session():
         return jsonify({"ok": True, "user": session['user'], "email": session['email'], "domain": session.get('domain')})
     return jsonify({"ok": False})
 
-@auth_p.route('/api/logout', methods=['POST'])
+@auth_bp.route('/api/logout', methods=['POST'])
 def api_logout():
     session.clear()
     return jsonify({"ok": True})
