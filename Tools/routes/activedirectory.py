@@ -44,7 +44,7 @@ def get_ldap_connection():
         logger.warning("get_ldap_connection failed: Authentication required.")
         return None, {'ok': False, 'error': 'Authentication required. Please log in first.', 'error_code': 'AUTH_REQUIRED'}, 401
 
-    from ldap3 import Server, Connection, ALL, SIMPLE, Tls
+    from ldap3 import Server, Connection, ALL, SIMPLE, Tls, AUTO_BIND_TLS_BEFORE_BIND
     import ssl
 
     user_principal_name = session.get("email")
@@ -52,33 +52,38 @@ def get_ldap_connection():
     domain = session.get("domain")
     
     logger.info(f"Attempting LDAP connection to domain '{domain}' with user '{user_principal_name}'.")
+    
+    # Let ldap3 discover the server from the domain
+    server = Server(domain, get_info=ALL)
     conn = None
     last_error = None
     
-    # Attempt 1: Connect with SSL (LDAPS)
+    # Attempt 1: Connect with TLS (recommended)
     try:
-        logger.info("Trying LDAPS on port 636...")
-        tls_config = Tls(validate=ssl.CERT_NONE, version=ssl.PROTOCOL_TLS)
-        server = Server(domain, get_info=ALL, use_ssl=True, port=636, tls=tls_config)
-        conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
+        logger.info("Trying LDAP connection with StartTLS...")
+        conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=AUTO_BIND_TLS_BEFORE_BIND, check_names=True)
         if conn.bound:
-             logger.info("LDAPS connection successful.")
+             logger.info("LDAP connection with StartTLS successful.")
     except Exception as e:
         last_error = str(e)
-        logger.warning(f"LDAPS connection failed: {last_error}")
+        logger.warning(f"LDAP connection with StartTLS failed: {last_error}")
+        if conn:
+            conn.unbind()
         conn = None
-    
-    # Attempt 2: If SSL failed, connect without SSL (standard LDAP)
+
+    # Attempt 2: If TLS failed, try a simple bind without encryption
     if not conn or not conn.bound:
         try:
-            logger.info("LDAPS failed, trying standard LDAP on port 389...")
-            server = Server(domain, get_info=ALL, port=389)
+            logger.info("StartTLS failed, trying standard LDAP simple bind...")
+            # Recreate the connection object
             conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
             if conn.bound:
-                logger.info("Standard LDAP connection successful.")
+                logger.info("Standard LDAP simple bind successful.")
         except Exception as e:
             last_error = str(e)
-            logger.warning(f"Standard LDAP connection failed: {last_error}")
+            logger.warning(f"Standard LDAP simple bind failed: {last_error}")
+            if conn:
+                conn.unbind()
             conn = None
 
     # Check the final result
@@ -93,6 +98,7 @@ def get_ldap_connection():
             'details': f"Last encountered error: {last_error or 'No specific error message was captured.'}",
             'error_code': 'LDAP_BIND_FAILED'
         }, 401
+
 
 def _get_ad_computers_data():
     """
@@ -404,3 +410,5 @@ def set_user_status():
         if conn:
             conn.unbind()
             logger.info("LDAP connection unbound after user status operation.")
+
+    
