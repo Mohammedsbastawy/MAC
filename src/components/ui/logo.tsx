@@ -1,103 +1,92 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import Image from "next/image";
 
-export const Logo: React.FC<React.SVGProps<SVGSVGElement>> = (props) => {
-  return (
-    <svg
+const DefaultLogo: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+     <svg
         xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 400 100"
-        className={cn("h-16 w-auto", props.className)}
+        viewBox="0 0 200 200"
         {...props}
     >
         <title>Atlas Systems Control Logo</title>
         <defs>
-            <linearGradient id="globe-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" style={{stopColor: "hsl(var(--primary))", stopOpacity: 1}} />
-                <stop offset="100%" style={{stopColor: "hsl(var(--accent-foreground))", stopOpacity: 0.8}} />
+            <linearGradient id="globe-gradient" x1="50%" y1="0%" x2="50%" y2="100%">
+                <stop offset="0%" stopColor="hsl(var(--primary))" />
+                <stop offset="100%" stopColor="hsl(var(--accent-foreground))" />
             </linearGradient>
-            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="1.5" result="coloredBlur" />
-                <feMerge>
-                    <feMergeNode in="coloredBlur" />
-                    <feMergeNode in="SourceGraphic" />
-                </feMerge>
-            </filter>
         </defs>
-
-        {/* Globe */}
-        <circle cx="50" cy="50" r="40" fill="url(#globe-gradient)" />
-        <g stroke="hsl(var(--background))" strokeWidth="0.5" strokeOpacity="0.5">
-            {/* Latitudes */}
-            <ellipse cx="50" cy="50" rx="40" ry="15" fill="none" />
-            <ellipse cx="50" cy="50" rx="35" ry="28" fill="none" />
-            <ellipse cx="50" cy="50" rx="25" ry="36" fill="none" />
-             {/* Longitudes */}
-            <path d="M50 10 V 90" fill="none" />
-            <ellipse cx="50" cy="50" rx="20" ry="40" fill="none" transform="rotate(30 50 50)" />
-            <ellipse cx="50" cy="50" rx="20" ry="40" fill="none" transform="rotate(-30 50 50)" />
-            <ellipse cx="50" cy="50" rx="20" ry="40" fill="none" transform="rotate(60 50 50)" />
-            <ellipse cx="50" cy="50" rx="20" ry="40" fill="none" transform="rotate(-60 50 50)" />
+        <circle cx="100" cy="100" r="90" fill="url(#globe-gradient)" />
+        <g stroke="hsl(var(--sidebar-background))" strokeWidth="2" strokeOpacity="0.6">
+            <ellipse cx="100" cy="100" rx="90" ry="30" fill="none" />
+            <ellipse cx="100" cy="100" rx="80" ry="60" fill="none" />
+            <ellipse cx="100" cy="100" rx="60" ry="80" fill="none" />
+            <path d="M100 10 V 190" fill="none" />
+            <ellipse cx="100" cy="100" rx="45" ry="90" fill="none" transform="rotate(30 100 100)" />
+            <ellipse cx="100" cy="100" rx="45" ry="90" fill="none" transform="rotate(-30 100 100)" />
+            <ellipse cx="100" cy="100" rx="45" ry="90" fill="none" transform="rotate(60 100 100)" />
+            <ellipse cx="100" cy="100" rx="45" ry="90" fill="none" transform="rotate(-60 100 100)" />
         </g>
-        
-        {/* Atlas Figure */}
-        <g fill="hsl(var(--sidebar-foreground))" transform="translate(0, 5)">
-            {/* Body */}
-            <path d="M50 62 l-4 -8 h8 z M46 54 l-2 -4 h12 l-2 4 z M44 50 l-2 -4 h16 l-2 4 z" />
-            {/* Arms */}
-            <path d="M42 50 q-8 -4 -12 -12 l4 1 q8 8 8 11 z M58 50 q8 -4 12 -12 l-4 1 q-8 8 -8 11 z" />
-            {/* Head */}
-            <circle cx="50" cy="44" r="3" />
-            {/* Globe on shoulders */}
-            <circle cx="50" cy="35" r="10" fill="none" stroke="hsl(var(--sidebar-foreground))" strokeWidth="1.5" />
-        </g>
-      
-        {/* Text block */}
-        <g transform="translate(115, 8)">
-            <text
-                x="0"
-                y="35"
-                fontFamily="Inter, sans-serif"
-                fontSize="32"
-                fontWeight="bold"
-                fill="hsl(var(--foreground))"
-                letterSpacing="-1"
-            >
-                ATLAS
-            </text>
-            <text
-                x="0"
-                y="52"
-                fontFamily="Inter, sans-serif"
-                fontSize="12"
-                fontWeight="500"
-                fill="hsl(var(--primary))"
-                letterSpacing="0"
-            >
-                NETWORK MANAGER
-            </text>
-            <text
-                x="0"
-                y="68"
-                fontFamily="Inter, sans-serif"
-                fontSize="12"
-                fontWeight="500"
-                fill="hsl(var(--foreground))"
-                letterSpacing="0"
-            >
-                SYSTEMS CONTROL
-            </text>
-            <text
-                x="0"
-                y="85"
-                fontFamily="Inter, sans-serif"
-                fontSize="10"
-                fontWeight="normal"
-                fill="hsl(var(--muted-foreground))"
-                letterSpacing="0.1em"
-            >
-                BY BASTAWY
-            </text>
+        <g fill="hsl(var(--sidebar-foreground))" transform="translate(15 15) scale(0.85)">
+            <path d="M100 120 l-8 -15 h16 z M92 105 l-4 -8 h24 l-4 8 z M88 97 l-4 -8 h32 l-4 8 z" />
+            <path d="M84 97 q-16 -8 -24 -24 l8 2 q16 16 16 22 z M116 97 q16 -8 24 -24 l-8 2 q-16 16 -16 22 z" />
+            <circle cx="100" cy="87" r="6" />
+            <circle cx="100" cy="65" r="20" fill="none" stroke="hsl(var(--sidebar-foreground))" strokeWidth="3" />
         </g>
     </svg>
-  );
+);
+
+
+export const Logo: React.FC<{ className?: string }> = ({ className }) => {
+    const [logoUrl, setLogoUrl] = React.useState<string | null>(null);
+    const [isMounted, setIsMounted] = React.useState(false);
+
+    React.useEffect(() => {
+        setIsMounted(true);
+        try {
+            const storedUrl = localStorage.getItem("customLogoUrl");
+            if (storedUrl) {
+                setLogoUrl(storedUrl);
+            }
+        } catch (error) {
+            console.warn("Could not access localStorage for custom logo.");
+        }
+    }, []);
+
+    // Effect to listen for storage changes
+    React.useEffect(() => {
+        const handleStorageChange = () => {
+            try {
+                const storedUrl = localStorage.getItem("customLogoUrl");
+                setLogoUrl(storedUrl);
+            } catch (error) {
+                 console.warn("Could not access localStorage for custom logo.");
+            }
+        };
+
+        window.addEventListener('storage', handleStorageChange);
+        return () => {
+            window.removeEventListener('storage', handleStorageChange);
+        };
+    }, []);
+
+    if (!isMounted) {
+        return <div className={cn("bg-muted rounded-full", className)} />;
+    }
+
+    if (logoUrl) {
+        return (
+            <div className={cn("relative", className)}>
+                <Image
+                    src={logoUrl}
+                    alt="Custom Atlas Logo"
+                    layout="fill"
+                    objectFit="contain"
+                    className="rounded-md"
+                    unoptimized // Use this if the image source is external and not configured in next.config.js
+                />
+            </div>
+        );
+    }
+    
+    return <DefaultLogo className={className} />;
 };

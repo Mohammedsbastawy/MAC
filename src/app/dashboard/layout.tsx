@@ -3,7 +3,7 @@
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar, SidebarHeader } from "@/components/ui/sidebar";
-import { Globe, Users, NotebookText, HelpCircle } from "lucide-react";
+import { Globe, Users, NotebookText, HelpCircle, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -22,8 +22,11 @@ const AppSidebar = () => {
 
     return (
         <Sidebar>
-            <SidebarHeader className="p-0">
-                 <Logo className="h-14 w-full" />
+            <SidebarHeader className="p-4 flex items-center gap-2">
+                 <Logo className="h-10 w-10 shrink-0" />
+                 <div className={cn("flex flex-col", state === 'collapsed' && "hidden")}>
+                    <h2 className="font-bold text-lg tracking-tight text-sidebar-foreground">ATLAS</h2>
+                 </div>
             </SidebarHeader>
             <SidebarContent className="p-2">
                 <SidebarGroup>
@@ -49,6 +52,14 @@ const AppSidebar = () => {
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/logs')} onClick={closeSidebar}>
                                     <NotebookText />
                                     <span className={cn(state === 'collapsed' && "hidden")}>System Logs</span>
+                                </SidebarMenuButton>
+                            </Link>
+                        </SidebarMenuItem>
+                        <SidebarMenuItem>
+                            <Link href="/dashboard/settings" passHref legacyBehavior>
+                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/settings')} onClick={closeSidebar}>
+                                    <Settings />
+                                    <span className={cn(state === 'collapsed' && "hidden")}>Settings</span>
                                 </SidebarMenuButton>
                             </Link>
                         </SidebarMenuItem>
@@ -83,7 +94,7 @@ export default function DashboardLayout({
   );
 }
 
-const DashboardLayoutContent = ({ children }: { children: React.ReactNode }) => {
+const DashboardLayoutContent = ({ children }: { children: React.Node }) => {
   const { state } = useSidebar();
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
