@@ -282,13 +282,15 @@ def check_host_status_ping(ip):
 def check_host_status_psinfo(ip, user, domain, pwd):
     """
     Checks if a host is responsive by trying to run psinfo.
-    This is a fallback for when ping is disabled.
+    This is a fallback for when ping is disabled. Returns True on success.
     """
     try:
-        # We use a very short timeout. We don't need the output, just the return code.
+        # We use a very short timeout and suppress decoding errors.
+        # We only care about the return code, not the output.
         rc, _, _ = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=15, suppress_errors=True)
         return rc == 0
     except Exception:
+        # If any exception occurs (e.g., in run_ps_command), assume offline.
         return False
 
 
@@ -342,6 +344,8 @@ def api_check_status():
     final_online_ips = list(online_by_ping.union(online_by_psinfo))
     
     return jsonify({"ok": True, "online_ips": final_online_ips})
+
+    
 
     
 
