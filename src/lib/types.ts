@@ -37,14 +37,19 @@ export type ADUser = {
   enabled: boolean;
   created: string;
   domain?: string;
+  dn: string;
 };
 
 export type ADGroup = {
   name: string;
   description: string;
   created: string;
-  members?: string[];
 };
+
+export type ADGroupMember = {
+    username: string;
+    email: string;
+}
 
 export type ADOu = {
   name: string;

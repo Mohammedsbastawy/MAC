@@ -13,7 +13,7 @@ ad_bp = Blueprint('activedirectory', __name__)
 def check_ldap3_availability():
     """Checks if ldap3 can be imported."""
     try:
-        from ldap3 import Server, Connection, ALL, NTLM, Tls, SASL, KERBEROS, SIMPLE
+        from ldap3 import Server, Connection, ALL, NTLM, Tls, SASL, KERBEROS, SIMPLE, MODIFY_ADD, MODIFY_DELETE
         import ssl
         return True, None
     except ImportError as e:
@@ -190,7 +190,7 @@ def _get_ad_users_data():
         user_domain = session.get("domain", "Unknown")
         
         search_filter = "(&(objectCategory=person)(objectClass=user))"
-        attributes = ["sAMAccountName", "displayName", "userPrincipalName", "whenCreated", "userAccountControl"]
+        attributes = ["sAMAccountName", "displayName", "userPrincipalName", "whenCreated", "userAccountControl", "distinguishedName"]
         
         logger.info(f"Searching AD with base DN '{base_dn}' and filter '{search_filter}'.")
         conn.search(search_base=base_dn,
@@ -211,7 +211,8 @@ def _get_ad_users_data():
                 "email": str(entry.userPrincipalName.value) if entry.userPrincipalName.value else "",
                 "enabled": is_enabled,
                 "created": format_datetime(entry.whenCreated.value),
-                "domain": user_domain
+                "domain": user_domain,
+                "dn": str(entry.distinguishedName.value) if entry.distinguishedName.value else ""
             })
         
         logger.info(f"Found {len(users_list)} user objects in AD.")
@@ -476,9 +477,13 @@ def get_group_members():
             # We need to resolve each member DN to a sAMAccountName
             for member_dn in member_dns:
                 # The search scope is the member's DN itself
-                conn.search(search_base=member_dn, search_filter='(objectClass=*)', search_scope='BASE', attributes=['sAMAccountName'])
+                conn.search(search_base=member_dn, search_filter='(objectClass=*)', search_scope='BASE', attributes=['sAMAccountName', 'userPrincipalName'])
                 if conn.entries:
-                    members.append(str(conn.entries[0].sAMAccountName.value))
+                    member_entry = conn.entries[0]
+                    members.append({
+                        "username": str(member_entry.sAMAccountName.value),
+                        "email": str(member_entry.userPrincipalName.value) if member_entry.userPrincipalName.value else ""
+                    })
         
         logger.info(f"Found {len(members)} members in group '{group_name}'.")
         return jsonify({"ok": True, "members": members}), 200
@@ -495,7 +500,78 @@ def get_group_members():
     finally:
         if conn:
             conn.unbind()
-            
+
+@ad_bp.route('/api/ad/modify-group-member', methods=['POST'])
+def modify_group_member():
+    """
+    Adds or removes a user from a group in Active Directory.
+    """
+    from ldap3 import MODIFY_ADD, MODIFY_DELETE
+    data = request.get_json() or {}
+    group_name = data.get('group_name')
+    username = data.get('username')
+    action = data.get('action')  # 'add' or 'remove'
+
+    logger.info(f"Received request to {action} user '{username}' {'to' if action == 'add' else 'from'} group '{group_name}'.")
+
+    if not all([group_name, username, action]) or action not in ['add', 'remove']:
+        logger.warning("Modify group member request failed: Missing parameters or invalid action.")
+        return jsonify({'ok': False, 'error': 'Group name, username, and a valid action (add/remove) are required.'}), 400
+
+    conn, error, status = get_ldap_connection()
+    if error:
+        return jsonify(error), status
+
+    try:
+        base_dn = conn.server.info.other.get('defaultNamingContext')[0]
+
+        # Find the group's DN
+        conn.search(base_dn, f'(&(objectCategory=group)(sAMAccountName={group_name}))', attributes=['distinguishedName'])
+        if not conn.entries:
+            logger.warning(f"Group '{group_name}' not found for membership modification.")
+            return jsonify({'ok': False, 'error': f'Group "{group_name}" not found.'}), 404
+        group_dn = conn.entries[0].distinguishedName.value
+
+        # Find the user's DN
+        conn.search(base_dn, f'(&(objectCategory=person)(objectClass=user)(sAMAccountName={username}))', attributes=['distinguishedName'])
+        if not conn.entries:
+            logger.warning(f"User '{username}' not found for membership modification.")
+            return jsonify({'ok': False, 'error': f'User "{username}" not found.'}), 404
+        user_dn = conn.entries[0].distinguishedName.value
+        
+        logger.info(f"Modifying group '{group_dn}' to {action} member '{user_dn}'.")
+        
+        operation = MODIFY_ADD if action == 'add' else MODIFY_DELETE
+        success = conn.modify(group_dn, {'member': [(operation, [user_dn])]})
+
+        if success:
+            action_past_tense = 'added' if action == 'add' else 'removed'
+            message = f"Successfully {action_past_tense} user '{username}' {'to' if action == 'add' else 'from'} group '{group_name}'."
+            logger.info(message)
+            return jsonify({'ok': True, 'message': message})
+        else:
+            logger.error(f"Failed to {action} member for group '{group_name}': {conn.result.get('message')}")
+            return jsonify({
+                'ok': False,
+                'error': 'Active Directory Error',
+                'message': f'Failed to {action} the member. You may not have sufficient permissions.',
+                'error_code': 'AD_GENERIC_ERROR',
+                'details': conn.result.get('message', 'No details provided.')
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error during group membership modification: {e}", exc_info=True)
+        return jsonify({
+            "ok": False,
+            "error": "Unexpected Error",
+            "message": "An unexpected error occurred during group membership modification.",
+            "error_code": "UNEXPECTED_ERROR",
+            "details": str(e)
+        }), 500
+    finally:
+        if conn:
+            conn.unbind()
+
 @ad_bp.route('/api/ad/get-ous', methods=['POST'])
 def get_ad_ous():
     """
