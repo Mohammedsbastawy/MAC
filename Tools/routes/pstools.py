@@ -33,7 +33,7 @@ def api_psexec():
         rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     except Exception as e:
         logger.error(f"psexec on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
 
@@ -68,7 +68,7 @@ def api_psservice():
             return json_result(2, "", "Invalid action")
     except Exception as e:
         logger.error(f"psservice on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     
     return json_result(rc, out, err, structured_data)
 
@@ -83,7 +83,7 @@ def api_pslist():
         rc, out, err = run_ps_command("pslist", ip, user, domain, pwd, ["-x"], timeout=120)
     except Exception as e:
         logger.error(f"pslist on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
 
     structured_data = None
     if rc == 0 and out:
@@ -103,7 +103,7 @@ def api_pskill():
         rc, out, err = run_ps_command("pskill", ip, user, domain, pwd, [proc], timeout=60)
     except Exception as e:
         logger.error(f"pskill on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
 
@@ -117,7 +117,7 @@ def api_psloglist():
         rc, out, err = run_ps_command("psloglist", ip, user, domain, pwd, ["-d", "1", kind], timeout=120)
     except Exception as e:
         logger.error(f"psloglist on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
 
     structured_data = None
     if rc == 0 and out:
@@ -136,7 +136,7 @@ def api_psinfo():
         rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
     except Exception as e:
         logger.error(f"psinfo on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     
     structured_data = None
     if rc == 0 and out:
@@ -154,7 +154,7 @@ def api_psloggedon():
         rc, out, err = run_ps_command("psloggedon", ip, user, domain, pwd, [], timeout=60)
     except Exception as e:
         logger.error(f"psloggedon on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
 
     structured_data = None
     if rc == 0 and out:
@@ -180,7 +180,7 @@ def api_psshutdown():
         rc, out, err = run_ps_command("psshutdown", ip, user, domain, pwd, args, timeout=60)
     except Exception as e:
         logger.error(f"psshutdown on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
 @pstools_bp.route('/psfile', methods=['POST'])
@@ -193,7 +193,7 @@ def api_psfile():
         rc, out, err = run_ps_command("psfile", ip, user, domain, pwd, [], timeout=60)
     except Exception as e:
         logger.error(f"psfile on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     
     structured_data = None
     if rc == 0 and out:
@@ -211,7 +211,7 @@ def api_psgetsid():
         rc, out, err = run_ps_command("psgetsid", ip, user, domain, pwd, [], timeout=60)
     except Exception as e:
         logger.error(f"psgetsid on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
 @pstools_bp.route('/pspasswd', methods=['POST'])
@@ -227,7 +227,7 @@ def api_pspasswd():
         rc, out, err = run_ps_command("pspasswd", ip, user, domain, pwd, [target_user, new_pass], timeout=60)
     except Exception as e:
         logger.error(f"pspasswd on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
 @pstools_bp.route('/pssuspend', methods=['POST'])
@@ -242,7 +242,7 @@ def api_pssuspend():
         rc, out, err = run_ps_command("pssuspend", ip, user, domain, pwd, [proc], timeout=60)
     except Exception as e:
         logger.error(f"pssuspend on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
 @pstools_bp.route('/psping', methods=['POST'])
@@ -263,7 +263,7 @@ def api_psping():
 
     except Exception as e:
         logger.error(f"psping on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(2, "", str(e))
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
     

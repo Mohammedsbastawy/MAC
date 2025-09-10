@@ -4,6 +4,7 @@ import ipaddress
 import subprocess
 import re
 import socket
+from Tools.utils.logger import logger
 
 def is_valid_ip(ip: str) -> bool:
     try:
@@ -150,12 +151,25 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
         
         out = decode_output(completed.stdout)
         err = decode_output(completed.stderr)
+        
+        # Enhanced logging for failures
+        if completed.returncode != 0:
+            log_message = f"Tool '{tool_name}' failed on '{ip}' with RC={completed.returncode}."
+            if err:
+                log_message += f" Stderr: {err.strip()}"
+            if out:
+                log_message += f" Stdout: {out.strip()}"
+            logger.error(log_message)
+
         return completed.returncode, out, err
     except subprocess.TimeoutExpired:
+        logger.error(f"Tool '{tool_name}' on '{ip}' timed out after {timeout}s.")
         return 124, "", f"Command timed out after {timeout}s"
     except FileNotFoundError:
+        logger.error(f"Executable not found for tool '{tool_name}': {cmd_list[0]}")
         return 127, "", f"Executable not found: {cmd_list[0]}. Ensure it is placed in the Tools/bin directory."
     except Exception as e:
+        logger.error(f"Unexpected error running '{tool_name}' on '{ip}': {e}", exc_info=True)
         return 1, "", f"Unexpected error: {e}"
 
 def parse_psinfo_output(output):
