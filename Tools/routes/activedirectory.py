@@ -8,15 +8,20 @@ from datetime import datetime, timezone
 ad_bp = Blueprint('activedirectory', __name__)
 
 def check_pyad_availability():
-    """Checks if pyad can be imported."""
+    """Checks if pyad can be imported and its core components are available."""
     try:
         from pyad import aduser, adcomputer, adquery, pyad_setdefaults, pyadexceptions
+        # Perform a basic check to see if we can access the exception class
+        _ = pyadexceptions.PyADError
         return True, None
     except ImportError as e:
         return False, str(e)
+    except AttributeError as e:
+        # This catches issues like 'PyADError' not being in pyadexceptions
+        return False, f"A component of the pyad library is missing or has changed. Details: {str(e)}"
     except Exception as e:
         # Catch other potential init errors
-        return False, str(e)
+        return False, f"An unexpected error occurred during pyad initialization. Details: {str(e)}"
 
 
 def format_datetime(dt_obj):
@@ -40,9 +45,9 @@ def require_login_and_set_ad_credentials():
     if not pyad_ok:
         return jsonify({
             'ok': False,
-            'error': 'The pyad library is required for Active Directory queries but failed to import on the server.',
-            'error_code': 'PYAD_IMPORT_FAILED',
-            'details': f"The pyad python library could not be imported. Please ensure it and its dependencies (like pywin32) are installed and configured correctly. Details: {pyad_error}"
+            'error': 'The pyad library is required for Active Directory queries but failed to import or initialize on the server.',
+            'error_code': 'PYAD_INIT_FAILED',
+            'details': f"The pyad python library could not be used. Please ensure it and its dependencies (like pywin32) are installed and configured correctly. Details: {pyad_error}"
         }), 500
     
     # 3. Retrieve credentials from the session
@@ -84,15 +89,7 @@ def get_ad_computers():
     """
     Fetches all computer objects from Active Directory.
     """
-    pyad_ok, pyad_error = check_pyad_availability()
-    if not pyad_ok:
-        return jsonify({
-            'ok': False,
-            'error': 'The pyad library failed to import.',
-            'error_code': 'PYAD_IMPORT_FAILED',
-            'details': f"Details: {pyad_error}"
-        }), 500
-
+    # The before_request handler already checked for pyad availability and set credentials.
     from pyad import adquery, pyadexceptions
 
     try:
@@ -108,7 +105,9 @@ def get_ad_computers():
             last_logon_timestamp = row.get("lastLogonTimestamp")
             if last_logon_timestamp and hasattr(last_logon_timestamp, 'value'):
                 try:
-                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timedelta(microseconds=last_logon_timestamp.value / 10)
+                    # The timestamp is the number of 100-nanosecond intervals since January 1, 1601.
+                    # To convert to a datetime object, we need to add this delta to the base date.
+                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp.value / 10)
                 except:
                     last_logon_dt = None
             else:
@@ -147,15 +146,7 @@ def set_user_password():
     """
     Sets the password for a target user in Active Directory.
     """
-    pyad_ok, pyad_error = check_pyad_availability()
-    if not pyad_ok:
-        return jsonify({
-            'ok': False,
-            'error': 'The pyad library failed to import.',
-            'error_code': 'PYAD_IMPORT_FAILED',
-            'details': f"Details: {pyad_error}"
-        }), 500
-
+    # The before_request handler already checked for pyad availability and set credentials.
     from pyad import aduser, pyadexceptions
 
     data = request.get_json() or {}
@@ -197,5 +188,3 @@ def set_user_password():
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
-
-    
