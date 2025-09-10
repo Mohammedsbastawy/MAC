@@ -59,14 +59,6 @@ const AppSidebar = () => {
                                 </SidebarMenuButton>
                             </Link>
                         </SidebarMenuItem>
-                        <SidebarMenuItem>
-                            <Link href="/dashboard/settings" passHref legacyBehavior>
-                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/settings')} onClick={closeSidebar}>
-                                    <Settings />
-                                    <span className={cn(state === 'collapsed' && "hidden")}>Settings</span>
-                                </SidebarMenuButton>
-                            </Link>
-                        </SidebarMenuItem>
                          <SidebarMenuItem>
                             <Link href="/dashboard/help" passHref legacyBehavior>
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
