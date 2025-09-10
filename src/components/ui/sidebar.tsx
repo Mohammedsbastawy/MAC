@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -21,9 +22,9 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "16rem" // Adjusted width from 14rem
+const SIDEBAR_WIDTH = "16rem" 
 const SIDEBAR_WIDTH_MOBILE = "16rem"
-const SIDEBAR_WIDTH_ICON = "3.5rem" // Kept as is, can be changed if needed
+const SIDEBAR_WIDTH_ICON = "3.5rem" 
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContext = {
@@ -191,8 +192,8 @@ export const SidebarHeader = React.forwardRef<
     <div
       ref={ref}
       data-sidebar="header"
-      className={cn("flex h-20 items-center justify-center gap-3 border-b border-sidebar-border p-4", 
-        state === 'collapsed' && "h-20 justify-center px-2",
+      className={cn("flex h-auto items-center justify-center gap-3 border-b border-sidebar-border p-4", 
+        state === 'collapsed' && "h-20 justify-center px-2 py-4",
         className)}
       {...props}
     />
