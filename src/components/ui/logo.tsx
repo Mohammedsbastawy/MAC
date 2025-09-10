@@ -24,15 +24,12 @@ const DefaultLogo: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 
 export const Logo: React.FC<{ className?: string }> = ({ className }) => {
     const [logoUrl, setLogoUrl] = React.useState<string | null>(null);
-    const [logoSize, setLogoSize] = React.useState(100);
     const [isMounted, setIsMounted] = React.useState(false);
 
     const updateLogo = React.useCallback(() => {
         try {
             const storedUrl = localStorage.getItem("customLogoUrl");
-            const storedSize = localStorage.getItem("customLogoSize");
             setLogoUrl(storedUrl);
-            setLogoSize(storedSize ? parseInt(storedSize, 10) : 100);
         } catch (error) {
             console.warn("Could not access localStorage for custom logo.");
         }
@@ -65,8 +62,7 @@ export const Logo: React.FC<{ className?: string }> = ({ className }) => {
                     fill
                     sizes="100%"
                     style={{ 
-                        objectFit: 'contain',
-                        transform: `scale(${logoSize / 100})`,
+                        objectFit: "contain",
                     }}
                     className="rounded-md"
                     unoptimized // Use this for external URLs and data URIs

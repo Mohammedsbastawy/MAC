@@ -1,62 +1,161 @@
 "use client";
 
 import * as React from "react";
+import Cropper from "react-easy-crop";
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { UploadCloud, Image as ImageIcon } from "lucide-react";
+import { UploadCloud, Image as ImageIcon, Crop, ZoomIn, ZoomOut } from "lucide-react";
 import { Logo } from "@/components/ui/logo";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import type { Area } from "react-easy-crop";
+
+
+/**
+ * Creates a cropped image.
+ * @param {string} imageSrc - The source of the image to crop.
+ * @param {Area} pixelCrop - The pixel crop area.
+ * @returns {Promise<string>} - A promise that resolves with the cropped image as a base64 string.
+ */
+const getCroppedImg = (imageSrc: string, pixelCrop: Area): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.src = imageSrc;
+        image.onload = () => {
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+
+            if (!ctx) {
+                return reject(new Error("Failed to get canvas context"));
+            }
+
+            canvas.width = pixelCrop.width;
+            canvas.height = pixelCrop.height;
+
+            ctx.drawImage(
+                image,
+                pixelCrop.x,
+                pixelCrop.y,
+                pixelCrop.width,
+                pixelCrop.height,
+                0,
+                0,
+                pixelCrop.width,
+                pixelCrop.height
+            );
+            
+            // Get the data URL of the cropped image
+            resolve(canvas.toDataURL("image/png"));
+        };
+        image.onerror = (error) => reject(error);
+    });
+};
+
+
+const ImageCropperDialog: React.FC<{
+    image: string | null;
+    onClose: () => void;
+    onCropComplete: (croppedImage: string) => void;
+}> = ({ image, onClose, onCropComplete }) => {
+    const [crop, setCrop] = React.useState({ x: 0, y: 0 });
+    const [zoom, setZoom] = React.useState(1);
+    const [croppedAreaPixels, setCroppedAreaPixels] = React.useState<Area | null>(null);
+
+    const handleCropComplete = React.useCallback((_croppedArea: Area, croppedAreaPixels: Area) => {
+        setCroppedAreaPixels(croppedAreaPixels);
+    }, []);
+
+    const handleCrop = async () => {
+        if (!image || !croppedAreaPixels) return;
+        try {
+            const croppedImage = await getCroppedImg(image, croppedAreaPixels);
+            onCropComplete(croppedImage);
+        } catch (e) {
+            console.error(e);
+            toast({
+                variant: "destructive",
+                title: "Cropping Failed",
+                description: "Could not crop the image. Please try again.",
+            });
+        }
+    };
+
+    if (!image) return null;
+
+    return (
+        <Dialog open={!!image} onOpenChange={onClose}>
+            <DialogContent className="max-w-xl">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2"><Crop /> Crop your new logo</DialogTitle>
+                </DialogHeader>
+                <div className="relative h-80 w-full bg-muted mt-4">
+                    <Cropper
+                        image={image}
+                        crop={crop}
+                        zoom={zoom}
+                        aspect={1}
+                        onCropChange={setCrop}
+                        onZoomChange={setZoom}
+                        onCropComplete={handleCropComplete}
+                    />
+                </div>
+                <div className="flex items-center gap-4 mt-4">
+                    <ZoomOut />
+                    <Slider
+                        value={[zoom]}
+                        onValueChange={(value) => setZoom(value[0])}
+                        min={1}
+                        max={3}
+                        step={0.1}
+                    />
+                    <ZoomIn />
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Cancel</Button>
+                    <Button onClick={handleCrop}>Crop and Use Image</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 
 export default function SettingsPage() {
-    const [logoUrl, setLogoUrl] = React.useState("");
-    const [logoSize, setLogoSize] = React.useState(100);
+    const [logoPreviewUrl, setLogoPreviewUrl] = React.useState("");
     const [currentLogo, setCurrentLogo] = React.useState<string | null>("");
-    const [currentLogoSize, setCurrentLogoSize] = React.useState(100);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const [imageToCrop, setImageToCrop] = React.useState<string | null>(null);
 
     React.useEffect(() => {
-        // Load the saved settings from localStorage on component mount
         const savedLogo = localStorage.getItem("customLogoUrl");
         if (savedLogo) {
-            setLogoUrl(savedLogo);
+            setLogoPreviewUrl(savedLogo);
             setCurrentLogo(savedLogo);
-        }
-        const savedSize = localStorage.getItem("customLogoSize");
-        if (savedSize) {
-            const size = parseInt(savedSize, 10);
-            setLogoSize(size);
-            setCurrentLogoSize(size);
         }
     }, []);
 
     const handleSave = () => {
         try {
-            if (logoUrl) {
-                localStorage.setItem("customLogoUrl", logoUrl);
+            if (logoPreviewUrl) {
+                localStorage.setItem("customLogoUrl", logoPreviewUrl);
+                 setCurrentLogo(logoPreviewUrl);
             } else {
                 localStorage.removeItem("customLogoUrl");
+                 setCurrentLogo(null);
             }
-            localStorage.setItem("customLogoSize", logoSize.toString());
-
-            // Manually dispatch a storage event to trigger update in other components
             window.dispatchEvent(new Event('storage'));
             toast({
                 title: "Settings Saved",
                 description: "Your custom logo has been updated.",
             });
-            setCurrentLogo(logoUrl);
-            setCurrentLogoSize(logoSize);
         } catch (error) {
             toast({
                 variant: "destructive",
@@ -68,12 +167,9 @@ export default function SettingsPage() {
 
     const handleRevert = () => {
         localStorage.removeItem("customLogoUrl");
-        localStorage.removeItem("customLogoSize");
         window.dispatchEvent(new Event('storage'));
-        setLogoUrl("");
-        setLogoSize(100);
+        setLogoPreviewUrl("");
         setCurrentLogo(null);
-        setCurrentLogoSize(100);
         toast({
             title: "Logo Reverted",
             description: "The logo has been reverted to the default.",
@@ -90,11 +186,7 @@ export default function SettingsPage() {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const result = e.target?.result as string;
-                setLogoUrl(result);
-                 toast({
-                    title: "Image Ready",
-                    description: "Image loaded successfully. Click 'Save' to apply it.",
-                });
+                setImageToCrop(result);
             };
             reader.onerror = () => {
                  toast({
@@ -106,8 +198,18 @@ export default function SettingsPage() {
             reader.readAsDataURL(file);
         }
     };
+    
+    const handleCropComplete = (croppedImage: string) => {
+        setLogoPreviewUrl(croppedImage);
+        setImageToCrop(null);
+         toast({
+            title: "Image Cropped",
+            description: "Image processed successfully. Click 'Save' to apply it.",
+        });
+    }
 
   return (
+    <>
     <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">
@@ -122,88 +224,67 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle>Logo Settings</CardTitle>
           <CardDescription>
-            Change the application logo. Upload an image or enter a URL, and adjust its size.
+            Upload a custom logo. You will be able to crop and position the image before saving.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 <div className="space-y-4">
-                    <div className="space-y-2">
-                        <Label htmlFor="logo-url">Logo Image URL or Data URI</Label>
-                        <Input
-                            id="logo-url"
-                            placeholder="https://example.com/logo.png or data:image/..."
-                            value={logoUrl}
-                            onChange={(e) => setLogoUrl(e.target.value)}
-                        />
-                        <input 
-                            type="file" 
-                            ref={fileInputRef} 
-                            onChange={handleFileChange}
-                            className="hidden" 
-                            accept="image/png, image/jpeg, image/gif, image/svg+xml"
-                        />
-                    </div>
-                     <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                            <Label>Logo Size</Label>
-                            <span className="text-sm text-muted-foreground font-mono">{logoSize}%</span>
-                        </div>
-                         <Slider
-                            value={[logoSize]}
-                            onValueChange={(value) => setLogoSize(value[0])}
-                            min={50}
-                            max={150}
-                            step={5}
-                            />
+                    <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleFileChange}
+                        className="hidden" 
+                        accept="image/png, image/jpeg, image/gif"
+                    />
+                    <div className="flex flex-col gap-2 pt-2 md:pt-0">
+                        <Button onClick={handleUploadClick} className="w-full md:w-auto">
+                            <UploadCloud className="mr-2 h-4 w-4" />
+                            Upload New Logo
+                        </Button>
+                        <Button onClick={handleSave} disabled={!logoPreviewUrl} className="w-full md:w-auto">Save Changes</Button>
+                        <Button variant="destructive" onClick={handleRevert} disabled={!currentLogo} className="w-full md:w-auto">
+                            Revert to Default
+                        </Button>
                     </div>
                 </div>
-
-                 <div className="flex flex-col gap-2 pt-2 md:pt-0">
-                    <Button onClick={handleSave} className="w-full md:w-auto">Save Changes</Button>
-                    <Button variant="outline" onClick={handleUploadClick} className="w-full md:w-auto">
-                        <UploadCloud className="mr-2 h-4 w-4" />
-                        Upload Image
-                    </Button>
-                    <Button variant="destructive" onClick={handleRevert} disabled={!currentLogo} className="w-full md:w-auto">
-                        Revert to Default
-                    </Button>
+                 <div className="grid grid-cols-2 gap-4 text-center">
+                     <div>
+                        <h4 className="text-sm font-medium text-muted-foreground mb-2">Current Logo</h4>
+                        <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2 overflow-hidden">
+                            <Logo className="w-full h-full" />
+                        </div>
+                    </div>
+                     <div>
+                        <h4 className="text-sm font-medium text-muted-foreground mb-2">New Preview</h4>
+                        <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2 overflow-hidden">
+                            {logoPreviewUrl ? (
+                                <img 
+                                    src={logoPreviewUrl} 
+                                    alt="New logo preview" 
+                                    className="max-w-full max-h-full"
+                                    style={{ objectFit: 'contain' }}
+                                />
+                            ) : (
+                                <div className="text-muted-foreground flex flex-col items-center">
+                                    <ImageIcon className="h-8 w-8" />
+                                    <span className="text-xs mt-1">Upload an image</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
            </div>
 
            <Separator className="my-6"/>
-
-            <div className="grid grid-cols-2 gap-4 text-center">
-                 <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-2">Current Logo</h4>
-                    <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2 overflow-hidden">
-                        <Logo className="w-full h-full" />
-                    </div>
-                </div>
-                 <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-2">New Preview</h4>
-                    <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2 overflow-hidden">
-                        {logoUrl ? (
-                            <img 
-                                src={logoUrl} 
-                                alt="New logo preview" 
-                                className="max-w-full max-h-full transition-transform duration-200"
-                                style={{ 
-                                    transform: `scale(${logoSize / 100})`,
-                                    objectFit: 'contain'
-                                }}
-                            />
-                        ) : (
-                            <div className="text-muted-foreground flex flex-col items-center">
-                                <ImageIcon className="h-8 w-8" />
-                                <span className="text-xs mt-1">No URL or image</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
         </CardContent>
       </Card>
     </div>
+     <ImageCropperDialog 
+        image={imageToCrop}
+        onClose={() => setImageToCrop(null)}
+        onCropComplete={handleCropComplete}
+    />
+    </>
   );
 }
