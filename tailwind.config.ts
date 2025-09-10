@@ -12,6 +12,7 @@ export default {
       fontFamily: {
         body: ['Inter', 'sans-serif'],
         code: ['monospace'],
+        headline: ['"Permanent Marker"', 'cursive'],
       },
       colors: {
         background: 'hsl(var(--background))',
