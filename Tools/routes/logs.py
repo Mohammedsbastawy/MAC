@@ -25,7 +25,7 @@ def get_logs():
         # Fallback to file if memory is empty, which can happen on first load or after a restart.
         if not log_content:
              logger.info("In-memory log buffer is empty, attempting to read from log file as a fallback.")
-             log_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'dominion-tools.log')
+             log_file = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'atlas-tools.log'))
              if os.path.exists(log_file):
                  try:
                      with open(log_file, 'r', encoding='utf-8', errors='replace') as f:

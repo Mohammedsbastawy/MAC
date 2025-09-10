@@ -20,6 +20,6 @@ def create_app():
 
     @app.route("/")
     def index():
-        return "Dominion Tools Flask Backend is running."
+        return "Atlas Tools Flask Backend is running."
 
     return app

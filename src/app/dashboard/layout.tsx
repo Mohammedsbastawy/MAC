@@ -3,7 +3,7 @@
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import { Briefcase, FolderCog, HelpCircle, Network, Users, NotebookText } from "lucide-react";
+import { Globe, Users, NotebookText, HelpCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ const AppSidebar = () => {
                         <SidebarMenuItem>
                             <Link href="/dashboard/devices" passHref legacyBehavior>
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/devices')} onClick={closeSidebar}>
-                                    <Network />
+                                    <Globe />
                                     <span>Network Devices</span>
                                 </SidebarMenuButton>
                             </Link>

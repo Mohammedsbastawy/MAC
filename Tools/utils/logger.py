@@ -6,7 +6,7 @@ from collections import deque
 
 # This script is in Tools/utils. The log file should be in the parent Tools/ directory.
 # We use an absolute path to be safe.
-log_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'dominion-tools.log'))
+log_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'atlas-tools.log'))
 
 # --- Formatter ---
 log_formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')

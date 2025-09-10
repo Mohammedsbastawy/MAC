@@ -64,32 +64,32 @@ const LogsPage: React.FC = () => {
     }
 
     return (
-        <div className="flex flex-col h-[calc(100vh-8rem)] bg-black rounded-lg border border-gray-700 shadow-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+        <div className="flex flex-col h-[calc(100vh-8rem)] bg-card rounded-lg border shadow-sm">
+            <div className="flex items-center justify-between p-4 border-b">
                 <div className="flex items-center gap-3">
-                    <NotebookText className="text-gray-300" />
-                    <h1 className="text-lg font-bold text-gray-200 font-mono">
-                        Dominion Tools - Live System Logs
+                    <NotebookText className="text-muted-foreground" />
+                    <h1 className="text-lg font-bold text-foreground">
+                        Atlas Tools - Live System Logs
                     </h1>
                 </div>
                  <div className="flex items-center gap-2">
                     <div className={cn("w-3 h-3 rounded-full animate-pulse", isPaused ? 'bg-yellow-500' : 'bg-green-500')} />
-                    <span className="text-sm text-gray-400 font-mono">
+                    <span className="text-sm text-muted-foreground">
                          {isPaused ? "Paused" : "Live"}
                     </span>
-                    <Button variant="outline" size="sm" onClick={() => setIsPaused(!isPaused)} className="ml-4 bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700">
+                    <Button variant="outline" size="sm" onClick={() => setIsPaused(!isPaused)} className="ml-4">
                         {isPaused ? "Resume" : "Pause"}
                     </Button>
                 </div>
             </div>
-            <div className="flex-grow p-4 overflow-y-auto font-mono text-sm text-green-400">
+            <div className="flex-grow p-4 overflow-y-auto font-mono text-sm text-foreground bg-background">
                 {isLoading ? (
-                    <div className="flex items-center gap-2 text-gray-400">
+                    <div className="flex items-center gap-2 text-muted-foreground">
                         <Loader2 className="animate-spin" />
                         <span>Loading initial logs...</span>
                     </div>
                 ) : error ? (
-                    <pre className="text-red-400 whitespace-pre-wrap">{`[ERROR] ${error}`}</pre>
+                    <pre className="text-destructive whitespace-pre-wrap">{`[ERROR] ${error}`}</pre>
                 ) : (
                     <pre className="whitespace-pre-wrap">{logs}</pre>
                 )}

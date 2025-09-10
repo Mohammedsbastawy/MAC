@@ -3,7 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
-  title: 'Dominion Control Panel',
+  title: 'Atlas Control Panel',
   description: 'Manage your network devices with ease.',
 };
 
