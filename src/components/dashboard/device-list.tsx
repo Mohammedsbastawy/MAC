@@ -137,6 +137,27 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light")) return "iot";
     return "unknown";
   };
+  
+  const fetchDeviceDetails = async (ip: string) => {
+    try {
+      const res = await fetch('/api/device-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip }),
+      });
+      if (!res.ok) {
+        return { os: "Details failed to load", domain: "N/A", isDomainMember: false };
+      }
+      const data = await res.json();
+      return { 
+        os: data.os || "Unknown OS", 
+        domain: data.domain || "WORKGROUP",
+        isDomainMember: data.isDomainMember || false
+      };
+    } catch (e) {
+      return { os: "Details failed (network)", domain: "N/A", isDomainMember: false };
+    }
+  };
 
 
   const handleScan = async (manualRouterMac: string | null = null) => {
@@ -203,27 +224,41 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             macAddress: d.mac || "-",
             status: 'online',
             type: determineDeviceType(d.hostname),
-            os: "N/A",
+            os: "Loading...",
             lastSeen: 'Now',
-            domain: "N/A",
+            domain: "Loading...",
             isDomainMember: false,
-            isLoadingDetails: false, // Set to false initially
+            isLoadingDetails: true,
         }));
         
         if (initialDevices.length === 0) {
             toast({ title: "Scan Complete", description: "No online devices were found on this network."});
         } else {
-            toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices.`});
+            toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices. Fetching details...`});
         }
         
         setDevices(initialDevices);
+        setIsScanning(false); // Initial scan done, now fetch details
+
+        // Fetch details for each device
+        for (const device of initialDevices) {
+            fetchDeviceDetails(device.ipAddress).then(details => {
+                setDevices(prevDevices => 
+                    prevDevices.map(d => 
+                        d.id === device.id 
+                            ? { ...d, ...details, isLoadingDetails: false } 
+                            : d
+                    )
+                );
+            });
+        }
+
 
     } catch (err: any) {
         const errorMessage = err.message || "An unknown client-side error occurred.";
         setScanError({ isError: true, title: "Client Error", message: errorMessage });
         toast({ variant: "destructive", title: "Scan Error", description: errorMessage });
         console.error(err);
-    } finally {
         setIsScanning(false);
     }
   };
@@ -449,7 +484,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               <CardFooter>
                 {device.isLoadingDetails ? <Skeleton className="h-5 w-24" /> : (
                     device.isDomainMember ? (
-                        <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">
+                        <Badge variant="default" className="bg-green-600 hover:bg-green-700">
                             <Users className="mr-1 h-3 w-3" />
                             Domain Member
                         </Badge>

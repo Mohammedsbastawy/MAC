@@ -19,7 +19,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, ServerCrash, Users, FileText } from "lucide-react";
+import { Loader2, ServerCrash, Users, FileText, Laptop, Folder, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,6 +43,8 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 
 type ADComputer = {
   name: string;
@@ -64,6 +66,104 @@ const columns: ColumnDef<ADComputer>[] = [
     { accessorKey: "last_logon", header: "Last Logon" },
     { accessorKey: "created", header: "Date Created" },
 ];
+
+
+const ComputerTabContent: React.FC<{computers: ADComputer[], table: ReturnType<typeof useReactTable<ADComputer>>}> = ({computers, table}) => (
+     <Card>
+      <CardHeader>
+        <div className="flex justify-between items-center">
+            <div>
+                <CardTitle className="flex items-center gap-2">
+                    <Laptop /> Domain Computers
+                </CardTitle>
+                <CardDescription>
+                A list of all computer objects found in the domain. Found {table.getRowModel().rows.length} computers.
+                </CardDescription>
+            </div>
+             <Input
+                placeholder="Filter computer name..."
+                value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
+                onChange={(event) =>
+                    table.getColumn("name")?.setFilterValue(event.target.value)
+                }
+                className="max-w-sm"
+                />
+        </div>
+      </CardHeader>
+      <CardContent>
+         <div className="rounded-md border">
+            <Table>
+                <TableHeader>
+                {table.getHeaderGroups().map((headerGroup) => (
+                    <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => {
+                        return (
+                        <TableHead key={header.id} onClick={() => header.column.toggleSorting(header.column.getIsSorted() === "asc")}>
+                            {header.isPlaceholder
+                            ? null
+                            : flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                                )}
+                        </TableHead>
+                        );
+                    })}
+                    </TableRow>
+                ))}
+                </TableHeader>
+                <TableBody>
+                {table.getRowModel().rows?.length ? (
+                    table.getRowModel().rows.map((row) => (
+                    <TableRow
+                        key={row.id}
+                        data-state={row.getIsSelected() && "selected"}
+                    >
+                        {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                        ))}
+                    </TableRow>
+                    ))
+                ) : (
+                    <TableRow>
+                    <TableCell colSpan={columns.length} className="h-24 text-center">
+                        No results.
+                    </TableCell>
+                    </TableRow>
+                )}
+                </TableBody>
+            </Table>
+        </div>
+        <div className="flex items-center justify-end space-x-2 py-4">
+            <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+            >
+                Previous
+            </Button>
+            <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+            >
+                Next
+            </Button>
+        </div>
+      </CardContent>
+    </Card>
+);
+
+const PlaceholderTab: React.FC<{title: string; icon: React.ElementType}> = ({ title, icon: Icon }) => (
+    <div className="flex flex-col items-center justify-center text-center text-muted-foreground p-10 border-2 border-dashed rounded-lg h-96">
+        <Icon className="h-12 w-12 mb-4" />
+        <h3 className="text-lg font-semibold">{title}</h3>
+        <p className="text-sm">This feature is not yet implemented.</p>
+    </div>
+)
 
 
 export default function ActiveDirectoryPage() {
@@ -142,7 +242,7 @@ export default function ActiveDirectoryPage() {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="ml-2">Loading Active Directory Computers...</p>
+        <p className="ml-2">Loading Active Directory Objects...</p>
       </div>
     );
   }
@@ -188,91 +288,48 @@ export default function ActiveDirectoryPage() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex justify-between items-center">
-            <div>
-                <CardTitle className="flex items-center gap-2">
-                    <Users /> Active Directory Computers
-                </CardTitle>
-                <CardDescription>
-                A list of all computer objects in the domain. Found {table.getRowModel().rows.length} computers.
-                </CardDescription>
+    <div className="space-y-6">
+        <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+            <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Active Directory Management</h1>
+            <p className="text-muted-foreground">
+                Browse and manage AD objects like computers, users, and groups.
+            </p>
             </div>
-             <Input
-                placeholder="Filter computer name..."
-                value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
-                onChange={(event) =>
-                    table.getColumn("name")?.setFilterValue(event.target.value)
-                }
-                className="max-w-sm"
-                />
         </div>
-      </CardHeader>
-      <CardContent>
-         <div className="rounded-md border">
-            <Table>
-                <TableHeader>
-                {table.getHeaderGroups().map((headerGroup) => (
-                    <TableRow key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => {
-                        return (
-                        <TableHead key={header.id} onClick={() => header.column.toggleSorting(header.column.getIsSorted() === "asc")}>
-                            {header.isPlaceholder
-                            ? null
-                            : flexRender(
-                                header.column.columnDef.header,
-                                header.getContext()
-                                )}
-                        </TableHead>
-                        );
-                    })}
-                    </TableRow>
-                ))}
-                </TableHeader>
-                <TableBody>
-                {table.getRowModel().rows?.length ? (
-                    table.getRowModel().rows.map((row) => (
-                    <TableRow
-                        key={row.id}
-                        data-state={row.getIsSelected() && "selected"}
-                    >
-                        {row.getVisibleCells().map((cell) => (
-                        <TableCell key={cell.id}>
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </TableCell>
-                        ))}
-                    </TableRow>
-                    ))
-                ) : (
-                    <TableRow>
-                    <TableCell colSpan={columns.length} className="h-24 text-center">
-                        No results.
-                    </TableCell>
-                    </TableRow>
-                )}
-                </TableBody>
-            </Table>
-        </div>
-        <div className="flex items-center justify-end space-x-2 py-4">
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
-            >
-                Previous
-            </Button>
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
-            >
-                Next
-            </Button>
-        </div>
-      </CardContent>
-    </Card>
+
+        <Tabs defaultValue="computers">
+            <TabsList>
+                <TabsTrigger value="computers">
+                    <Laptop className="mr-2 h-4 w-4" />
+                    Computers
+                </TabsTrigger>
+                 <TabsTrigger value="users">
+                    <Users className="mr-2 h-4 w-4" />
+                    Users
+                </TabsTrigger>
+                 <TabsTrigger value="groups">
+                    <Shield className="mr-2 h-4 w-4" />
+                    Groups
+                </TabsTrigger>
+                 <TabsTrigger value="ous">
+                    <Folder className="mr-2 h-4 w-4" />
+                    OUs
+                </TabsTrigger>
+            </TabsList>
+            <TabsContent value="computers" className="mt-4">
+                 <ComputerTabContent computers={computers} table={table} />
+            </TabsContent>
+            <TabsContent value="users" className="mt-4">
+                <PlaceholderTab title="Users Management" icon={Users} />
+            </TabsContent>
+            <TabsContent value="groups" className="mt-4">
+                 <PlaceholderTab title="Groups Management" icon={Shield} />
+            </TabsContent>
+            <TabsContent value="ous" className="mt-4">
+                 <PlaceholderTab title="Organizational Units" icon={Folder} />
+            </TabsContent>
+        </Tabs>
+    </div>
   );
 }
