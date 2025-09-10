@@ -46,7 +46,8 @@ def get_ldap_connection():
     password = session.get("password")
     domain = session.get("domain")
     
-    user_principal_name = f"{username}@{domain}"
+    # NTLM authentication requires the format: DOMAIN\user
+    ntlm_user = f"{domain}\\{username}"
     
     conn = None
     last_error = None
@@ -56,7 +57,7 @@ def get_ldap_connection():
         # Use TLS for security, but be flexible with protocol
         tls_config = Tls(validate=ssl.CERT_NONE, version=ssl.PROTOCOL_TLS)
         server = Server(domain, get_info=ALL, use_ssl=True, port=636, tls=tls_config)
-        conn = Connection(server, user=user_principal_name, password=password, authentication=NTLM, auto_bind=True)
+        conn = Connection(server, user=ntlm_user, password=password, authentication=NTLM, auto_bind=True)
     except Exception as e:
         last_error = str(e)
         conn = None # Ensure connection is None on error
@@ -65,7 +66,7 @@ def get_ldap_connection():
     if not conn or not conn.bound:
         try:
             server = Server(domain, get_info=ALL, port=389)
-            conn = Connection(server, user=user_principal_name, password=password, authentication=NTLM, auto_bind=True)
+            conn = Connection(server, user=ntlm_user, password=password, authentication=NTLM, auto_bind=True)
         except Exception as e:
             last_error = str(e) # Update with the latest error
             conn = None
