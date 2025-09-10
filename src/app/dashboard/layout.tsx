@@ -25,7 +25,7 @@ const AppSidebar = () => {
         <Sidebar>
             <SidebarHeader>
                  <div className="flex items-center gap-3">
-                    <Logo className="h-12 w-12 flex-shrink-0" />
+                    <Logo className="h-16 w-16 flex-shrink-0" />
                     <div className={cn("flex flex-col", state === 'collapsed' && "hidden")}>
                         <span className="font-bold text-lg tracking-wider font-headline">ATLAS</span>
                         <span className="text-xs text-muted-foreground">BY BASTAWY</span>
