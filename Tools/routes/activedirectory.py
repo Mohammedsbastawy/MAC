@@ -404,7 +404,3 @@ def set_user_status():
         if conn:
             conn.unbind()
             logger.info("LDAP connection unbound after user status operation.")
-
-    
-
-```
