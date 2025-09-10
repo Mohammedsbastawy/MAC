@@ -3,15 +3,6 @@
 @tailwind utilities;
 
 @layer base {
-  @font-face {
-    font-family: 'Branda';
-    src: url('/BRANDA.ttf') format('truetype');
-    font-weight: normal;
-    font-style: normal;
-  }
-}
-
-@layer base {
   :root {
     --background: 30 27% 95%; /* #F3F2EC */
     --foreground: 210 10% 23%;
