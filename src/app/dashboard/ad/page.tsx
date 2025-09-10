@@ -19,7 +19,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, ServerCrash, Users } from "lucide-react";
+import { Loader2, ServerCrash, Users, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,6 +33,16 @@ import {
   type ColumnFiltersState,
   type SortingState,
 } from "@tanstack/react-table";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 type ADComputer = {
   name: string;
@@ -41,6 +51,11 @@ type ADComputer = {
   last_logon: string;
   created: string;
 };
+
+type ADError = {
+    message: string;
+    details?: string;
+}
 
 const columns: ColumnDef<ADComputer>[] = [
     { accessorKey: "name", header: "Name" },
@@ -55,7 +70,8 @@ export default function ActiveDirectoryPage() {
   const { user } = useAuth();
   const [computers, setComputers] = React.useState<ADComputer[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<ADError | null>(null);
+  const [showErrorDetails, setShowErrorDetails] = React.useState(false);
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
 
@@ -75,10 +91,16 @@ export default function ActiveDirectoryPage() {
         if (data.ok) {
           setComputers(data.computers);
         } else {
-          setError(data.message || "Failed to fetch computers from Active Directory.");
+          setError({
+            message: data.message || "Failed to fetch computers from Active Directory.",
+            details: data.details || "No further details were provided by the server."
+          });
         }
       } catch (err) {
-        setError("An unexpected error occurred while contacting the server.");
+        setError({
+            message: "An unexpected error occurred while contacting the server.",
+            details: (err instanceof Error) ? err.message : "The server is likely offline or unreachable."
+        });
       } finally {
         setIsLoading(false);
       }
@@ -127,13 +149,41 @@ export default function ActiveDirectoryPage() {
 
   if (error) {
     return (
-       <div className="flex items-center justify-center h-full">
-         <Alert variant="destructive" className="max-w-lg">
-            <ServerCrash className="h-4 w-4" />
-            <AlertTitle>Active Directory Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-        </Alert>
-       </div>
+       <>
+        <div className="flex items-center justify-center h-full">
+            <Alert variant="destructive" className="max-w-lg">
+                <ServerCrash className="h-4 w-4" />
+                <AlertTitle>Active Directory Error</AlertTitle>
+                <AlertDescription>
+                    {error.message}
+                </AlertDescription>
+                 {error.details && (
+                    <Button variant="secondary" size="sm" className="mt-4" onClick={() => setShowErrorDetails(true)}>
+                        <FileText className="mr-2 h-4 w-4" />
+                        View Details
+                    </Button>
+                )}
+            </Alert>
+        </div>
+        <AlertDialog open={showErrorDetails} onOpenChange={setShowErrorDetails}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Error Details</AlertDialogTitle>
+                     <AlertDialogDescription>
+                        The following technical details were returned from the server. This can help diagnose the issue.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <Textarea
+                    readOnly
+                    value={error.details}
+                    className="h-64 text-xs font-mono bg-muted"
+                />
+                <AlertDialogFooter>
+                    <AlertDialogAction onClick={() => setShowErrorDetails(false)}>Close</AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+       </>
     );
   }
 
