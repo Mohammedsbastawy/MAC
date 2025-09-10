@@ -3,8 +3,10 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 
-# مسار مجلد الأدوات
-tools_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This script is in Tools/utils. The log file should be in Tools/
+# We use an absolute path to be safe.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+tools_dir = os.path.dirname(current_dir)
 log_file_path = os.path.join(tools_dir, 'dominion-tools.log')
 
 # إعداد الفورماتر
@@ -27,4 +29,3 @@ logger.setLevel(logging.INFO)
 if not logger.handlers:
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
-
