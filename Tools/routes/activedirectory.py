@@ -1,6 +1,7 @@
 # دوال التعامل مع Active Directory باستخدام ldap3
 from flask import Blueprint, request, jsonify, session
 from datetime import datetime, timezone
+from Tools.utils.logger import logger
 
 # We will use ldap3 which is cross-platform
 # We will attempt the import within the routes themselves to ensure
@@ -15,8 +16,10 @@ def check_ldap3_availability():
         import ssl
         return True, None
     except ImportError as e:
+        logger.error(f"ldap3 library is missing: {e}")
         return False, f"The ldap3 library is missing. Please install it using 'pip install ldap3'. Details: {str(e)}"
     except Exception as e:
+        logger.error(f"Unexpected error during ldap3 initialization: {e}")
         return False, f"An unexpected error occurred during ldap3 initialization. Details: {str(e)}"
 
 def format_datetime(dt_obj):
@@ -37,42 +40,51 @@ def get_ldap_connection():
         return None, {'ok': False, 'error': 'LDAP3 Library Not Available', 'message': ldap3_error, 'error_code': 'LDAP3_INIT_FAILED'}, 500
 
     if 'user' not in session or 'password' not in session or 'domain' not in session or 'email' not in session:
+        logger.warning("get_ldap_connection failed: Authentication required.")
         return None, {'ok': False, 'error': 'Authentication required. Please log in first.', 'error_code': 'AUTH_REQUIRED'}, 401
 
     from ldap3 import Server, Connection, ALL, SIMPLE, Tls
     import ssl
 
-    # For SIMPLE bind, we use the User Principal Name (UPN), e.g., user@domain.com
     user_principal_name = session.get("email")
     password = session.get("password")
     domain = session.get("domain")
     
+    logger.info(f"Attempting LDAP connection to domain '{domain}' with user '{user_principal_name}'.")
     conn = None
     last_error = None
     
     # Attempt 1: Connect with SSL (LDAPS)
     try:
-        # Use TLS for security, but be flexible with protocol
+        logger.info("Trying LDAPS on port 636...")
         tls_config = Tls(validate=ssl.CERT_NONE, version=ssl.PROTOCOL_TLS)
         server = Server(domain, get_info=ALL, use_ssl=True, port=636, tls=tls_config)
         conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
+        if conn.bound:
+             logger.info("LDAPS connection successful.")
     except Exception as e:
         last_error = str(e)
-        conn = None # Ensure connection is None on error
+        logger.warning(f"LDAPS connection failed: {last_error}")
+        conn = None
     
     # Attempt 2: If SSL failed, connect without SSL (standard LDAP)
     if not conn or not conn.bound:
         try:
+            logger.info("LDAPS failed, trying standard LDAP on port 389...")
             server = Server(domain, get_info=ALL, port=389)
             conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
+            if conn.bound:
+                logger.info("Standard LDAP connection successful.")
         except Exception as e:
-            last_error = str(e) # Update with the latest error
+            last_error = str(e)
+            logger.warning(f"Standard LDAP connection failed: {last_error}")
             conn = None
 
     # Check the final result
     if conn and conn.bound:
         return conn, None, 200
     else:
+        logger.error(f"LDAP bind failed for domain '{domain}'. Last error: {last_error}")
         return None, {
             'ok': False,
             'error': 'LDAP Connection Failed',
@@ -86,38 +98,32 @@ def _get_ad_computers_data():
     Internal function that fetches all computer objects from Active Directory
     and returns a Python dictionary. It does not return a Flask response.
     """
+    logger.info("Fetching computer data from Active Directory.")
     conn, error, status = get_ldap_connection()
     if error:
-        return error # Return the error dictionary directly
+        return error
 
     try:
-        # Discover the default naming context (e.g., "DC=example,DC=com")
         base_dn = conn.server.info.other.get('defaultNamingContext')[0]
         user_domain = session.get("domain", "Unknown")
         
-        # LDAP query to find all computer objects
         search_filter = "(objectCategory=computer)"
         attributes = ["name", "dNSHostName", "operatingSystem", "lastLogonTimestamp", "whenCreated"]
         
+        logger.info(f"Searching AD with base DN '{base_dn}' and filter '{search_filter}'.")
         conn.search(search_base=base_dn,
                     search_filter=search_filter,
                     attributes=attributes)
         
         computers_list = []
         for entry in conn.entries:
-            # The lastLogonTimestamp is a large integer representing 100-nanosecond intervals since Jan 1, 1601.
             last_logon_timestamp = entry.lastLogonTimestamp.value
-            if last_logon_timestamp:
+            last_logon_dt = None
+            if last_logon_timestamp and int(last_logon_timestamp) > 0:
                 try:
-                    # Timestamps of 0 or -1 mean 'never'
-                    if int(last_logon_timestamp) > 0:
-                        last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
-                    else:
-                        last_logon_dt = None
-                except:
+                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
+                except Exception:
                     last_logon_dt = None
-            else:
-                last_logon_dt = None
 
             computers_list.append({
                 "name": str(entry.name.value) if entry.name.value else "",
@@ -127,10 +133,12 @@ def _get_ad_computers_data():
                 "created": format_datetime(entry.whenCreated.value),
                 "domain": user_domain
             })
-
+        
+        logger.info(f"Found {len(computers_list)} computer objects in AD.")
         return {"ok": True, "computers": computers_list}
 
     except Exception as e:
+        logger.error(f"Unexpected error during AD computer query: {e}", exc_info=True)
         return {
             "ok": False, 
             "error": "Unexpected LDAP Query Error",
@@ -141,6 +149,7 @@ def _get_ad_computers_data():
     finally:
         if conn:
             conn.unbind()
+            logger.info("LDAP connection unbound.")
 
 
 @ad_bp.route('/api/ad/get-computers', methods=['POST'])
@@ -149,6 +158,7 @@ def get_ad_computers():
     API endpoint to fetch all computer objects from Active Directory using ldap3.
     This wraps the internal data-fetching function with a JSON response.
     """
+    logger.info("Received request for /api/ad/get-computers.")
     result = _get_ad_computers_data()
     status_code = 401 if result.get("error_code") == 'AUTH_REQUIRED' else 500 if not result.get("ok") else 200
     return jsonify(result), status_code
@@ -162,8 +172,11 @@ def set_user_password():
     data = request.get_json() or {}
     target_username = data.get('username')
     new_password = data.get('new_password')
+    
+    logger.info(f"Received request to set password for user '{target_username}'.")
 
     if not target_username or not new_password:
+        logger.warning("Set user password request failed: Missing username or password.")
         return jsonify({'ok': False, 'error': 'Target username and new password are required.'}), 400
 
     conn, error, status = get_ldap_connection()
@@ -171,32 +184,33 @@ def set_user_password():
         return jsonify(error), status
         
     try:
-        # Find the user to get their distinguished name (DN)
         base_dn = conn.server.info.other.get('defaultNamingContext')[0]
         search_filter = f"(&(objectCategory=person)(objectClass=user)(sAMAccountName={target_username}))"
         
+        logger.info(f"Searching for user '{target_username}' to reset password.")
         conn.search(search_base=base_dn,
                     search_filter=search_filter,
                     attributes=['distinguishedName'])
 
         if not conn.entries:
+            logger.warning(f"User '{target_username}' not found in AD for password reset.")
             return jsonify({'ok': False, 'error': f'User "{target_username}" not found in Active Directory.', 'error_code': 'USER_NOT_FOUND'}), 404
 
         user_dn = conn.entries[0].distinguishedName.value
+        logger.info(f"Found user DN: {user_dn}. Attempting password modification.")
 
-        # Set the password. It must be a UTF-16-LE encoded string, enclosed in quotes.
         quoted_password = f'"{new_password}"'
         password_value = quoted_password.encode('utf-16-le')
 
-        # The operation is a 'replace' on the 'unicodePwd' attribute.
         success = conn.modify(user_dn, {'unicodePwd': [('MODIFY_REPLACE', [password_value])]})
 
         if success:
+            logger.info(f'Successfully changed password for user "{target_username}".')
             return jsonify({'ok': True, 'message': f'Password for user "{target_username}" has been changed successfully.'})
         else:
-             # Check if it's a password policy error
             result_text = conn.result.get('description', '').lower()
             if 'constraint violation' in result_text or 'complexity' in result_text or 'history' in result_text:
+                 logger.warning(f"Password change for '{target_username}' failed due to domain policy: {conn.result.get('message')}")
                  return jsonify({
                     'ok': False, 
                     'error': 'Failed to set password due to domain policy.',
@@ -205,6 +219,7 @@ def set_user_password():
                     'details': conn.result.get('message', 'No details provided.')
                 }), 400
             
+            logger.error(f"Generic AD error on password change for '{target_username}': {conn.result.get('message')}")
             return jsonify({
                 'ok': False, 
                 'error': 'Active Directory Error', 
@@ -214,6 +229,7 @@ def set_user_password():
             }), 500
 
     except Exception as e:
+        logger.error(f"Unexpected error while setting user password: {e}", exc_info=True)
         return jsonify({
             "ok": False, 
             "error": "Unexpected Error",
@@ -224,3 +240,6 @@ def set_user_password():
     finally:
         if conn:
             conn.unbind()
+            logger.info("LDAP connection unbound after password operation.")
+
+    
