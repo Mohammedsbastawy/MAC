@@ -11,7 +11,7 @@ export default {
     extend: {
       fontFamily: {
         body: ['Inter', 'sans-serif'],
-        headline: ['"Rhythmic Regal"', 'serif'],
+        headline: ['Stanley', 'serif'],
         code: ['monospace'],
       },
       colors: {

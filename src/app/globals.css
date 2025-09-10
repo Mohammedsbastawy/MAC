@@ -3,6 +3,17 @@
 @tailwind utilities;
 
 @layer base {
+  @font-face {
+    font-family: 'Stanley';
+    src: url('/fonts/Stanley.ttf') format('truetype'),
+         url('/fonts/Stanley.woff2') format('woff2'),
+         url('/fonts/Stanley.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+  }
+}
+
+@layer base {
   :root {
     --background: 30 27% 95%; /* #F3F2EC */
     --foreground: 210 10% 23%;

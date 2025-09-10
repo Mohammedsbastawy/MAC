@@ -27,7 +27,7 @@ const AppSidebar = () => {
                  <div className={cn("flex w-full items-center justify-center gap-4", state === "collapsed" && "hidden")}>
                     <Logo className="h-16 w-16" />
                     <div className="flex flex-col items-start">
-                        <span className="text-2xl tracking-wider">ATLAS</span>
+                        <span className="text-2xl tracking-wider font-headline">ATLAS</span>
                         <span className="text-xs text-muted-foreground">BY BASTAWY</span>
                     </div>
                 </div>
