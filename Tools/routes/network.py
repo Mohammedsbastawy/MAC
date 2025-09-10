@@ -201,6 +201,17 @@ def api_discover_devices():
         source_ip = get_source_ip_for_cidr(scan_cidr)
         online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
+        # Get AD computers to filter them out from the scan results
+        ad_data = _get_ad_computers_data()
+        ad_hostnames = set()
+        if ad_data.get('ok'):
+             # Create a set of both short names and FQDNs for robust matching
+            for computer in ad_data.get('computers', []):
+                ad_hostnames.add(computer['name'].lower())
+                if computer['dns_hostname']:
+                    ad_hostnames.add(computer['dns_hostname'].lower())
+
+
         online_hosts_info = []
         with ThreadPoolExecutor(max_workers=50) as executor:
             future_to_ip = {executor.submit(get_device_info, ip): ip for ip in online_ips}
@@ -208,7 +219,10 @@ def api_discover_devices():
                 try:
                     result = future.result()
                     if result:
-                      online_hosts_info.append(result)
+                      # Check if the discovered host is in the AD list
+                      hostname = result.get('hostname', '').lower()
+                      if hostname not in ad_hostnames and ('.' in hostname and hostname.split('.')[0] not in ad_hostnames):
+                         online_hosts_info.append(result)
                 except Exception:
                     pass
         
@@ -242,7 +256,7 @@ def api_discover_devices():
         }), 500
 
 
-def check_host_status(ip):
+def check_host_status_ping(ip):
     """
     Checks if a host is online by sending a single ping.
     Returns True if online, False otherwise.
@@ -265,28 +279,68 @@ def check_host_status(ip):
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
+def check_host_status_psinfo(ip, user, domain, pwd):
+    """
+    Checks if a host is responsive by trying to run psinfo.
+    This is a fallback for when ping is disabled.
+    """
+    try:
+        # We use a very short timeout. We don't need the output, just the return code.
+        rc, _, _ = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=15, suppress_errors=True)
+        return rc == 0
+    except Exception:
+        return False
+
 
 @network_bp.route('/api/network/check-status', methods=['POST'])
 def api_check_status():
     """
-    Receives a list of IPs and checks their online status using ping.
+    Receives a list of IPs and checks their online status.
+    First tries a fast ping. For any that fail, it tries a slower but more
+    reliable PsInfo check, as ping (ICMP) might be blocked by a firewall.
     """
     data = request.get_json() or {}
     ips = data.get("ips", [])
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     
     if not ips:
         return jsonify({"ok": True, "online_ips": []})
 
-    online_ips = []
+    online_by_ping = set()
+    offline_after_ping = []
+
+    # Step 1: Fast ping check for all hosts
     with ThreadPoolExecutor(max_workers=50) as executor:
-        future_to_ip = {executor.submit(check_host_status, ip): ip for ip in ips}
+        future_to_ip = {executor.submit(check_host_status_ping, ip): ip for ip in ips}
         for future in as_completed(future_to_ip):
             ip = future_to_ip[future]
             try:
                 if future.result():
-                    online_ips.append(ip)
+                    online_by_ping.add(ip)
+                else:
+                    offline_after_ping.append(ip)
             except Exception:
-                # Ignore errors for single IP checks
-                pass
+                offline_after_ping.append(ip)
+
+    online_by_psinfo = set()
+    # Step 2: For hosts that failed ping, try PsInfo
+    if offline_after_ping:
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            future_to_ip = {
+                executor.submit(check_host_status_psinfo, ip, user, domain, pwd): ip
+                for ip in offline_after_ping
+            }
+            for future in as_completed(future_to_ip):
+                ip = future_to_ip[future]
+                try:
+                    if future.result():
+                        online_by_psinfo.add(ip)
+                except Exception:
+                    pass
     
-    return jsonify({"ok": True, "online_ips": online_ips})
+    # Step 3: Combine results
+    final_online_ips = list(online_by_ping.union(online_by_psinfo))
+    
+    return jsonify({"ok": True, "online_ips": final_online_ips})
+
+    

@@ -70,11 +70,12 @@ def get_tools_path(exe_name: str) -> str:
     # If not found, return the expected path, allowing subprocess to fail with a clear "not found" error.
     return candidate
 
-def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90):
+def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90, suppress_errors=False):
     """
     A centralized function to build and run any PsTools command.
     tool_name should be 'psexec', 'psinfo', etc. (without .exe)
     ip can be a hostname or an IP address.
+    suppress_errors will prevent logging decoding errors, useful for quick checks.
     """
     exe_name = tool_name.capitalize() + ".exe" if not tool_name.lower().endswith('.exe') else tool_name
     
@@ -99,6 +100,7 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
 
         # Build target arg
         target_arg = []
+        # Allow hostnames or IPs
         if ip:
              target_arg = [f"\\\\{ip}"]
         else:
@@ -139,7 +141,12 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
                 except UnicodeDecodeError:
                     continue
             # If all fail, decode with replacement characters
-            return raw_bytes.decode('utf-8', errors='replace')
+            if suppress_errors:
+                return raw_bytes.decode('utf-8', errors='replace')
+            else:
+                 # Re-raise the error if we can't decode and are not suppressing
+                raise UnicodeDecodeError("All decoding attempts failed for raw output.")
+
         
         out = decode_output(completed.stdout)
         err = decode_output(completed.stderr)
@@ -298,3 +305,5 @@ def parse_psloglist_output(output):
         if all(k in event_data for k in ['record_num', 'source', 'type', 'time', 'id', 'computer', 'user', 'message']):
             events.append(event_data)
     return {"psloglist": events} if events else None
+
+    
