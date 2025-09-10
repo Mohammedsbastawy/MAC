@@ -32,7 +32,8 @@ def require_login_and_set_ad_credentials():
         return jsonify({
             'ok': False,
             'error': 'The pyad library is not installed on the server, which is required for Active Directory queries.',
-            'error_code': 'PYAD_NOT_FOUND'
+            'error_code': 'PYAD_NOT_FOUND',
+            'details': 'The pyad python library could not be imported. Please ensure it is installed via requirements.txt.'
         }), 500
     
     # 3. Retrieve credentials from the session
@@ -109,7 +110,7 @@ def get_ad_computers():
         return jsonify({
             "ok": False, 
             "error": "Active Directory Query Failed",
-            "message": f"An error occurred while trying to query Active Directory. This can be due to insufficient permissions or connectivity issues.",
+            "message": "An error occurred while trying to query Active Directory. This can be due to insufficient permissions or connectivity issues.",
             "error_code": "AD_QUERY_FAILED",
             "details": str(e)
         }), 500
@@ -174,5 +175,3 @@ def set_user_password():
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
-
-    
