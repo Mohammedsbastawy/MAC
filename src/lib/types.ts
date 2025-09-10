@@ -3,13 +3,14 @@ export type Device = {
   name: string;
   ipAddress: string;
   macAddress: string;
-  status: 'online' | 'offline';
+  status: 'online' | 'offline' | 'unknown';
   type: 'laptop' | 'server' | 'router' | 'mobile' | 'iot' | 'desktop' | 'unknown';
   os: string;
   lastSeen: string;
   domain: string;
   isDomainMember: boolean;
   isLoadingDetails: boolean;
+  source: 'ad' | 'scan';
 };
 
 export type NetworkInterface = {
@@ -18,4 +19,13 @@ export type NetworkInterface = {
   ip: string;
   netmask: string;
   cidr: string;
+};
+
+export type ADComputer = {
+  name: string;
+  dns_hostname: string;
+  os: string;
+  last_logon: string;
+  created: string;
+  domain?: string;
 };

@@ -122,7 +122,8 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
     if not os.path.exists(masscan_path):
         raise FileNotFoundError("masscan.exe not found in the Tools/bin directory.")
 
-    output_file = "masscan_scan.json"
+    # Use a unique filename to avoid race conditions if multiple scans run
+    output_file = f"masscan_scan_{os.getpid()}.json"
     
     command = [
         masscan_path,
@@ -151,15 +152,12 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
         # Pass the stderr output for better error reporting in the UI
         raise RuntimeError("Masscan execution failed.", proc.stderr or proc.stdout)
 
-    # Masscan outputs JSON objects on each line, not a valid single JSON array
-    # We need to parse it line by line
     found_hosts = []
     if os.path.exists(output_file):
         try:
             with open(output_file, 'r') as f:
                 for line in f:
                     line = line.strip()
-                    # Masscan might leave an empty "[]" at the end, so we check for actual objects
                     if line.startswith('{') and line.endswith('}'):
                         try:
                             data = json.loads(line)
@@ -167,7 +165,7 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
                             if ip:
                                 found_hosts.append(ip)
                         except json.JSONDecodeError:
-                            continue # Ignore malformed lines
+                            continue
             os.remove(output_file)
         finally:
             if os.path.exists(output_file):
@@ -182,30 +180,19 @@ def get_device_info(ip):
         hostname = get_hostname_from_ip(ip)
         mac = get_mac_address(ip)
         return {"ip": ip, "hostname": hostname or "Unknown", "mac": mac or "N/A"}
-    except Exception as e:
-        # Don't let a single failure stop the whole scan
+    except Exception:
         return {"ip": ip, "hostname": "Error", "mac": "Error"}
-
-
-@network_bp.route('/api/get-router-mac', methods=['POST'])
-def api_get_router_mac():
-    mac = get_router_mac_address()
-    if mac:
-        return jsonify({"ok": True, "mac": mac})
-    else:
-        return jsonify({"ok": False, "error": "Could not determine router MAC automatically."})
 
 
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
-    Performs a fast network discovery using Masscan, then enriches the
-    data with information from Active Directory.
+    Performs a fast network discovery using Masscan. This is intended to find
+    WORKGROUP devices, as domain devices are fetched directly from AD.
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
     router_mac = data.get("router_mac")
-    user_domain = session.get("domain")
 
     if not scan_cidr:
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
@@ -214,71 +201,20 @@ def api_discover_devices():
         source_ip = get_source_ip_for_cidr(scan_cidr)
         online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
-        # Now get details for each IP in parallel
-        online_hosts_basic_info = []
+        online_hosts_info = []
         with ThreadPoolExecutor(max_workers=50) as executor:
             future_to_ip = {executor.submit(get_device_info, ip): ip for ip in online_ips}
             for future in as_completed(future_to_ip):
                 try:
                     result = future.result()
                     if result:
-                      online_hosts_basic_info.append(result)
-                except Exception as exc:
-                    print(f'{future_to_ip[future]} generated an exception: {exc}')
-
-        # Fetch all computer data from Active Directory once
-        ad_computers_data = _get_ad_computers_data()
-        ad_computers_map = {}
-        if ad_computers_data.get('ok'):
-             # Create a map for quick lookups using both FQDN and short name
-             for comp in ad_computers_data.get('computers', []):
-                # DNS hostname is more reliable for matching (FQDN)
-                dns_hostname = comp.get('dns_hostname')
-                if dns_hostname:
-                    ad_computers_map[dns_hostname.lower()] = comp
-                # Add the short name (SAMAccountName) as well, without the trailing $
-                short_name = comp.get('name')
-                if short_name:
-                    ad_computers_map[short_name.lower()] = comp
-        else:
-             # If fetching AD data failed, return that error
-             return jsonify(ad_computers_data), 500
-
-
-        # Enrich the discovered hosts with AD data
-        enriched_hosts = []
-        for host in online_hosts_basic_info:
-            # Check for a match using both the FQDN and the short name
-            hostname_lower = host['hostname'].lower() if host['hostname'] else ''
-            
-            # The resolved hostname might be FQDN or short, so we check both possibilities.
-            # We also check just the first part of the FQDN in case that's what matches.
-            short_hostname_lower = hostname_lower.split('.')[0]
-
-            ad_info = ad_computers_map.get(hostname_lower) or ad_computers_map.get(short_hostname_lower)
-            
-            if ad_info:
-                # This device is in Active Directory
-                enriched_hosts.append({
-                    "ip": host['ip'],
-                    "hostname": host['hostname'],
-                    "mac": host['mac'],
-                    "os": ad_info.get('os', 'Unknown OS'),
-                    "domain": user_domain,
-                    "isDomainMember": True
-                })
-            else:
-                 # This device is not in Active Directory, or hostname couldn't be resolved
-                enriched_hosts.append({
-                    "ip": host['ip'],
-                    "hostname": host['hostname'],
-                    "mac": host['mac'],
-                    "os": "Unknown OS",
-                    "domain": "WORKGROUP",
-                    "isDomainMember": False
-                })
-
-        sorted_hosts = sorted(enriched_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
+                      online_hosts_info.append(result)
+                except Exception:
+                    pass
+        
+        # This endpoint now only returns discovered devices. The frontend will filter out
+        # any that are already in the domain list.
+        sorted_hosts = sorted(online_hosts_info, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})
 
     except FileNotFoundError:
@@ -287,7 +223,6 @@ def api_discover_devices():
             "error": "Masscan Not Found",
             "message": "masscan.exe was not found in the Tools/bin directory.",
             "error_code": "MASSCAN_NOT_FOUND",
-            "details": "Please download the Masscan Windows binary from the official GitHub releases page and place the 'masscan.exe' file in the 'Tools/bin' folder."
         }), 500
     except RuntimeError as e:
         return jsonify({
@@ -305,3 +240,53 @@ def api_discover_devices():
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
+
+
+def check_host_status(ip):
+    """
+    Checks if a host is online by sending a single ping.
+    Returns True if online, False otherwise.
+    """
+    try:
+        # The '-n 1' sends only one echo request.
+        # The '-w 1000' sets a timeout of 1000ms (1 second).
+        command = ["ping", "-n", "1", "-w", "1000", ip]
+        
+        # Use CREATE_NO_WINDOW to prevent flash of a command prompt window
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        # A successful ping usually returns 0.
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+@network_bp.route('/api/network/check-status', methods=['POST'])
+def api_check_status():
+    """
+    Receives a list of IPs and checks their online status using ping.
+    """
+    data = request.get_json() or {}
+    ips = data.get("ips", [])
+    
+    if not ips:
+        return jsonify({"ok": True, "online_ips": []})
+
+    online_ips = []
+    with ThreadPoolExecutor(max_workers=50) as executor:
+        future_to_ip = {executor.submit(check_host_status, ip): ip for ip in ips}
+        for future in as_completed(future_to_ip):
+            ip = future_to_ip[future]
+            try:
+                if future.result():
+                    online_ips.append(ip)
+            except Exception:
+                # Ignore errors for single IP checks
+                pass
+    
+    return jsonify({"ok": True, "online_ips": online_ips})

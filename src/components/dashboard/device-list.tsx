@@ -12,7 +12,6 @@ import {
   ToyBrick,
   Wifi,
   WifiOff,
-  ChevronDown,
   Users,
   Briefcase,
   Zap,
@@ -24,6 +23,7 @@ import {
   Siren,
   FileText,
   Search,
+  RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +35,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Device, NetworkInterface } from "@/lib/types";
+import type { Device, NetworkInterface, ADComputer } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -47,12 +47,12 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "../ui/badge";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import Link from "next/link";
 import { Input } from "../ui/input";
+import { Separator } from "../ui/separator";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -69,12 +69,6 @@ type DeviceListProps = {
   onSelectDevice: (device: Device) => void;
 };
 
-type GpUpdateStatus = 'idle' | 'loading' | 'success' | 'error';
-type GpUpdateResult = {
-    status: GpUpdateStatus;
-    output?: string;
-};
-
 type ScanErrorState = {
     isError: boolean;
     title: string;
@@ -83,51 +77,23 @@ type ScanErrorState = {
     errorCode?: 'MASSCAN_NOT_FOUND' | 'MASSCAN_FAILED';
 }
 
-export default function DeviceList({ onSelectDevice }: DeviceListProps) {
-  const [isScanning, setIsScanning] = React.useState(false);
-  const [isGpUpdating, setIsGpUpdating] = React.useState(false);
-  const [devices, setDevices] = React.useState<Device[]>([]);
-  const { toast } = useToast();
-  
-  const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
-  const [selectedCidr, setSelectedCidr] = React.useState<string | undefined>();
-  const [networkError, setNetworkError] = React.useState<string | null>(null);
-  const [scanError, setScanError] = React.useState<ScanErrorState | null>(null);
+const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
+    id: adComputer.dns_hostname || adComputer.name,
+    name: adComputer.name,
+    ipAddress: adComputer.dns_hostname, // Primary identifier for status check
+    macAddress: "-",
+    status: 'unknown', // Initially unknown
+    type: determineDeviceType(adComputer.name),
+    os: adComputer.os,
+    lastSeen: adComputer.last_logon,
+    domain: adComputer.domain || "Domain",
+    isDomainMember: true,
+    isLoadingDetails: false,
+    source: 'ad',
+});
 
-  const [gpUpdateStatus, setGpUpdateStatus] = React.useState<Record<string, GpUpdateResult>>({});
-  const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, title: string, content: string}>({ isOpen: false, title: '', content: '' });
-  const [macPrompt, setMacPrompt] = React.useState<{isOpen: boolean, details: string}>({isOpen: false, details: ''});
-
-
-  React.useEffect(() => {
-    const fetchInterfaces = async () => {
-        try {
-            // Don't set scanning true here, it's just a background fetch
-            setNetworkError(null);
-            const res = await fetch("/api/network-interfaces", { method: 'POST' });
-            const data = await res.json();
-            if(data.ok && data.interfaces.length > 0) {
-                setInterfaces(data.interfaces);
-                // Automatically select the first interface
-                if (!selectedCidr) {
-                    setSelectedCidr(data.interfaces[0].cidr);
-                }
-            } else {
-                 const errorMsg = data.error || "Could not find any usable network interfaces.";
-                 setNetworkError(errorMsg);
-                 toast({ variant: "destructive", title: "Network Error", description: errorMsg});
-            }
-        } catch (err: any) {
-             const errorMsg = err.message || "An unknown error occurred while fetching network interfaces.";
-             setNetworkError(errorMsg);
-             toast({ variant: "destructive", title: "Network Error", description: errorMsg});
-        }
-    };
-    fetchInterfaces();
-  }, [toast, selectedCidr]);
-
-
-  const determineDeviceType = (hostname: string): Device["type"] => {
+const determineDeviceType = (hostname: string): Device["type"] => {
+    if (!hostname) return 'unknown';
     const lowerHostname = hostname.toLowerCase();
     if (lowerHostname.includes("laptop")) return "laptop";
     if (lowerHostname.includes("server")) return "server";
@@ -136,54 +102,195 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     if (lowerHostname.includes("desktop") || lowerHostname.includes("pc")) return "desktop";
     if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light")) return "iot";
     return "unknown";
+};
+
+
+const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device, onSelect }) => {
+    const Icon = ICONS[device.type] || Laptop;
+
+    return (
+        <Card
+            onClick={onSelect}
+            className={cn("cursor-pointer transition-all hover:shadow-md hover:-translate-y-1 flex flex-col",
+             device.status === 'offline' && "opacity-60 hover:opacity-100"
+            )}
+        >
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                <CardTitle className="text-lg font-medium">{device.name}</CardTitle>
+                <Icon className="h-5 w-5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent className="space-y-1 flex-grow">
+                <p className="text-sm text-muted-foreground">{device.ipAddress}</p>
+                <div className="flex items-center pt-2">
+                    <div className={cn(
+                        "h-2.5 w-2.5 rounded-full mr-2",
+                        device.status === 'online' ? "bg-green-500 animate-pulse" : 
+                        device.status === 'offline' ? "bg-gray-400" :
+                        "bg-yellow-400"
+                    )} />
+                    {device.isLoadingDetails ? (
+                        <div className="flex items-center">
+                            <Loader2 className="h-3 w-3 mr-1.5 animate-spin text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">Checking...</span>
+                        </div>
+                    ) : (
+                        <p className="text-xs text-muted-foreground truncate" title={device.os}>
+                            {device.os}
+                        </p>
+                    )}
+                </div>
+            </CardContent>
+            <CardFooter>
+                {device.isDomainMember ? (
+                    <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">
+                        <Users className="mr-1 h-3 w-3" />
+                        Domain Member
+                    </Badge>
+                ) : (
+                    <Badge variant="secondary">
+                        <Briefcase className="mr-1 h-3 w-3" />
+                        Workgroup
+                    </Badge>
+                )}
+            </CardFooter>
+        </Card>
+    );
+};
+
+
+export default function DeviceList({ onSelectDevice }: DeviceListProps) {
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [domainDevices, setDomainDevices] = React.useState<Device[]>([]);
+  const [workgroupDevices, setWorkgroupDevices] = React.useState<Device[]>([]);
+  const { toast } = useToast();
+  
+  const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
+  const [selectedCidr, setSelectedCidr] = React.useState<string | undefined>();
+  const [networkError, setNetworkError] = React.useState<string | null>(null);
+  const [scanError, setScanError] = React.useState<ScanErrorState | null>(null);
+  const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, title: string, content: string}>({ isOpen: false, title: '', content: '' });
+
+  // Fetch initial data (AD computers and network interfaces) on mount
+  React.useEffect(() => {
+    const fetchInitialData = async () => {
+        setIsLoading(true);
+        setNetworkError(null);
+        setScanError(null);
+
+        // Fetch network interfaces
+        try {
+            const res = await fetch("/api/network-interfaces", { method: 'POST' });
+            const data = await res.json();
+            if(data.ok && data.interfaces.length > 0) {
+                setInterfaces(data.interfaces);
+                if (!selectedCidr) {
+                    setSelectedCidr(data.interfaces[0].cidr);
+                }
+            } else {
+                 setNetworkError(data.error || "Could not find any usable network interfaces.");
+            }
+        } catch (err) {
+             setNetworkError("Failed to fetch network interfaces.");
+        }
+
+        // Fetch AD Computers
+        try {
+            const response = await fetch("/api/ad/get-computers", { method: "POST" });
+            const data = await response.json();
+            if (data.ok) {
+                const adDevices = data.computers.map(mapAdComputerToDevice);
+                setDomainDevices(adDevices);
+            } else {
+                 setScanError({
+                    isError: true,
+                    title: data.error || "AD Error",
+                    message: data.message || `Failed to fetch devices from Active Directory.`,
+                    details: data.details,
+                });
+            }
+        } catch (err) {
+            setScanError({ isError: true, title: "Server Error", message: "Failed to connect to the server to get AD devices." });
+        }
+
+        setIsLoading(false);
+    };
+    fetchInitialData();
+  }, []);
+
+  const handleRefreshStatus = async () => {
+      const allDevices = [...domainDevices, ...workgroupDevices];
+      const ipsToCheck = allDevices.map(d => d.ipAddress).filter(Boolean);
+
+      if (ipsToCheck.length === 0) {
+          toast({ title: "No devices to check", description: "There are no devices with IP addresses to check." });
+          return;
+      }
+
+      toast({ title: "Refreshing Status...", description: `Pinging ${ipsToCheck.length} devices.` });
+
+      setDomainDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true })));
+      setWorkgroupDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true })));
+
+      try {
+          const res = await fetch("/api/network/check-status", {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ips: ipsToCheck })
+          });
+          const data = await res.json();
+
+          if (!data.ok) {
+              throw new Error(data.error || "Failed to check device status.");
+          }
+          
+          const onlineIps = new Set(data.online_ips);
+
+          setDomainDevices(prev => prev.map(d => ({ 
+              ...d, 
+              status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
+              isLoadingDetails: false 
+          })));
+
+          setWorkgroupDevices(prev => prev.map(d => ({ 
+              ...d, 
+              status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
+              isLoadingDetails: false
+          })));
+
+          toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} devices online.` });
+
+      } catch (err: any) {
+          toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
+          // Reset loading state on error
+          setDomainDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false })));
+          setWorkgroupDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false })));
+      }
   };
 
 
-  const handleScan = async (manualRouterMac: string | null = null) => {
+  const handleDiscoverWorkgroup = async () => {
     if (!selectedCidr) {
         toast({ variant: "destructive", title: "No Network Selected", description: "Please select a network to scan."});
         return;
     }
 
-    setIsScanning(true);
-    setDevices([]);
-    setGpUpdateStatus({});
+    setIsLoading(true);
+    setWorkgroupDevices([]);
     setScanError(null);
-    toast({ title: "Scan Initiated", description: `Discovering devices and querying AD on ${selectedCidr}...` });
+    toast({ title: "Scan Initiated", description: `Discovering workgroup devices on ${selectedCidr}...` });
 
     try {
-        let router_mac = manualRouterMac;
-
-        // Step 1: Try to get router MAC automatically if not provided manually
-        if (!router_mac) {
-             const macRes = await fetch("/api/get-router-mac", {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cidr: selectedCidr })
-             });
-             const macData = await macRes.json();
-             if (macData.ok && macData.mac) {
-                router_mac = macData.mac;
-                toast({ title: "Router Detected", description: `Using router MAC: ${router_mac}`});
-             }
-        }
+        const domainHostnames = new Set(domainDevices.map(d => d.name.toLowerCase()));
 
         const res = await fetch("/api/discover-devices", { 
             method: "POST",
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cidr: selectedCidr, router_mac: router_mac })
+            body: JSON.stringify({ cidr: selectedCidr })
         });
         
         const data = await res.json();
 
         if (!res.ok || !data.ok) {
-            // If the scan failed with a specific MASSCAN_FAILED error, prompt for MAC
-            if (data.error_code === 'MASSCAN_FAILED') {
-                setMacPrompt({isOpen: true, details: data.details || "The scan failed. Please provide the router MAC address."});
-                setIsScanning(false); // Stop the loading spinner
-                return;
-            }
-
             setScanError({
                 isError: true,
                 title: data.error || "Scan Error",
@@ -191,154 +298,47 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 details: data.details,
                 errorCode: data.error_code
             });
-            toast({ variant: "destructive", title: data.error || "Scan Failed", description: data.message });
-            setIsScanning(false);
+            setIsLoading(false);
             return; 
         }
-
-        const discoveredDevices: Device[] = data.devices.map((d: any) => ({
-            id: d.mac || d.ip, // Use MAC address as ID if available, else IP
-            name: d.hostname === "Unknown" ? d.ip : d.hostname,
-            ipAddress: d.ip,
-            macAddress: d.mac || "-",
-            status: 'online',
-            type: determineDeviceType(d.hostname),
-            os: d.os || "Unknown OS",
-            lastSeen: 'Now',
-            domain: d.domain || "WORKGROUP",
-            isDomainMember: d.isDomainMember || false,
-            isLoadingDetails: false, // Details are now loaded in one go
-        }));
         
-        if (discoveredDevices.length === 0) {
-            toast({ title: "Scan Complete", description: "No online devices were found on this network."});
-        } else {
-            toast({ title: "Discovery Complete", description: `Found and categorized ${discoveredDevices.length} devices.`});
-        }
-        
-        setDevices(discoveredDevices);
-        setIsScanning(false);
+        const discoveredButNotDomain = data.devices
+            .filter((d: any) => !domainHostnames.has(d.hostname.toLowerCase()))
+            .map((d: any) => ({
+                id: d.mac || d.ip,
+                name: d.hostname === "Unknown" ? d.ip : d.hostname,
+                ipAddress: d.ip,
+                macAddress: d.mac || "-",
+                status: 'online', // Masscan only finds online devices
+                type: determineDeviceType(d.hostname),
+                os: d.os || "Unknown OS",
+                lastSeen: 'Now',
+                domain: "WORKGROUP",
+                isDomainMember: false,
+                isLoadingDetails: false,
+                source: 'scan',
+            } as Device));
 
+        toast({ title: "Workgroup Scan Complete", description: `Found ${discoveredButNotDomain.length} non-domain devices.`});
+        setWorkgroupDevices(discoveredButNotDomain);
+        setIsLoading(false);
 
     } catch (err: any) {
-        const errorMessage = err.message || "An unknown client-side error occurred.";
-        setScanError({ isError: true, title: "Client Error", message: errorMessage });
-        toast({ variant: "destructive", title: "Scan Error", description: errorMessage });
+        setScanError({ isError: true, title: "Client Error", message: err.message || "An unknown client-side error occurred." });
         console.error(err);
-        setIsScanning(false);
+        setIsLoading(false);
     }
   };
-
-  const handleDeviceSelect = (device: Device) => {
-    onSelectDevice(device);
-  };
-  
-  const handleMassGpUpdate = async () => {
-    const domainDevices = devices.filter(d => d.status === 'online' && d.isDomainMember);
-    if (domainDevices.length === 0) {
-      toast({ title: "No Devices to Update", description: "There are no online domain member devices to update." });
-      return;
-    }
-
-    setIsGpUpdating(true);
-    toast({ title: "Starting Mass GpUpdate", description: `Updating ${domainDevices.length} domain devices...` });
-
-    const initialStatus: Record<string, GpUpdateResult> = {};
-    domainDevices.forEach(d => {
-      initialStatus[d.id] = { status: 'loading' };
-    });
-    setGpUpdateStatus(initialStatus);
-
-    for (const device of domainDevices) {
-        try {
-            const response = await fetch('/api/psexec', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ip: device.ipAddress, cmd: "gpupdate /force" }),
-            });
-
-            const result = await response.json();
-            
-            setGpUpdateStatus(prev => ({
-                ...prev,
-                [device.id]: {
-                    status: result.rc === 0 ? 'success' : 'error',
-                    output: result.stdout || result.stderr
-                }
-            }));
-
-        } catch (error: any) {
-            setGpUpdateStatus(prev => ({
-                ...prev,
-                [device.id]: {
-                    status: 'error',
-                    output: error.message || "A client-side error occurred."
-                }
-            }));
-        }
-    }
-    
-    setIsGpUpdating(false);
-    toast({ title: "Mass GpUpdate Complete", description: "Finished updating all targeted devices." });
-  };
-
-  const renderStatusIcon = (device: Device) => {
-      const gpStatus = gpUpdateStatus[device.id]?.status;
-
-      switch(gpStatus) {
-          case 'loading':
-              return <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />;
-          case 'success':
-              return (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger>
-                        <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                        <p>GPUpdate successful!</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )
-          case 'error':
-              return (
-                 <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                         <Button variant="ghost" size="icon" className="h-auto w-auto text-red-500 hover:text-red-500" onClick={(e) => {
-                              e.stopPropagation();
-                              setErrorDialog({ isOpen: true, title: "GPUpdate Execution Failed", content: gpUpdateStatus[device.id]?.output || "No error details available." });
-                          }}>
-                            <HelpCircle className="h-5 w-5" />
-                          </Button>
-                    </TooltipTrigger>
-                     <TooltipContent>
-                        <p>GPUpdate Failed. Click for details.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              );
-          default:
-              const Icon = ICONS[device.type] || Laptop;
-              return <Icon className="h-5 w-5 text-muted-foreground" />;
-      }
-  }
-
 
   const renderContent = () => {
-    if (networkError && interfaces.length === 0) {
-        return (
-             <Alert variant="destructive" className="h-80 flex flex-col items-center justify-center text-center">
-                <WifiOff className="h-12 w-12" />
-                <AlertTitle className="mt-4 text-lg">Failed to Load Network Interfaces</AlertTitle>
-                <AlertDescription className="mt-2">
-                    {networkError}
-                    <br/>
-                    Please ensure the backend is running and has the necessary permissions.
-                </AlertDescription>
-            </Alert>
-        )
+    if (isLoading) {
+      return (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-40" />
+          ))}
+        </div>
+      );
     }
 
     if (scanError?.isError) {
@@ -348,133 +348,101 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 <AlertTitle className="mt-4 text-lg">{scanError.title}</AlertTitle>
                 <AlertDescription className="mt-2 max-w-md space-y-4">
                     <p>{scanError.message}</p>
-                    <div className="flex justify-center items-center gap-4">
-                        {scanError.errorCode === 'MASSCAN_NOT_FOUND' && (
-                             <>
-                                <Button asChild>
-                                <a href="https://github.com/robertdavidgraham/masscan/releases" target="_blank" rel="noopener noreferrer">
-                                    <DownloadCloud className="mr-2 h-4 w-4" />
-                                    Download Masscan
-                                </a>
-                                </Button>
-                                <Button asChild variant="secondary">
-                                    <Link href="/dashboard/help">View Instructions</Link>
-                                </Button>
-                             </>
-                        )}
-                        {scanError.errorCode === 'MASSCAN_FAILED' && (
-                            <>
-                                <Button asChild variant="secondary">
-                                    <Link href="/dashboard/help">Troubleshooting Guide</Link>
-                                </Button>
-                                {scanError.details && (
-                                    <Button onClick={() => setErrorDialog({isOpen: true, title: "Masscan Error Log", content: scanError.details ?? "No details available."})}>
-                                        <FileText className="mr-2 h-4 w-4" />
-                                        Show Error Log
-                                    </Button>
-                                )}
-                            </>
-                        )}
-                    </div>
+                    {scanError.details && (
+                        <Button onClick={() => setErrorDialog({isOpen: true, title: "Error Log", content: scanError.details ?? "No details available."})}>
+                            <FileText className="mr-2 h-4 w-4" />
+                            Show Error Log
+                        </Button>
+                    )}
                 </AlertDescription>
             </Alert>
         )
     }
 
-    if (isScanning && devices.length === 0) {
-      return (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Card key={i}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <Skeleton className="h-5 w-32" />
-                <Skeleton className="h-6 w-6 rounded-full" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-5 w-24 mb-2" />
-                <Skeleton className="h-4 w-40" />
-              </CardContent>
-              <CardFooter>
-                 <Skeleton className="h-5 w-20" />
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-      );
-    }
-
-    if (!isScanning && devices.length === 0) {
-      return (
-        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-80">
-          <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
-          <h3 className="mt-4 text-lg font-semibold text-foreground">No devices found</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Select a network and click "Discover Devices" to begin the Masscan.
-          </p>
-        </div>
-      );
-    }
+    const onlineDomainDevices = domainDevices.filter(d => d.status === 'online').length;
+    const onlineWorkgroupDevices = workgroupDevices.filter(d => d.status === 'online').length;
 
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {devices.map((device) => {
-          return (
-            <Card
-              key={device.id}
-              onClick={() => handleDeviceSelect(device)}
-              className="cursor-pointer transition-all hover:shadow-md hover:-translate-y-1 flex flex-col"
-            >
-              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-                <CardTitle className="text-lg font-medium">{device.name}</CardTitle>
-                {renderStatusIcon(device)}
-              </CardHeader>
-              <CardContent className="space-y-1 flex-grow">
-                <p className="text-sm text-muted-foreground">{device.ipAddress}</p>
-                 <div className="flex items-center pt-2">
-                    <div className={cn(
-                        "h-2.5 w-2.5 rounded-full mr-2",
-                        device.status === 'online' ? "bg-green-500" : "bg-gray-400"
-                    )} />
-                     {device.isLoadingDetails ? (
-                        <div className="flex items-center">
-                            <Loader2 className="h-3 w-3 mr-1.5 animate-spin text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">Loading details...</span>
-                        </div>
-                     ) : (
-                        <p className="text-xs text-muted-foreground truncate" title={device.os}>
-                            {device.os}
-                        </p>
-                    )}
+      <div className="space-y-8">
+        {/* Domain Devices Section */}
+        <div>
+            <CardTitle className="mb-1 text-xl flex items-center gap-2">
+                <Users /> Domain Devices ({domainDevices.length} total / {onlineDomainDevices} online)
+            </CardTitle>
+            <CardDescription className="mb-4">
+                Devices found in Active Directory. Click 'Refresh Online Status' to check which are online.
+            </CardDescription>
+            {domainDevices.length > 0 ? (
+                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {domainDevices.map((device) => (
+                        <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
+                    ))}
                 </div>
-              </CardContent>
-              <CardFooter>
-                {device.isDomainMember ? (
-                    <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                        <Users className="mr-1 h-3 w-3" />
-                        Domain Member
-                    </Badge>
-                ) : (
-                    <Badge variant="secondary">
-                         <Briefcase className="mr-1 h-3 w-3" />
-                        {device.domain}
-                    </Badge>
-                )}
-              </CardFooter>
-            </Card>
-          );
-        })}
+            ) : (
+                <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40">
+                    <h3 className="text-lg font-semibold text-foreground">No domain devices found</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">Could not retrieve devices from Active Directory.</p>
+                </div>
+            )}
+        </div>
+
+        <Separator />
+
+        {/* Workgroup Devices Section */}
+        <div>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+                <div>
+                     <CardTitle className="mb-1 text-xl flex items-center gap-2">
+                        <Briefcase /> Discovered Workgroup Devices ({workgroupDevices.length} found)
+                    </CardTitle>
+                    <CardDescription className="mb-4">
+                        Use the network scanner to find devices that are not in the domain.
+                    </CardDescription>
+                </div>
+                 <div className="flex flex-wrap items-center gap-2 mb-4 md:mb-0">
+                    <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isLoading}>
+                        <SelectTrigger className="h-11 min-w-[250px] justify-between">
+                            <div className="flex items-center gap-2">
+                                <Network className="h-4 w-4" />
+                                <SelectValue placeholder={networkError ? "No networks found" : "Select a Network"} />
+                            </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                            {interfaces.map(iface => (
+                                <SelectItem key={iface.id} value={iface.cidr}>
+                                    {iface.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Button onClick={handleDiscoverWorkgroup} disabled={isLoading || !selectedCidr} size="lg" className="h-11">
+                        <Search className="mr-2 h-4 w-4" />
+                        Discover Workgroup Devices
+                    </Button>
+                </div>
+            </div>
+
+            {workgroupDevices.length > 0 ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
+                    {workgroupDevices.map((device) => (
+                        <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
+                    ))}
+                </div>
+            ) : (
+                <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40 mt-4">
+                     <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
+                     <h3 className="mt-4 text-lg font-semibold text-foreground">No workgroup devices discovered</h3>
+                     <p className="mt-2 text-sm text-muted-foreground">
+                        Select a network and scan to find non-domain devices.
+                     </p>
+                </div>
+            )}
+        </div>
+
       </div>
     );
   };
   
-  const handleManualMacSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const mac = formData.get('mac') as string;
-    setMacPrompt({isOpen: false, details: ''});
-    handleScan(mac);
-  }
-
   return (
     <>
     <div className="space-y-6">
@@ -482,35 +450,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         <div className="space-y-1">
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Network Devices</h1>
           <p className="text-muted-foreground">
-            {isScanning 
-                ? `Scanning ${selectedCidr}...`
-                : `Discovered ${devices.length} online devices.`
-            }
+            Manage domain-joined and workgroup devices.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-             <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isScanning || isGpUpdating}>
-                <SelectTrigger className="h-11 min-w-[250px] justify-between">
-                    <div className="flex items-center gap-2">
-                        <Network className="h-4 w-4" />
-                        <SelectValue placeholder={networkError ? "No networks found" : "Select a Network"} />
-                    </div>
-                </SelectTrigger>
-                <SelectContent>
-                    {interfaces.map(iface => (
-                        <SelectItem key={iface.id} value={iface.cidr}>
-                             {iface.name}
-                        </SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-            <Button onClick={() => handleScan()} disabled={isScanning || isGpUpdating || !selectedCidr} size="lg" className="h-11">
-                {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                Discover Devices
-            </Button>
-            <Button onClick={handleMassGpUpdate} disabled={isScanning || isGpUpdating || devices.length === 0} size="lg" className="h-11">
-                {isGpUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
-                Mass GpUpdate
+            <Button onClick={handleRefreshStatus} disabled={isLoading || (domainDevices.length === 0 && workgroupDevices.length === 0)} size="lg" className="h-11">
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                Refresh Online Status
             </Button>
         </div>
       </div>
@@ -539,38 +485,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
-     <AlertDialog open={macPrompt.isOpen} onOpenChange={(open) => !open && setMacPrompt({isOpen: false, details: ''})}>
-        <form onSubmit={handleManualMacSubmit}>
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Router MAC Address Required</AlertDialogTitle>
-                    <AlertDialogDescription>
-                        Masscan failed to automatically resolve the router. Please provide the router's MAC address to continue.
-                        <p className="text-xs text-muted-foreground mt-2 font-mono bg-muted p-2 rounded-md">{macPrompt.details}</p>
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <div className="my-4">
-                    <Label htmlFor="mac-input">Router MAC</Label>
-                    <Input
-                        id="mac-input"
-                        name="mac"
-                        placeholder="e.g., 00:1A:2B:3C:4D:5E"
-                        required
-                        className="mt-1 font-mono"
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                        You can find this on the router's label or by running `arp -a` in your command prompt and finding the entry for your router's IP.
-                    </p>
-                </div>
-                <AlertDialogFooter>
-                    <AlertDialogCancel type="button" onClick={() => setMacPrompt({isOpen: false, details: ''})}>Cancel</AlertDialogCancel>
-                    <AlertDialogAction type="submit">Scan Again</AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </form>
-    </AlertDialog>
     </>
   );
 }
-
-    

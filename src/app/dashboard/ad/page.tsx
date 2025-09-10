@@ -16,7 +16,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, ServerCrash, Users, FileText, Laptop, Folder, Shield } from "lucide-react";
@@ -44,15 +43,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { ADComputer } from "@/lib/types";
 
-
-type ADComputer = {
-  name: string;
-  dns_hostname: string;
-  os: string;
-  last_logon: string;
-  created: string;
-};
 
 type ADError = {
     message: string;

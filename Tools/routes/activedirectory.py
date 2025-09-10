@@ -93,6 +93,7 @@ def _get_ad_computers_data():
     try:
         # Discover the default naming context (e.g., "DC=example,DC=com")
         base_dn = conn.server.info.other.get('defaultNamingContext')[0]
+        user_domain = session.get("domain", "Unknown")
         
         # LDAP query to find all computer objects
         search_filter = "(objectCategory=computer)"
@@ -123,7 +124,8 @@ def _get_ad_computers_data():
                 "dns_hostname": str(entry.dNSHostName.value) if entry.dNSHostName.value else "",
                 "os": str(entry.operatingSystem.value) if entry.operatingSystem.value else "",
                 "last_logon": format_datetime(last_logon_dt),
-                "created": format_datetime(entry.whenCreated.value)
+                "created": format_datetime(entry.whenCreated.value),
+                "domain": user_domain
             })
 
         return {"ok": True, "computers": computers_list}
@@ -222,5 +224,3 @@ def set_user_password():
     finally:
         if conn:
             conn.unbind()
-
-    
