@@ -10,6 +10,7 @@ import json
 from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_psinfo_output, get_hostname_from_ip, get_mac_address
+from .activedirectory import get_ad_computers as fetch_ad_computers_data
 
 network_bp = Blueprint('network', __name__)
 
@@ -198,11 +199,13 @@ def api_get_router_mac():
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
-    Performs a fast network discovery using Masscan.
+    Performs a fast network discovery using Masscan, then enriches the
+    data with information from Active Directory.
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
     router_mac = data.get("router_mac")
+    user_domain = session.get("domain")
 
     if not scan_cidr:
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
@@ -212,18 +215,57 @@ def api_discover_devices():
         online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
         # Now get details for each IP in parallel
-        online_hosts = []
+        online_hosts_basic_info = []
         with ThreadPoolExecutor(max_workers=50) as executor:
             future_to_ip = {executor.submit(get_device_info, ip): ip for ip in online_ips}
             for future in as_completed(future_to_ip):
                 try:
                     result = future.result()
                     if result:
-                      online_hosts.append(result)
+                      online_hosts_basic_info.append(result)
                 except Exception as exc:
                     print(f'{future_to_ip[future]} generated an exception: {exc}')
 
-        sorted_hosts = sorted(online_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
+        # Fetch all computer data from Active Directory once
+        ad_computers_response, ad_status_code = fetch_ad_computers_data()
+        ad_computers_data = ad_computers_response.get_json()
+        ad_computers_map = {}
+        if ad_status_code == 200 and ad_computers_data.get('ok'):
+             # Create a map of DNS hostname to computer object for quick lookups
+             for comp in ad_computers_data.get('computers', []):
+                # DNS hostname is more reliable for matching
+                hostname = comp.get('dns_hostname')
+                if hostname:
+                    ad_computers_map[hostname.lower()] = comp
+
+        # Enrich the discovered hosts with AD data
+        enriched_hosts = []
+        for host in online_hosts_basic_info:
+            hostname_lower = host['hostname'].lower() if host['hostname'] else ''
+            ad_info = ad_computers_map.get(hostname_lower)
+            
+            if ad_info:
+                # This device is in Active Directory
+                enriched_hosts.append({
+                    "ip": host['ip'],
+                    "hostname": host['hostname'],
+                    "mac": host['mac'],
+                    "os": ad_info.get('os', 'Unknown OS'),
+                    "domain": user_domain,
+                    "isDomainMember": True
+                })
+            else:
+                 # This device is not in Active Directory, or hostname couldn't be resolved
+                enriched_hosts.append({
+                    "ip": host['ip'],
+                    "hostname": host['hostname'],
+                    "mac": host['mac'],
+                    "os": "Unknown OS",
+                    "domain": "WORKGROUP",
+                    "isDomainMember": False
+                })
+
+        sorted_hosts = sorted(enriched_hosts, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})
 
     except FileNotFoundError:
@@ -250,46 +292,3 @@ def api_discover_devices():
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
-
-
-@network_bp.route('/api/device-details', methods=['POST'])
-def api_device_details():
-    """
-    Fetches detailed information for a single device using PsInfo.
-    This is called by the frontend for each discovered device.
-    """
-    data = request.get_json() or {}
-    ip = data.get('ip')
-    if not ip:
-        return jsonify({"ok": False, "error": "IP address is required."}), 400
-        
-    username = session.get("user")
-    pwd = session.get("password")
-    user_domain = session.get("domain")
-
-    device_details = { "domain": "WORKGROUP", "isDomainMember": False, "os": "Unknown" }
-    
-    try:
-        rc, out, err = run_ps_command("psinfo", ip, username, user_domain, pwd, ["-d"], timeout=20) # 20s timeout for single device
-        if rc == 0 and out:
-            psinfo_data = parse_psinfo_output(out)
-            if psinfo_data and psinfo_data.get('psinfo'):
-                system_info = psinfo_data['psinfo'].get('system_info', [])
-                for item in system_info:
-                    key = item.get('key','').lower()
-                    value = item.get('value','')
-                    if key == 'domain':
-                        device_details['domain'] = value if value else "WORKGROUP"
-                    elif key == 'operating system':
-                        device_details['os'] = value
-
-                # Compare with the logged-in user's domain (case-insensitive)
-                if user_domain and device_details['domain'].lower() == user_domain.lower():
-                    device_details['isDomainMember'] = True
-        else:
-            # If psinfo fails, we can still say OS is unknown but domain is likely workgroup
-            device_details['os'] = f"PsInfo failed: {err or 'Timeout'}"
-    except Exception as e:
-        device_details['os'] = f"Error: {str(e)}"
-
-    return jsonify(device_details)

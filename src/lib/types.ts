@@ -19,6 +19,3 @@ export type NetworkInterface = {
   netmask: string;
   cidr: string;
 };
-
-    
-    

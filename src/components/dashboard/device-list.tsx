@@ -137,27 +137,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light")) return "iot";
     return "unknown";
   };
-  
-  const fetchDeviceDetails = async (ip: string) => {
-    try {
-      const res = await fetch('/api/device-details', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip }),
-      });
-      if (!res.ok) {
-        return { os: "Details failed to load", domain: "N/A", isDomainMember: false };
-      }
-      const data = await res.json();
-      return { 
-        os: data.os || "Unknown OS", 
-        domain: data.domain || "WORKGROUP",
-        isDomainMember: data.isDomainMember || false
-      };
-    } catch (e) {
-      return { os: "Details failed (network)", domain: "N/A", isDomainMember: false };
-    }
-  };
 
 
   const handleScan = async (manualRouterMac: string | null = null) => {
@@ -170,7 +149,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     setDevices([]);
     setGpUpdateStatus({});
     setScanError(null);
-    toast({ title: "Scan Initiated", description: `Performing Masscan on ${selectedCidr}...` });
+    toast({ title: "Scan Initiated", description: `Discovering devices and querying AD on ${selectedCidr}...` });
 
     try {
         let router_mac = manualRouterMac;
@@ -217,41 +196,28 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             return; 
         }
 
-        const initialDevices: Device[] = data.devices.map((d: any) => ({
+        const discoveredDevices: Device[] = data.devices.map((d: any) => ({
             id: d.mac || d.ip, // Use MAC address as ID if available, else IP
             name: d.hostname === "Unknown" ? d.ip : d.hostname,
             ipAddress: d.ip,
             macAddress: d.mac || "-",
             status: 'online',
             type: determineDeviceType(d.hostname),
-            os: "Loading...",
+            os: d.os || "Unknown OS",
             lastSeen: 'Now',
-            domain: "Loading...",
-            isDomainMember: false,
-            isLoadingDetails: true,
+            domain: d.domain || "WORKGROUP",
+            isDomainMember: d.isDomainMember || false,
+            isLoadingDetails: false, // Details are now loaded in one go
         }));
         
-        if (initialDevices.length === 0) {
+        if (discoveredDevices.length === 0) {
             toast({ title: "Scan Complete", description: "No online devices were found on this network."});
         } else {
-            toast({ title: "Discovery Complete", description: `Found ${initialDevices.length} devices. Fetching details...`});
+            toast({ title: "Discovery Complete", description: `Found and categorized ${discoveredDevices.length} devices.`});
         }
         
-        setDevices(initialDevices);
-        setIsScanning(false); // Initial scan done, now fetch details
-
-        // Fetch details for each device
-        for (const device of initialDevices) {
-            fetchDeviceDetails(device.ipAddress).then(details => {
-                setDevices(prevDevices => 
-                    prevDevices.map(d => 
-                        d.id === device.id 
-                            ? { ...d, ...details, isLoadingDetails: false } 
-                            : d
-                    )
-                );
-            });
-        }
+        setDevices(discoveredDevices);
+        setIsScanning(false);
 
 
     } catch (err: any) {
@@ -482,22 +448,16 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 </div>
               </CardContent>
               <CardFooter>
-                {device.isLoadingDetails ? <Skeleton className="h-5 w-24" /> : (
-                    device.isDomainMember ? (
-                        <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                            <Users className="mr-1 h-3 w-3" />
-                            Domain Member
-                        </Badge>
-                    ) : (
-                        <Badge variant="secondary">
-                             {device.domain === 'WORKGROUP' || device.domain === 'N/A' ? (
-                                <Briefcase className="mr-1 h-3 w-3" />
-                             ) : (
-                                <ShieldAlert className="mr-1 h-3 w-3" />
-                             )}
-                            {device.domain}
-                        </Badge>
-                    )
+                {device.isDomainMember ? (
+                    <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                        <Users className="mr-1 h-3 w-3" />
+                        Domain Member
+                    </Badge>
+                ) : (
+                    <Badge variant="secondary">
+                         <Briefcase className="mr-1 h-3 w-3" />
+                        {device.domain}
+                    </Badge>
                 )}
               </CardFooter>
             </Card>
