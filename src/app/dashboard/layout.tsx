@@ -23,10 +23,10 @@ const AppSidebar = () => {
     return (
         <Sidebar>
             <SidebarHeader>
-                 <div className={cn("flex w-full items-center justify-center gap-4 h-28", state === "collapsed" && "hidden")}>
-                    <Logo className="h-20 w-20" />
+                 <div className={cn("flex w-full items-center justify-center gap-3 h-24", state === "collapsed" && "hidden")}>
+                    <Logo className="h-16 w-16" />
                     <div className="flex flex-col items-start">
-                        <span className="text-3xl font-headline font-bold tracking-wider">ATLAS</span>
+                        <span className="text-2xl font-headline font-bold tracking-wider">ATLAS</span>
                         <span className="text-xs text-muted-foreground">BY BASTAWY</span>
                     </div>
                 </div>
