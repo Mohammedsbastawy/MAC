@@ -29,13 +29,13 @@
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
-    --sidebar-background: 210 10% 15%;
-    --sidebar-foreground: 0 0% 98%;
+    --sidebar-background: 0 0% 100%; /* White */
+    --sidebar-foreground: 210 10% 23%; /* Dark text */
     --sidebar-primary: 193 72% 40%; /* #1E93AB */
     --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 210 10% 25%;
-    --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 210 10% 25%;
+    --sidebar-accent: 193 72% 95%; /* Light blue accent */
+    --sidebar-accent-foreground: 193 72% 40%; /* Dark blue text on accent */
+    --sidebar-border: 0 0% 86%; /* #DCDCDC */
     --sidebar-ring: 193 72% 40%;
   }
 }
