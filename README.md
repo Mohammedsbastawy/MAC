@@ -57,14 +57,14 @@ These are external tools that give the application its core functionality.
 1.  **PsTools**:
     *   Download **PsTools** from the official Microsoft website.
     *   Unzip the downloaded file.
-    *   **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them directly into the `pstools_app` folder in this project.
+    *   **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them directly into the `Tools` folder in this project.
 2.  **Masscan (Required for Fast Network Discovery)**:
     *   **Masscan:** The application uses `masscan` for extremely fast network discovery.
         *   Download the latest **Masscan** Windows release from its [official GitHub releases page](https://github.com/robertdavidgraham/masscan/releases).
         *   On the releases page, find the latest version and download the file named `masscan-*.zip` (e.g., `masscan-2.0.5-win.zip`).
         *   Unzip the downloaded file.
         *   Find the `bin` directory, and inside it, you will find `masscan.exe`.
-        *   **Important:** Copy `masscan.exe` and paste it directly into the `pstools_app` folder in this project.
+        *   **Important:** Copy `masscan.exe` and paste it directly into the `Tools` folder in this project.
 
 ### Step 2: Install Required Libraries
 
@@ -73,7 +73,7 @@ You need to install the necessary components for both the user interface and the
 1.  Open a command window (like Command Prompt or PowerShell) in the main project folder.
 2.  **Install Python Libraries:** Run the following command:
     ```bash
-    python -m pip install -r pstools_app/requirements.txt
+    python -m pip install -r Tools/requirements.txt
     ```
 3.  **Install Node.js Libraries:** After the first command finishes, run this command in the **same window**:
     ```bash

@@ -51,7 +51,7 @@ export default function HelpPage() {
                 <CardContent className="space-y-6">
                     <div>
                         <h4 className="font-semibold text-lg">Download Masscan Executable</h4>
-                        <p className="text-muted-foreground mt-1">You need to place the Masscan executable (`masscan.exe`) in the application's `pstools_app` directory.</p>
+                        <p className="text-muted-foreground mt-1">You need to place the Masscan executable (`masscan.exe`) in the application's `Tools` directory.</p>
                          <a href="https://github.com/robertdavidgraham/masscan/releases" target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 mt-3">
                             Download Masscan from GitHub Releases <DownloadCloud className="ml-2 h-4 w-4" />
                          </a>
@@ -62,7 +62,7 @@ export default function HelpPage() {
                                1. On the GitHub releases page, find the latest version and look for a file named something like `masscan-2.0.5-win.zip`. This is the correct file.<br/>
                                2. Unzip the downloaded file.<br/>
                                3. Find the `bin` directory inside the unzipped folder. Inside `bin`, you will find `masscan.exe`.<br/>
-                               4. Copy `masscan.exe` and paste it directly into the `pstools_app` directory at the root of this project.
+                               4. Copy `masscan.exe` and paste it directly into the `Tools` directory at the root of this project.
                             </AlertDescription>
                         </Alert>
                     </div>

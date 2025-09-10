@@ -280,7 +280,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
   const handleDeviceSelect = (device: Device) => {
     // If the device OS is N/A, it means we haven't fetched details yet.
-    if (device.os === 'N/A') {
+    if (device.os === 'N/A' && !device.isLoadingDetails) {
       fetchDeviceDetails(device);
     } else {
       // Details are already loaded, just open the panel.
