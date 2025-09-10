@@ -20,12 +20,18 @@ import { Separator } from "@/components/ui/separator";
 export default function SettingsPage() {
     const [logoUrl, setLogoUrl] = React.useState("");
     const [currentLogo, setCurrentLogo] = React.useState<string | null>("");
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     React.useEffect(() => {
         // Load the saved logo URL from localStorage on component mount
         const savedLogo = localStorage.getItem("customLogoUrl");
         if (savedLogo) {
-            setLogoUrl(savedLogo);
+            // Check if it's a data URI or a regular URL
+             if (savedLogo.startsWith("data:image")) {
+                setLogoUrl(savedLogo);
+             } else {
+                setLogoUrl(savedLogo);
+             }
             setCurrentLogo(savedLogo);
         }
     }, []);
@@ -64,6 +70,41 @@ export default function SettingsPage() {
         });
     };
 
+    const handleUploadClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            if (file.size > 2 * 1024 * 1024) { // 2MB limit
+                toast({
+                    variant: "destructive",
+                    title: "File Too Large",
+                    description: "Please select an image smaller than 2MB.",
+                });
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const result = e.target?.result as string;
+                setLogoUrl(result);
+                 toast({
+                    title: "Image Ready",
+                    description: "Image loaded successfully. Click 'Save' to apply it.",
+                });
+            };
+            reader.onerror = () => {
+                 toast({
+                    variant: "destructive",
+                    title: "Error Reading File",
+                    description: "There was an issue reading the selected file.",
+                });
+            }
+            reader.readAsDataURL(file);
+        }
+    };
+
   return (
     <div className="space-y-6">
       <div className="space-y-1">
@@ -79,26 +120,33 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle>Logo Settings</CardTitle>
           <CardDescription>
-            Change the application logo. Enter a URL to an image file.
+            Change the application logo. Upload an image or enter a URL.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
                 <div className="space-y-2">
-                    <Label htmlFor="logo-url">Logo Image URL</Label>
+                    <Label htmlFor="logo-url">Logo Image URL or Data URI</Label>
                     <Input
-                    id="logo-url"
-                    placeholder="https://example.com/logo.png"
-                    value={logoUrl}
-                    onChange={(e) => setLogoUrl(e.target.value)}
+                        id="logo-url"
+                        placeholder="https://example.com/logo.png or data:image/..."
+                        value={logoUrl}
+                        onChange={(e) => setLogoUrl(e.target.value)}
+                    />
+                     <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleFileChange}
+                        className="hidden" 
+                        accept="image/png, image/jpeg, image/gif, image/svg+xml"
                     />
                 </div>
                  <div className="flex items-center gap-2">
                     <Button onClick={handleSave}>Save</Button>
                     <Button variant="destructive" onClick={handleRevert} disabled={!currentLogo}>Revert to Default</Button>
-                    <Button variant="outline" disabled>
+                    <Button variant="outline" onClick={handleUploadClick}>
                         <UploadCloud className="mr-2 h-4 w-4" />
-                        Upload (coming soon)
+                        Upload
                     </Button>
                 </div>
            </div>
@@ -118,7 +166,7 @@ export default function SettingsPage() {
                         ) : (
                             <div className="text-muted-foreground flex flex-col items-center">
                                 <ImageIcon className="h-8 w-8" />
-                                <span className="text-xs mt-1">No URL entered</span>
+                                <span className="text-xs mt-1">No URL or image</span>
                             </div>
                         )}
                     </div>
