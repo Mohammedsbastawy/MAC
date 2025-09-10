@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: 'Permanent Marker';
+  src: url('https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap');
+}
+
 @layer base {
   :root {
     --background: 30 27% 95%; /* #F3F2EC */
@@ -37,6 +42,36 @@
     --sidebar-accent-foreground: 193 72% 40%; /* Dark blue text on accent */
     --sidebar-border: 0 0% 86%; /* #DCDCDC */
     --sidebar-ring: 193 72% 40%;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 193 72% 50%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 27%;
+    --input: 217 33% 27%;
+    --ring: 193 72% 50%;
+    --sidebar-background: 222 47% 9%; /* Slightly darker background */
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 193 72% 50%;
+    --sidebar-primary-foreground: 222 47% 11%;
+    --sidebar-accent: 222 47% 15%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 20%;
+    --sidebar-ring: 193 72% 50%;
   }
 }
 
