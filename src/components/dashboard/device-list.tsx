@@ -81,7 +81,7 @@ type ScanErrorState = {
 const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
     id: adComputer.dns_hostname || adComputer.name,
     name: adComputer.name,
-    ipAddress: adComputer.dns_hostname || adComputer.name, // Use DNS hostname (now IP) as primary, fallback to name
+    ipAddress: adComputer.dns_hostname || adComputer.name,
     macAddress: "-",
     status: 'unknown', // Initially unknown
     type: determineDeviceType(adComputer.name),
@@ -220,7 +220,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleRefreshStatus = async () => {
+ const handleRefreshStatus = async () => {
       const allDevices = [...domainDevices, ...workgroupDevices];
       const ipsToCheck = allDevices.map(d => d.ipAddress).filter(Boolean);
 
@@ -233,7 +233,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           setDomainDevices(prev => prev.map(updateFn));
           setWorkgroupDevices(prev => prev.map(updateFn));
       };
-
+      
       const sortDeviceLists = (onlineIps: Set<string>) => {
            const sortFn = (a: Device, b: Device) => {
               const aIsOnline = onlineIps.has(a.ipAddress) || onlineIps.has(a.name);
@@ -260,12 +260,14 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           if (!pingData.ok) throw new Error(pingData.error || "Ping scan failed.");
 
           const onlineByPing = new Set<string>(pingData.online_ips);
-          updateDeviceLists(d => ({
-              ...d,
-              status: (onlineByPing.has(d.ipAddress) || onlineByPing.has(d.name)) ? 'online' : 'unknown',
-              // Keep loading for devices that didn't respond to ping
-              isLoadingDetails: !(onlineByPing.has(d.ipAddress) || onlineByPing.has(d.name)) 
-          }));
+          updateDeviceLists(d => {
+              const isOnline = onlineByPing.has(d.ipAddress) || onlineByPing.has(d.name);
+              return {
+                  ...d,
+                  status: isOnline ? 'online' : 'unknown',
+                  isLoadingDetails: !isOnline // Stop loading only if online
+              };
+          });
           sortDeviceLists(onlineByPing);
           
           const ipsForPsInfo = ipsToCheck.filter(ip => !onlineByPing.has(ip));
@@ -287,13 +289,17 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           if (!psinfoData.ok) throw new Error(psinfoData.error || "PsInfo scan failed.");
           
           const onlineByPsInfo = new Set<string>(psinfoData.online_ips);
+          // Keep the existing online IPs from the ping scan
           const finalOnlineIps = new Set([...onlineByPing, ...onlineByPsInfo]);
 
-           updateDeviceLists(d => ({
-              ...d,
-              status: (finalOnlineIps.has(d.ipAddress) || finalOnlineIps.has(d.name)) ? 'online' : 'offline',
-              isLoadingDetails: false
-          }));
+           updateDeviceLists(d => {
+              const isOnline = finalOnlineIps.has(d.ipAddress) || finalOnlineIps.has(d.name);
+              return {
+                ...d,
+                status: isOnline ? 'online' : 'offline',
+                isLoadingDetails: false
+              }
+           });
           sortDeviceLists(finalOnlineIps);
 
           toast({ title: "Status Refresh Complete", description: `Found ${onlineByPsInfo.size} additional devices. Total online: ${finalOnlineIps.size}.` });
