@@ -16,15 +16,13 @@ import { toast } from "@/hooks/use-toast";
 import { UploadCloud, Image as ImageIcon } from "lucide-react";
 import { Logo } from "@/components/ui/logo";
 import { Separator } from "@/components/ui/separator";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-
-type LogoFit = "contain" | "cover";
+import { Slider } from "@/components/ui/slider";
 
 export default function SettingsPage() {
     const [logoUrl, setLogoUrl] = React.useState("");
-    const [logoFit, setLogoFit] = React.useState<LogoFit>("cover");
+    const [logoSize, setLogoSize] = React.useState(100);
     const [currentLogo, setCurrentLogo] = React.useState<string | null>("");
-    const [currentLogoFit, setCurrentLogoFit] = React.useState<LogoFit>("cover");
+    const [currentLogoSize, setCurrentLogoSize] = React.useState(100);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     React.useEffect(() => {
@@ -34,10 +32,11 @@ export default function SettingsPage() {
             setLogoUrl(savedLogo);
             setCurrentLogo(savedLogo);
         }
-        const savedFit = localStorage.getItem("customLogoFit") as LogoFit;
-        if (savedFit) {
-            setLogoFit(savedFit);
-            setCurrentLogoFit(savedFit);
+        const savedSize = localStorage.getItem("customLogoSize");
+        if (savedSize) {
+            const size = parseInt(savedSize, 10);
+            setLogoSize(size);
+            setCurrentLogoSize(size);
         }
     }, []);
 
@@ -48,7 +47,7 @@ export default function SettingsPage() {
             } else {
                 localStorage.removeItem("customLogoUrl");
             }
-            localStorage.setItem("customLogoFit", logoFit);
+            localStorage.setItem("customLogoSize", logoSize.toString());
 
             // Manually dispatch a storage event to trigger update in other components
             window.dispatchEvent(new Event('storage'));
@@ -57,7 +56,7 @@ export default function SettingsPage() {
                 description: "Your custom logo has been updated.",
             });
             setCurrentLogo(logoUrl);
-            setCurrentLogoFit(logoFit);
+            setCurrentLogoSize(logoSize);
         } catch (error) {
             toast({
                 variant: "destructive",
@@ -69,12 +68,12 @@ export default function SettingsPage() {
 
     const handleRevert = () => {
         localStorage.removeItem("customLogoUrl");
-        localStorage.removeItem("customLogoFit");
+        localStorage.removeItem("customLogoSize");
         window.dispatchEvent(new Event('storage'));
         setLogoUrl("");
-        setLogoFit("cover");
+        setLogoSize(100);
         setCurrentLogo(null);
-        setCurrentLogoFit("cover");
+        setCurrentLogoSize(100);
         toast({
             title: "Logo Reverted",
             description: "The logo has been reverted to the default.",
@@ -123,7 +122,7 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle>Logo Settings</CardTitle>
           <CardDescription>
-            Change the application logo. Upload an image or enter a URL, and choose how it fits.
+            Change the application logo. Upload an image or enter a URL, and adjust its size.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -146,25 +145,17 @@ export default function SettingsPage() {
                         />
                     </div>
                      <div className="space-y-2">
-                        <Label>Logo Fit (Dimensions)</Label>
-                         <RadioGroup
-                            value={logoFit}
-                            onValueChange={(value: LogoFit) => setLogoFit(value)}
-                            className="flex items-center gap-6 pt-2"
-                        >
-                            <div className="flex items-center space-x-2">
-                                <RadioGroupItem value="contain" id="fit-contain" />
-                                <Label htmlFor="fit-contain" className="cursor-pointer">
-                                    Contain (Show full image)
-                                </Label>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <RadioGroupItem value="cover" id="fit-cover" />
-                                <Label htmlFor="fit-cover" className="cursor-pointer">
-                                    Cover (Fill space)
-                                </Label>
-                            </div>
-                        </RadioGroup>
+                        <div className="flex justify-between items-center">
+                            <Label>Logo Size</Label>
+                            <span className="text-sm text-muted-foreground font-mono">{logoSize}%</span>
+                        </div>
+                         <Slider
+                            value={[logoSize]}
+                            onValueChange={(value) => setLogoSize(value[0])}
+                            min={50}
+                            max={150}
+                            step={5}
+                            />
                     </div>
                 </div>
 
@@ -185,19 +176,22 @@ export default function SettingsPage() {
             <div className="grid grid-cols-2 gap-4 text-center">
                  <div>
                     <h4 className="text-sm font-medium text-muted-foreground mb-2">Current Logo</h4>
-                    <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2">
+                    <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2 overflow-hidden">
                         <Logo className="w-full h-full" />
                     </div>
                 </div>
                  <div>
                     <h4 className="text-sm font-medium text-muted-foreground mb-2">New Preview</h4>
-                    <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2">
+                    <div className="w-32 h-32 mx-auto flex items-center justify-center bg-muted/50 rounded-lg p-2 overflow-hidden">
                         {logoUrl ? (
                             <img 
                                 src={logoUrl} 
                                 alt="New logo preview" 
-                                className="max-w-full max-h-full"
-                                style={{ objectFit: logoFit }}
+                                className="max-w-full max-h-full transition-transform duration-200"
+                                style={{ 
+                                    transform: `scale(${logoSize / 100})`,
+                                    objectFit: 'contain'
+                                }}
                             />
                         ) : (
                             <div className="text-muted-foreground flex flex-col items-center">

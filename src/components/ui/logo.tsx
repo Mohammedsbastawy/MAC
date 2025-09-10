@@ -22,19 +22,17 @@ const DefaultLogo: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     </svg>
 );
 
-type LogoFit = "contain" | "cover";
-
 export const Logo: React.FC<{ className?: string }> = ({ className }) => {
     const [logoUrl, setLogoUrl] = React.useState<string | null>(null);
-    const [logoFit, setLogoFit] = React.useState<LogoFit>("cover");
+    const [logoSize, setLogoSize] = React.useState(100);
     const [isMounted, setIsMounted] = React.useState(false);
 
     const updateLogo = React.useCallback(() => {
         try {
             const storedUrl = localStorage.getItem("customLogoUrl");
-            const storedFit = localStorage.getItem("customLogoFit") as LogoFit;
+            const storedSize = localStorage.getItem("customLogoSize");
             setLogoUrl(storedUrl);
-            setLogoFit(storedFit || "cover");
+            setLogoSize(storedSize ? parseInt(storedSize, 10) : 100);
         } catch (error) {
             console.warn("Could not access localStorage for custom logo.");
         }
@@ -60,13 +58,16 @@ export const Logo: React.FC<{ className?: string }> = ({ className }) => {
 
     if (logoUrl) {
         return (
-            <div className={cn("relative", className)}>
+            <div className={cn("relative w-full h-full flex items-center justify-center", className)}>
                 <Image
                     src={logoUrl}
                     alt="Custom Atlas Logo"
                     fill
                     sizes="100%"
-                    style={{ objectFit: logoFit }}
+                    style={{ 
+                        objectFit: 'contain',
+                        transform: `scale(${logoSize / 100})`,
+                    }}
                     className="rounded-md"
                     unoptimized // Use this for external URLs and data URIs
                 />
