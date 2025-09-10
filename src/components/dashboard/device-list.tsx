@@ -81,7 +81,7 @@ type ScanErrorState = {
 const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
     id: adComputer.dns_hostname || adComputer.name,
     name: adComputer.name,
-    ipAddress: adComputer.dns_hostname || adComputer.name,
+    ipAddress: adComputer.dns_hostname,
     macAddress: "-",
     status: 'unknown', // Initially unknown
     type: determineDeviceType(adComputer.name),
@@ -220,35 +220,25 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
- const handleRefreshStatus = async () => {
+  const handleRefreshStatus = async () => {
       const allDevices = [...domainDevices, ...workgroupDevices];
       const ipsToCheck = allDevices.map(d => d.ipAddress).filter(Boolean);
 
       if (ipsToCheck.length === 0) {
-          toast({ title: "No devices to check", description: "There are no devices with IP addresses to check." });
+          toast({ title: "No devices to check" });
           return;
       }
+
+      toast({ title: "Refreshing Status...", description: `Checking ${ipsToCheck.length} devices.` });
       
-      const updateDeviceLists = (updateFn: (d: Device) => Device) => {
+      const updateDevicesState = (updateFn: (d: Device) => Device) => {
           setDomainDevices(prev => prev.map(updateFn));
           setWorkgroupDevices(prev => prev.map(updateFn));
       };
-      
-      const sortDeviceLists = (onlineIps: Set<string>) => {
-           const sortFn = (a: Device, b: Device) => {
-              const aIsOnline = onlineIps.has(a.ipAddress) || onlineIps.has(a.name);
-              const bIsOnline = onlineIps.has(b.ipAddress) || onlineIps.has(b.name);
-              if (aIsOnline && !bIsOnline) return -1;
-              if (!aIsOnline && bIsOnline) return 1;
-              return a.name.localeCompare(b.name);
-          };
-          setDomainDevices(prev => [...prev].sort(sortFn));
-          setWorkgroupDevices(prev => [...prev].sort(sortFn));
-      }
 
-      toast({ title: "Refreshing Status...", description: `Phase 1: Pinging ${ipsToCheck.length} devices.` });
-      updateDeviceLists(d => ({ ...d, isLoadingDetails: true, status: 'unknown' }));
-      
+      // Start: Set all devices to loading state
+      updateDevicesState(d => ({ ...d, isLoadingDetails: true, status: 'unknown' }));
+
       try {
           // --- Phase 1: Ping Scan ---
           const pingRes = await fetch("/api/network/check-status-ping", {
@@ -260,53 +250,48 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           if (!pingData.ok) throw new Error(pingData.error || "Ping scan failed.");
 
           const onlineByPing = new Set<string>(pingData.online_ips);
-          updateDeviceLists(d => {
+          
+          // Update UI immediately after ping scan
+          updateDevicesState(d => {
               const isOnline = onlineByPing.has(d.ipAddress) || onlineByPing.has(d.name);
               return {
                   ...d,
                   status: isOnline ? 'online' : 'unknown',
-                  isLoadingDetails: !isOnline // Stop loading only if online
+                  isLoadingDetails: !isOnline // Stop loading for online devices
               };
           });
-          sortDeviceLists(onlineByPing);
-          
+
           const ipsForPsInfo = ipsToCheck.filter(ip => !onlineByPing.has(ip));
-          toast({ title: "Ping Scan Complete", description: `Found ${onlineByPing.size} devices. Now checking ${ipsForPsInfo.length} devices with PsInfo.` });
+          toast({ title: "Ping Scan Complete", description: `Found ${onlineByPing.size} devices. Now checking ${ipsForPsInfo.length} more.` });
 
-          if (ipsForPsInfo.length === 0) {
-              updateDeviceLists(d => ({...d, isLoadingDetails: false, status: d.status === 'unknown' ? 'offline' : d.status }));
+          if (ipsForPsInfo.length > 0) {
+              // --- Phase 2: PsInfo Scan ---
+              const psinfoRes = await fetch("/api/network/check-status-psinfo", {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ ips: ipsForPsInfo })
+              });
+              const psinfoData = await psinfoRes.json();
+              if (!psinfoData.ok) throw new Error(psinfoData.error || "PsInfo scan failed.");
+              
+              const onlineByPsInfo = new Set<string>(psinfoData.online_ips);
+              const finalOnlineIps = new Set([...onlineByPing, ...onlineByPsInfo]);
+              
+              updateDevicesState(d => ({
+                  ...d,
+                  status: (finalOnlineIps.has(d.ipAddress) || finalOnlineIps.has(d.name)) ? 'online' : 'offline',
+                  isLoadingDetails: false
+              }));
+              
+              toast({ title: "Status Refresh Complete", description: `Total online: ${finalOnlineIps.size}.` });
+          } else {
+              // No more devices to check, finalize state
+              updateDevicesState(d => ({...d, isLoadingDetails: false, status: d.status === 'unknown' ? 'offline' : d.status }));
               toast({ title: "Status Refresh Complete", description: "All responsive devices found by ping." });
-              return;
           }
-
-          // --- Phase 2: PsInfo Scan ---
-           const psinfoRes = await fetch("/api/network/check-status-psinfo", {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ips: ipsForPsInfo })
-          });
-          const psinfoData = await psinfoRes.json();
-          if (!psinfoData.ok) throw new Error(psinfoData.error || "PsInfo scan failed.");
-          
-          const onlineByPsInfo = new Set<string>(psinfoData.online_ips);
-          // Keep the existing online IPs from the ping scan
-          const finalOnlineIps = new Set([...onlineByPing, ...onlineByPsInfo]);
-
-           updateDeviceLists(d => {
-              const isOnline = finalOnlineIps.has(d.ipAddress) || finalOnlineIps.has(d.name);
-              return {
-                ...d,
-                status: isOnline ? 'online' : 'offline',
-                isLoadingDetails: false
-              }
-           });
-          sortDeviceLists(finalOnlineIps);
-
-          toast({ title: "Status Refresh Complete", description: `Found ${onlineByPsInfo.size} additional devices. Total online: ${finalOnlineIps.size}.` });
-
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
-          updateDeviceLists(d => ({ ...d, isLoadingDetails: false, status: 'unknown' }));
+          updateDevicesState(d => ({ ...d, isLoadingDetails: false, status: 'unknown' }));
       }
   };
 
