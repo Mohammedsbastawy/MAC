@@ -8,7 +8,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
+import localFont from 'next/font/local';
 
+
+const brandaFont = localFont({
+  src: '../BRANDA.woff2',
+  display: 'swap',
+});
 
 const AppSidebar = () => {
     const pathname = usePathname();
@@ -23,10 +29,10 @@ const AppSidebar = () => {
     return (
         <Sidebar>
             <SidebarHeader>
-                 <div className={cn("flex w-full items-center justify-center gap-4", state === "collapsed" && "hidden")}>
+                 <div className={cn("flex w-full items-center justify-center gap-4 h-28", state === "collapsed" && "hidden")}>
                     <Logo className="h-20 w-20" />
                     <div className="flex flex-col items-start">
-                        <span className="text-3xl tracking-wider font-bold">ATLAS</span>
+                        <span className={cn("text-3xl tracking-wider", brandaFont.className)}>ATLAS</span>
                         <span className="text-xs text-muted-foreground">BY BASTAWY</span>
                     </div>
                 </div>
