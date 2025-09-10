@@ -157,18 +157,38 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
             with open(output_file, 'r') as f:
                 content = f.read().strip()
                 if content and content != ',':
-                    if content.endswith(',\n'): content = content[:-2]
+                    # Fix for masscan's sometimes-broken JSON
+                    if content.startswith('[\n'): content = content[2:]
+                    if content.endswith('\n]'): content = content[:-2]
                     if content.endswith(','): content = content[:-1]
+                    
                     json_content = f"[{content}]"
                     
                     try:
                         scan_results = json.loads(json_content)
                         for result in scan_results:
-                            if result.get("ip"):
-                                found_hosts.append(result.get("ip"))
+                            # Handle different possible JSON output formats from masscan
+                            ip_to_add = None
+                            if isinstance(result, dict) and result.get("ip"):
+                                ip_to_add = result.get("ip")
+                            elif isinstance(result, list) and len(result) > 0 and 'ip' in result[0]:
+                                ip_to_add = result[0].get('ip')
+                            
+                            if ip_to_add:
+                                found_hosts.append(ip_to_add)
+
                     except json.JSONDecodeError as e:
                          logger.error(f"Masscan produced malformed JSON: {e}. Content: '{content}'")
-                         raise RuntimeError("Masscan produced malformed JSON output.", str(e))
+                         # Try parsing as list of lists as a fallback
+                         try:
+                             lines = content.split('},')
+                             for line in lines:
+                                 if '"ip":' in line:
+                                     ip_match = re.search(r'"ip":\s*"([^"]+)"', line)
+                                     if ip_match:
+                                         found_hosts.append(ip_match.group(1))
+                         except Exception:
+                             raise RuntimeError("Masscan produced malformed JSON output.", str(e))
     finally:
         if os.path.exists(output_file):
             try: os.remove(output_file)
@@ -318,5 +338,4 @@ def api_check_status():
     logger.info(f"Total online hosts: {len(final_online_ips)}. Sending response.")
     
     return jsonify({"ok": True, "online_ips": final_online_ips})
-
     
