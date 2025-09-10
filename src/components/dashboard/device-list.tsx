@@ -23,7 +23,8 @@ import {
   Siren,
   FileText,
   Search,
-  RefreshCw
+  RefreshCw,
+  NotebookText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -339,6 +340,20 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     }
   };
 
+  const handleViewLogs = async () => {
+    try {
+        const res = await fetch('/api/logs/get-logs');
+        const data = await res.json();
+        if (data.ok) {
+            setErrorDialog({ isOpen: true, title: "Backend Logs", content: data.logs });
+        } else {
+            toast({ variant: "destructive", title: "Failed to get logs", description: data.error });
+        }
+    } catch (e: any) {
+        toast({ variant: "destructive", title: "Error", description: `Could not connect to backend: ${e.message}` });
+    }
+  }
+
   const renderContent = () => {
     const onlineDomainDevices = domainDevices.filter(d => d.status === 'online').length;
 
@@ -460,6 +475,10 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+             <Button onClick={handleViewLogs} variant="outline" size="lg" className="h-11">
+                <NotebookText className="mr-2 h-4 w-4" />
+                View Logs
+            </Button>
             <Button onClick={handleRefreshStatus} disabled={isAdLoading || (domainDevices.length === 0 && workgroupDevices.length === 0)} size="lg" className="h-11">
                 {(domainDevices.some(d => d.isLoadingDetails) || workgroupDevices.some(d => d.isLoadingDetails)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Refresh Online Status
