@@ -2,6 +2,58 @@
 
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarSection, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { Briefcase, FolderCog, HelpCircle, Network, Users } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+
+const AppSidebar = () => {
+    const pathname = usePathname();
+    const { state, isMobile, setOpenMobile } = useSidebar();
+
+    const closeSidebar = () => {
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+    }
+
+    return (
+        <Sidebar>
+            <SidebarContent className="p-2">
+                <SidebarGroup>
+                   <SidebarMenu>
+                        <SidebarMenuItem>
+                            <Link href="/dashboard/devices" passHref legacyBehavior>
+                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/devices')} onClick={closeSidebar}>
+                                    <Network />
+                                    <span>Network Devices</span>
+                                </SidebarMenuButton>
+                            </Link>
+                        </SidebarMenuItem>
+                         <SidebarMenuItem>
+                             <Link href="/dashboard/ad" passHref legacyBehavior>
+                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/ad')} onClick={closeSidebar}>
+                                    <Users />
+                                    <span>Active Directory</span>
+                                </SidebarMenuButton>
+                            </Link>
+                        </SidebarMenuItem>
+                         <SidebarMenuItem>
+                            <Link href="/dashboard/help" passHref legacyBehavior>
+                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
+                                    <HelpCircle />
+                                    <span>Help & Prerequisites</span>
+                                </SidebarMenuButton>
+                            </Link>
+                        </SidebarMenuItem>
+                   </SidebarMenu>
+                </SidebarGroup>
+            </SidebarContent>
+        </Sidebar>
+    )
+}
+
 
 export default function DashboardLayout({
   children,
@@ -10,10 +62,15 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthProvider>
-      <div className="flex min-h-screen w-full flex-col">
-        <DashboardHeader />
-        <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
-      </div>
+      <SidebarProvider>
+        <div className="flex min-h-screen w-full flex-col bg-muted/40">
+           <AppSidebar />
+           <div className="flex flex-col sm:gap-4 sm:py-4 sm:pl-14">
+             <DashboardHeader />
+             <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
+           </div>
+        </div>
+      </SidebarProvider>
     </AuthProvider>
   );
 }

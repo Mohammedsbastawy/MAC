@@ -23,9 +23,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { LifeBuoy, LogOut, Settings, ShieldCheck, User, Loader2, Zap } from "lucide-react";
+import { LifeBuoy, LogOut, Settings, ShieldCheck, User, Loader2, Zap, PanelLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useSidebar } from "../ui/sidebar";
 
 
 const formSchema = z.object({
@@ -152,19 +153,16 @@ const UserMenu: React.FC = () => {
 
 export default function DashboardHeader() {
   const { user, isLoading } = useAuth();
+  const { isMobile, toggleSidebar } = useSidebar();
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 sm:px-6">
-      <Link href="/dashboard/devices" className="flex items-center gap-2 font-semibold">
-        <ShieldCheck className="h-6 w-6 text-primary" />
-        <span className="font-headline text-lg text-foreground">Dominion</span>
-      </Link>
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+      {isMobile && (
+         <Button size="icon" variant="outline" className="sm:hidden" onClick={toggleSidebar}>
+            <PanelLeft className="h-5 w-5" />
+            <span className="sr-only">Toggle Menu</span>
+        </Button>
+      )}
       <div className="ml-auto flex items-center gap-4">
-        <Link href="/dashboard/help">
-            <Button variant="outline" size="icon" className="h-9 w-9">
-                <LifeBuoy className="h-4 w-4" />
-                <span className="sr-only">Help & Support</span>
-            </Button>
-        </Link>
         {isLoading ? (
             <Loader2 className="animate-spin text-muted-foreground" />
         ) : user ? (
