@@ -306,3 +306,4 @@ def api_device_details():
 
 
 
+
