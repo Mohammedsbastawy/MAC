@@ -782,7 +782,7 @@ export default function DeviceActionsPanel({
       }
 
       try {
-          const response = await fetch(`/api/${tool}`, {
+          const response = await fetch(`/api/pstools/${tool.replace('api/','')}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

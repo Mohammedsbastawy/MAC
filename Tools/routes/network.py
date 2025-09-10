@@ -43,7 +43,7 @@ def get_source_ip_for_cidr(cidr_str):
 def get_router_mac_address():
     """
     Attempts to find the default gateway's MAC address by parsing `route print`
-    and then using `arp -a`.
+    and then using `arp -a`. This is a more robust method for masscan.
     """
     try:
         # Get the default gateway IP
@@ -123,7 +123,7 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
         raise FileNotFoundError("masscan.exe not found in the Tools/bin directory.")
 
     # Use a unique filename to avoid race conditions if multiple scans run
-    output_file = f"masscan_scan_{os.getpid()}.json"
+    output_file = os.path.join(os.path.dirname(masscan_path), f"masscan_scan_{os.getpid()}.json")
     
     command = [
         masscan_path,
@@ -135,6 +135,7 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
         "--output-file", output_file
     ]
 
+    # Prioritize router_mac if available, as it's more reliable
     if router_mac:
         command.extend(["--router-mac", router_mac])
     elif source_ip:
@@ -148,28 +149,38 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
         creationflags=subprocess.CREATE_NO_WINDOW
     )
 
-    if proc.returncode != 0:
-        # Pass the stderr output for better error reporting in the UI
+    if proc.returncode != 0 and "FAIL: could not determine default interface" not in proc.stderr:
+        # We ignore the default interface error because we will try other methods.
+        # But other errors should be raised.
         raise RuntimeError("Masscan execution failed.", proc.stderr or proc.stdout)
 
     found_hosts = []
-    if os.path.exists(output_file):
-        try:
+    try:
+        if os.path.exists(output_file):
             with open(output_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('{') and line.endswith('}'):
-                        try:
-                            data = json.loads(line)
-                            ip = data.get("ip")
+                content = f.read()
+                # Masscan might output an empty file or just a comma on completion, handle this
+                if content.strip() and content.strip() != ',':
+                    # The JSON is a list of objects, one per line, enclosed in []. Let's fix it.
+                    if content.endswith(',\n'):
+                        content = content[:-2]
+                    json_content = f"[{content}]"
+                    
+                    try:
+                        scan_results = json.loads(json_content)
+                        for result in scan_results:
+                            ip = result.get("ip")
                             if ip:
                                 found_hosts.append(ip)
-                        except json.JSONDecodeError:
-                            continue
-            os.remove(output_file)
-        finally:
-            if os.path.exists(output_file):
+                    except json.JSONDecodeError as e:
+                        # Handle cases where the JSON is still malformed
+                         raise RuntimeError("Masscan produced malformed JSON output.", str(e))
+    finally:
+        if os.path.exists(output_file):
+            try:
                 os.remove(output_file)
+            except OSError:
+                pass # Ignore if file is locked
     
     return found_hosts
 
@@ -192,13 +203,13 @@ def api_discover_devices():
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
-    router_mac = data.get("router_mac")
 
     if not scan_cidr:
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
     try:
         source_ip = get_source_ip_for_cidr(scan_cidr)
+        router_mac = get_router_mac_address()
         online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
         # Get AD computers to filter them out from the scan results
@@ -244,7 +255,7 @@ def api_discover_devices():
             "error": "Masscan Scan Failed",
             "message": "The network scan failed. This can happen if Masscan doesn't have the right permissions or can't find the network router.",
             "error_code": "MASSCAN_FAILED",
-            "details": e.args[1] if len(e.args) > 1 else str(e)
+            "details": e.args[0] if e.args else str(e)
         }), 500
     except Exception as e:
         return jsonify({
@@ -277,6 +288,8 @@ def check_host_status_ping(ip):
         # A successful ping usually returns 0.
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+    except Exception:
         return False
 
 def check_host_status_psinfo(ip, user, domain, pwd):

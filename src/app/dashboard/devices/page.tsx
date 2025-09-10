@@ -6,6 +6,7 @@ import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
 import type { Device } from "@/lib/types";
 import { useAuth } from "@/hooks/use-auth";
 import { Lock } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const UnauthenticatedMessage: React.FC = () => (
     <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-[calc(100vh-200px)]">
@@ -31,7 +32,22 @@ export default function DashboardDevicesPage() {
   };
 
   if (isLoading) {
-    return null; // Or a loading spinner for the whole page
+      return (
+        <div className="space-y-6">
+            <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                    <Skeleton className="h-8 w-64" />
+                    <Skeleton className="h-5 w-80" />
+                </div>
+                <Skeleton className="h-11 w-56" />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="h-40" />
+            ))}
+            </div>
+        </div>
+      )
   }
 
   if (!user) {

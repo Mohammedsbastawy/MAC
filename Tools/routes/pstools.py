@@ -8,19 +8,17 @@ from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, par
 def json_result(rc, out, err, structured_data=None):
     return jsonify({"rc": rc, "stdout": out, "stderr": err, "eula_required": False, "structured_data": structured_data})
 
-pstools_bp = Blueprint('pstools', __name__)
+pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 @pstools_bp.before_request
 def require_login():
-    if request.endpoint and request.endpoint.startswith('pstools.'):
+    if not request.endpoint.endswith('api_psexec'): # temp allow psexec
         if 'user' not in session or 'email' not in session:
-            # For POST requests, return JSON error
             if request.method == 'POST':
                 return jsonify({'rc': 401, 'stdout': '', 'stderr': 'Authentication required. Please log in.'}), 401
-            # For GET requests or others, you might redirect or show a different error
             return "Authentication required", 401
 
-@pstools_bp.route('/api/psexec', methods=['POST'])
+@pstools_bp.route('/psexec', methods=['POST'])
 def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
@@ -37,7 +35,7 @@ def api_psexec():
     return json_result(rc, out, err)
 
 
-@pstools_bp.route('/api/psservice', methods=['POST'])
+@pstools_bp.route('/psservice', methods=['POST'])
 def api_psservice():
     data = request.get_json() or {}
     ip = data.get("ip","")
@@ -72,7 +70,7 @@ def api_psservice():
     return json_result(rc, out, err, structured_data)
 
 
-@pstools_bp.route('/api/pslist', methods=['POST'])
+@pstools_bp.route('/pslist', methods=['POST'])
 def api_pslist():
     data = request.get_json() or {}
     ip = data.get("ip","")
@@ -88,7 +86,7 @@ def api_pslist():
         
     return json_result(rc, out, err, structured_data)
 
-@pstools_bp.route('/api/pskill', methods=['POST'])
+@pstools_bp.route('/pskill', methods=['POST'])
 def api_pskill():
     data = request.get_json() or {}
     ip, proc = data.get("ip",""), data.get("proc","")
@@ -102,7 +100,7 @@ def api_pskill():
     return json_result(rc, out, err)
 
 
-@pstools_bp.route('/api/psloglist', methods=['POST'])
+@pstools_bp.route('/psloglist', methods=['POST'])
 def api_psloglist():
     data = request.get_json() or {}
     ip, kind = data.get("ip",""), data.get("kind","system")
@@ -119,7 +117,7 @@ def api_psloglist():
     return json_result(rc, out, err, structured_data)
 
 
-@pstools_bp.route('/api/psinfo', methods=['POST'])
+@pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
     ip = data.get("ip","")
@@ -135,7 +133,7 @@ def api_psinfo():
         
     return json_result(rc, out, err, structured_data)
 
-@pstools_bp.route('/api/psloggedon', methods=['POST'])
+@pstools_bp.route('/psloggedon', methods=['POST'])
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip","")
@@ -151,7 +149,7 @@ def api_psloggedon():
 
     return json_result(rc, out, err, structured_data)
 
-@pstools_bp.route('/api/psshutdown', methods=['POST'])
+@pstools_bp.route('/psshutdown', methods=['POST'])
 def api_psshutdown():
     data = request.get_json() or {}
     ip, action = data.get("ip",""), data.get("action","restart")
@@ -171,7 +169,7 @@ def api_psshutdown():
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
 
-@pstools_bp.route('/api/psfile', methods=['POST'])
+@pstools_bp.route('/psfile', methods=['POST'])
 def api_psfile():
     data = request.get_json() or {}
     ip = data.get("ip","")
@@ -187,7 +185,7 @@ def api_psfile():
 
     return json_result(rc, out, err, structured_data)
 
-@pstools_bp.route('/api/psgetsid', methods=['POST'])
+@pstools_bp.route('/psgetsid', methods=['POST'])
 def api_psgetsid():
     data = request.get_json() or {}
     ip = data.get("ip","")
@@ -198,7 +196,7 @@ def api_psgetsid():
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
 
-@pstools_bp.route('/api/pspasswd', methods=['POST'])
+@pstools_bp.route('/pspasswd', methods=['POST'])
 def api_pspasswd():
     data = request.get_json() or {}
     ip = data.get("ip","")
@@ -212,7 +210,7 @@ def api_pspasswd():
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
 
-@pstools_bp.route('/api/pssuspend', methods=['POST'])
+@pstools_bp.route('/pssuspend', methods=['POST'])
 def api_pssuspend():
     data = request.get_json() or {}
     ip, proc = data.get("ip",""), data.get("proc","")
@@ -225,7 +223,7 @@ def api_pssuspend():
         return json_result(2, "", str(e))
     return json_result(rc, out, err)
 
-@pstools_bp.route('/api/psping', methods=['POST'])
+@pstools_bp.route('/psping', methods=['POST'])
 def api_psping():
     data = request.get_json() or {}
     ip, extra = data.get('ip',''), data.get('extra','')

@@ -159,7 +159,8 @@ const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device
 
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
-  const [isLoading, setIsLoading] = React.useState(true);
+  const [isAdLoading, setIsAdLoading] = React.useState(true);
+  const [isScanLoading, setIsScanLoading] = React.useState(false);
   const [domainDevices, setDomainDevices] = React.useState<Device[]>([]);
   const [workgroupDevices, setWorkgroupDevices] = React.useState<Device[]>([]);
   const { toast } = useToast();
@@ -173,7 +174,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   // Fetch initial data (AD computers and network interfaces) on mount
   React.useEffect(() => {
     const fetchInitialData = async () => {
-        setIsLoading(true);
+        setIsAdLoading(true);
         setNetworkError(null);
         setScanError(null);
 
@@ -212,7 +213,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             setScanError({ isError: true, title: "Server Error", message: "Failed to connect to the server to get AD devices." });
         }
 
-        setIsLoading(false);
+        setIsAdLoading(false);
     };
     fetchInitialData();
   }, []);
@@ -246,8 +247,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           const onlineIps = new Set(data.online_ips);
           
           const sortDevices = (a: Device, b: Device) => {
-              const aIsOnline = a.status === 'online';
-              const bIsOnline = b.status === 'online';
+              const aIsOnline = onlineIps.has(a.ipAddress);
+              const bIsOnline = onlineIps.has(b.ipAddress);
               if (aIsOnline && !bIsOnline) return -1;
               if (!aIsOnline && bIsOnline) return 1;
               return a.name.localeCompare(b.name);
@@ -282,7 +283,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         return;
     }
 
-    setIsLoading(true);
+    setIsScanLoading(true);
     setWorkgroupDevices([]);
     setScanError(null);
     toast({ title: "Scan Initiated", description: `Discovering workgroup devices on ${selectedCidr}...` });
@@ -306,7 +307,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 details: data.details,
                 errorCode: data.error_code
             });
-            setIsLoading(false);
+            setIsScanLoading(false);
             return; 
         }
         
@@ -329,46 +330,17 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
         toast({ title: "Workgroup Scan Complete", description: `Found ${discoveredButNotDomain.length} non-domain devices.`});
         setWorkgroupDevices(discoveredButNotDomain);
-        setIsLoading(false);
+        setIsScanLoading(false);
 
     } catch (err: any) {
         setScanError({ isError: true, title: "Client Error", message: err.message || "An unknown client-side error occurred." });
         console.error(err);
-        setIsLoading(false);
+        setIsScanLoading(false);
     }
   };
 
   const renderContent = () => {
-    if (isLoading) {
-      return (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={i} className="h-40" />
-          ))}
-        </div>
-      );
-    }
-
-    if (scanError?.isError) {
-         return (
-             <Alert variant="destructive" className="h-80 flex flex-col items-center justify-center text-center">
-                <Siren className="h-12 w-12" />
-                <AlertTitle className="mt-4 text-lg">{scanError.title}</AlertTitle>
-                <AlertDescription className="mt-2 max-w-md space-y-4">
-                    <p>{scanError.message}</p>
-                    {scanError.details && (
-                        <Button onClick={() => setErrorDialog({isOpen: true, title: "Error Log", content: scanError.details ?? "No details available."})}>
-                            <FileText className="mr-2 h-4 w-4" />
-                            Show Error Log
-                        </Button>
-                    )}
-                </AlertDescription>
-            </Alert>
-        )
-    }
-
     const onlineDomainDevices = domainDevices.filter(d => d.status === 'online').length;
-    const onlineWorkgroupDevices = workgroupDevices.filter(d => d.status === 'online').length;
 
     return (
       <div className="space-y-8">
@@ -380,7 +352,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             <CardDescription className="mb-4">
                 Devices found in Active Directory. Click 'Refresh Online Status' to check which are online.
             </CardDescription>
-            {domainDevices.length > 0 ? (
+            {isAdLoading ? (
+                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                        <Skeleton key={i} className="h-40" />
+                    ))}
+                </div>
+            ) : domainDevices.length > 0 ? (
                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {domainDevices.map((device) => (
                         <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
@@ -408,7 +386,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                     </CardDescription>
                 </div>
                  <div className="flex flex-wrap items-center gap-2 mb-4 md:mb-0">
-                    <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isLoading}>
+                    <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isScanLoading}>
                         <SelectTrigger className="h-11 min-w-[250px] justify-between">
                             <div className="flex items-center gap-2">
                                 <Network className="h-4 w-4" />
@@ -423,14 +401,34 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                             ))}
                         </SelectContent>
                     </Select>
-                    <Button onClick={handleDiscoverWorkgroup} disabled={isLoading || !selectedCidr} size="lg" className="h-11">
-                        <Search className="mr-2 h-4 w-4" />
+                    <Button onClick={handleDiscoverWorkgroup} disabled={isScanLoading || !selectedCidr} size="lg" className="h-11">
+                        {isScanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
                         Discover Workgroup Devices
                     </Button>
                 </div>
             </div>
-
-            {workgroupDevices.length > 0 ? (
+            
+            { isScanLoading ? (
+                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                        <Skeleton key={i} className="h-40" />
+                    ))}
+                </div>
+            ) : scanError?.isError ? (
+                <Alert variant="destructive" className="mt-4">
+                    <Siren className="h-4 w-4" />
+                    <AlertTitle>{scanError.title}</AlertTitle>
+                    <AlertDescription>
+                        {scanError.message}
+                         {scanError.details && (
+                            <Button variant="secondary" size="sm" className="mt-2" onClick={() => setErrorDialog({isOpen: true, title: "Error Log", content: scanError.details ?? "No details available."})}>
+                                <FileText className="mr-2 h-4 w-4" />
+                                Show Error Log
+                            </Button>
+                        )}
+                    </AlertDescription>
+                </Alert>
+            ) : workgroupDevices.length > 0 ? (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
                     {workgroupDevices.map((device) => (
                         <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
@@ -462,8 +460,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={handleRefreshStatus} disabled={isLoading || (domainDevices.length === 0 && workgroupDevices.length === 0)} size="lg" className="h-11">
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            <Button onClick={handleRefreshStatus} disabled={isAdLoading || (domainDevices.length === 0 && workgroupDevices.length === 0)} size="lg" className="h-11">
+                {(domainDevices.some(d => d.isLoadingDetails) || workgroupDevices.some(d => d.isLoadingDetails)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Refresh Online Status
             </Button>
         </div>
