@@ -10,8 +10,7 @@ ad_bp = Blueprint('activedirectory', __name__)
 def check_pyad_availability():
     """Checks if pyad can be imported."""
     try:
-        from pyad import aduser, adcomputer, adquery, pyad_setdefaults
-        from pyad.pyadexceptions import PyADError, PyADInvalidUser, PyADInvalidPassword
+        from pyad import aduser, adcomputer, adquery, pyad_setdefaults, pyadexceptions
         return True, None
     except ImportError as e:
         return False, str(e)
@@ -54,14 +53,13 @@ def require_login_and_set_ad_credentials():
     # This is the format pyad expects for the username
     user_principal_name = f"{username}@{domain}"
     
-    from pyad import pyad_setdefaults
-    from pyad.pyadexceptions import PyADError
+    from pyad import pyad_setdefaults, pyadexceptions
 
     try:
         # 4. Set the credentials for all subsequent pyad calls in this request.
         pyad_setdefaults(username=user_principal_name, password=password)
         
-    except PyADError as e:
+    except pyadexceptions.PyADError as e:
         # This will catch authentication/connection errors from pyad_setdefaults
         return jsonify({
             "ok": False, 
@@ -95,8 +93,7 @@ def get_ad_computers():
             'details': f"Details: {pyad_error}"
         }), 500
 
-    from pyad import adquery
-    from pyad.pyadexceptions import PyADError
+    from pyad import adquery, pyadexceptions
 
     try:
         q = adquery.ADQuery()
@@ -127,7 +124,7 @@ def get_ad_computers():
 
         return jsonify({"ok": True, "computers": computers_list})
 
-    except PyADError as e:
+    except pyadexceptions.PyADError as e:
         return jsonify({
             "ok": False, 
             "error": "Active Directory Query Failed",
@@ -159,8 +156,7 @@ def set_user_password():
             'details': f"Details: {pyad_error}"
         }), 500
 
-    from pyad import aduser
-    from pyad.pyadexceptions import PyADError, PyADInvalidUser, PyADInvalidPassword
+    from pyad import aduser, pyadexceptions
 
     data = request.get_json() or {}
     target_username = data.get('username')
@@ -175,9 +171,9 @@ def set_user_password():
 
         return jsonify({'ok': True, 'message': f'Password for user "{target_username}" has been changed successfully.'})
 
-    except PyADInvalidUser:
+    except pyadexceptions.PyADInvalidUser:
         return jsonify({'ok': False, 'error': f'User "{target_username}" not found in Active Directory.'}), 404
-    except PyADInvalidPassword as e:
+    except pyadexceptions.PyADInvalidPassword as e:
         return jsonify({
             'ok': False, 
             'error': 'Failed to set password due to domain policy.',
@@ -185,7 +181,7 @@ def set_user_password():
             'error_code': 'AD_INVALID_PASSWORD_POLICY',
             'details': str(e)
         }), 400
-    except PyADError as e:
+    except pyadexceptions.PyADError as e:
         return jsonify({
             'ok': False, 
             'error': 'Active Directory Error', 
@@ -201,3 +197,5 @@ def set_user_password():
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
+
+    
