@@ -230,14 +230,14 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       }
 
       toast({ title: "Refreshing Status...", description: `Checking ${ipsToCheck.length} devices.` });
-      
-      const updateDevicesState = (updateFn: (d: Device) => Device) => {
-          setDomainDevices(prev => prev.map(updateFn));
-          setWorkgroupDevices(prev => prev.map(updateFn));
+
+      const updateDeviceLists = (updateFn: (d: Device) => Partial<Device>) => {
+          setDomainDevices(prev => prev.map(d => ({ ...d, ...updateFn(d) })));
+          setWorkgroupDevices(prev => prev.map(d => ({ ...d, ...updateFn(d) })));
       };
 
-      // Start: Set all devices to loading state
-      updateDevicesState(d => ({ ...d, isLoadingDetails: true, status: 'unknown' }));
+      // Set all devices to loading
+      updateDeviceLists(() => ({ isLoadingDetails: true, status: 'unknown' }));
 
       let onlineIps = new Set<string>();
 
@@ -251,30 +251,34 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           
           let pingData;
           try {
-            pingData = await pingRes.json();
-          } catch(e) {
-             throw new Error("Received an invalid response from the server during ping scan. Is it running?");
+              pingData = await pingRes.json();
+          } catch (e) {
+              // Clone the response to be able to read it again
+              const resClone = pingRes.clone();
+              try {
+                const textError = await resClone.text();
+                throw new Error(`Received an invalid response from the server during ping scan. Details: ${textError}`);
+              } catch {
+                throw new Error("Received an invalid and unreadable response from the server during ping scan.");
+              }
           }
-          
           if (!pingData.ok) throw new Error(pingData.error || "Ping scan failed on the server.");
-
           onlineIps = new Set<string>(pingData.online_ips);
           
-          // Update UI immediately after ping scan
-          updateDevicesState(d => {
-              const isOnline = onlineIps.has(d.ipAddress) || onlineIps.has(d.name);
-              return {
-                  ...d,
-                  status: isOnline ? 'online' : 'unknown',
-                  isLoadingDetails: !isOnline // Stop loading for online devices
-              };
-          });
-
           const ipsForPsInfo = ipsToCheck.filter(ip => !onlineIps.has(ip));
           toast({ title: "Ping Scan Complete", description: `Found ${onlineIps.size} devices. Now checking ${ipsForPsInfo.length} more.` });
 
+          // Update UI immediately after ping scan
+          updateDeviceLists(d => {
+              const isOnline = onlineIps.has(d.ipAddress) || onlineIps.has(d.name);
+              return {
+                  status: isOnline ? 'online' : 'unknown',
+                  isLoadingDetails: !isOnline // Stop loading only for online devices
+              };
+          });
+
+          // --- Phase 2: PsInfo Scan ---
           if (ipsForPsInfo.length > 0) {
-              // --- Phase 2: PsInfo Scan ---
               const psinfoRes = await fetch("/api/network/check-status-psinfo", {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -285,24 +289,29 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               try {
                   psinfoData = await psinfoRes.json();
               } catch(e) {
-                 const textError = await psinfoRes.text();
-                 throw new Error(`Received an invalid response from the server during PsInfo scan. Details: ${textError}`);
+                 const resClone = psinfoRes.clone();
+                 try {
+                    const textError = await resClone.text();
+                    throw new Error(`Received an invalid response from the server during PsInfo scan. Details: ${textError}`);
+                 } catch {
+                    throw new Error("Received an invalid and unreadable response from the server during PsInfo scan.");
+                 }
               }
               
               if (!psinfoData.ok) throw new Error(psinfoData.error || "PsInfo scan failed on the server.");
               
+              // Add new online IPs to the existing set
               psinfoData.online_ips.forEach((ip: string) => onlineIps.add(ip));
-              
               toast({ title: "Status Refresh Complete", description: `Total online: ${onlineIps.size}.` });
           } else {
               toast({ title: "Status Refresh Complete", description: "All responsive devices found by ping." });
           }
+
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
       } finally {
           // Final update for all devices
-          updateDevicesState(d => ({
-              ...d,
+          updateDeviceLists(d => ({
               status: (onlineIps.has(d.ipAddress) || onlineIps.has(d.name)) ? 'online' : 'offline',
               isLoadingDetails: false
           }));
