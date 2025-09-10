@@ -2,6 +2,7 @@
 from flask import Blueprint, request, jsonify, session
 from datetime import datetime, timezone
 from Tools.utils.logger import logger
+import socket
 
 # We will use ldap3 which is cross-platform
 # We will attempt the import within the routes themselves to ensure
@@ -120,20 +121,29 @@ def _get_ad_computers_data():
             last_logon_timestamp = entry.lastLogonTimestamp.value
             last_logon_dt = None
 
-            # Correctly handle lastLogonTimestamp which can be an int or a datetime object
-            if last_logon_timestamp:
-                if isinstance(last_logon_timestamp, datetime):
-                    last_logon_dt = last_logon_timestamp
-                elif isinstance(last_logon_timestamp, (int, float)) and int(last_logon_timestamp) > 0:
-                    try:
-                        # Value is in 100-nanosecond intervals since Jan 1, 1601
-                        last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
-                    except Exception:
-                        last_logon_dt = None # Reset on error
-                
+            # Correctly handle lastLogonTimestamp which can be a datetime object or a numeric value
+            if isinstance(last_logon_timestamp, datetime):
+                last_logon_dt = last_logon_timestamp
+            elif isinstance(last_logon_timestamp, (int, float)) and int(last_logon_timestamp) > 0:
+                try:
+                    # Value is in 100-nanosecond intervals since Jan 1, 1601
+                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
+                except Exception:
+                    last_logon_dt = None # Reset on error
+            
+            hostname = str(entry.dNSHostName.value) if entry.dNSHostName.value else ""
+            ip_address = hostname
+            # Try to resolve hostname to IP, but don't fail if it's not possible
+            if hostname:
+                try:
+                    ip_address = socket.gethostbyname(hostname)
+                except socket.gaierror:
+                    logger.warning(f"Could not resolve hostname '{hostname}' to an IP address.")
+                    ip_address = hostname # fallback to hostname
+
             computers_list.append({
                 "name": str(entry.name.value) if entry.name.value else "",
-                "dns_hostname": str(entry.dNSHostName.value) if entry.dNSHostName.value else "",
+                "dns_hostname": ip_address,
                 "os": str(entry.operatingSystem.value) if entry.operatingSystem.value else "",
                 "last_logon": format_datetime(last_logon_dt),
                 "created": format_datetime(entry.whenCreated.value),

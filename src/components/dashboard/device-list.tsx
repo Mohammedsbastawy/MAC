@@ -81,7 +81,7 @@ type ScanErrorState = {
 const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
     id: adComputer.dns_hostname || adComputer.name,
     name: adComputer.name,
-    ipAddress: adComputer.dns_hostname || adComputer.name, // Use name as fallback IP/hostname
+    ipAddress: adComputer.dns_hostname || adComputer.name, // Use DNS hostname (now IP) as primary, fallback to name
     macAddress: "-",
     status: 'unknown', // Initially unknown
     type: determineDeviceType(adComputer.name),
@@ -248,25 +248,23 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           
           const onlineIps = new Set(data.online_ips);
           
+          const updateDeviceStatus = (d: Device) => ({
+                ...d,
+                // Check if the device's IP or name is in the online set
+                status: onlineIps.has(d.ipAddress) || onlineIps.has(d.name) ? 'online' : 'offline',
+                isLoadingDetails: false
+          });
+
           const sortDevices = (a: Device, b: Device) => {
-              const aIsOnline = onlineIps.has(a.ipAddress);
-              const bIsOnline = onlineIps.has(b.ipAddress);
+              const aIsOnline = onlineIps.has(a.ipAddress) || onlineIps.has(a.name);
+              const bIsOnline = onlineIps.has(b.ipAddress) || onlineIps.has(b.name);
               if (aIsOnline && !bIsOnline) return -1;
               if (!aIsOnline && bIsOnline) return 1;
               return a.name.localeCompare(b.name);
           };
 
-          setDomainDevices(prev => prev.map(d => ({ 
-              ...d, 
-              status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-              isLoadingDetails: false 
-          })).sort(sortDevices));
-
-          setWorkgroupDevices(prev => prev.map(d => ({ 
-              ...d, 
-              status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-              isLoadingDetails: false
-          })).sort(sortDevices));
+          setDomainDevices(prev => prev.map(updateDeviceStatus).sort(sortDevices));
+          setWorkgroupDevices(prev => prev.map(updateDeviceStatus).sort(sortDevices));
 
           toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} devices online.` });
 
