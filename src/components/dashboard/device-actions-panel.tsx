@@ -40,7 +40,8 @@ import {
   XCircle,
   InfoIcon,
   Skull,
-  Search
+  Search,
+  Zap
 } from "lucide-react";
 import {
   Sheet,
@@ -537,8 +538,7 @@ const PsServiceResult: React.FC<{ data: PsServiceData[], onAction: (serviceName:
                                                     </Button>
                                                 </TooltipTrigger>
                                                 <TooltipContent>
-                                                    <p>Show Details</p>
-                                                </TooltipContent>
+                                                    <p>Show Details</p></TooltipContent>
                                             </Tooltip>
 
                                             {service.state.includes("STOPPED") && (
@@ -903,6 +903,7 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Advanced Actions</h4>
                 <div className="grid grid-cols-1 gap-2">
+                    <ActionButton icon={Zap} label="Force GPUpdate" onClick={() => handlePstoolAction('psexec', { cmd: 'gpupdate /force' })} />
                     <AlertDialog>
                         <AlertDialogTrigger asChild>
                             <Button variant="outline" className="justify-start">
@@ -954,3 +955,5 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    
