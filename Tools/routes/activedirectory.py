@@ -39,14 +39,26 @@ def require_login():
     password = session.get("password")
     domain = session.get("domain")
     user_principal_name = f"{username}@{domain}"
+    
     try:
+        # This is the critical step. It attempts to authenticate with the DC.
         pyad_setdefaults(username=user_principal_name, password=password)
     except PyADError as e:
+        # This block will now catch authentication/connection errors from pyad_setdefaults
         return jsonify({
             "ok": False, 
             "error": "Active Directory Authentication Failed",
             "message": f"Could not authenticate with domain '{domain}'. Please check credentials or DC connectivity.",
             "error_code": "AD_AUTH_FAILED",
+            "details": str(e)
+        }), 500
+    except Exception as e:
+        # Catch any other unexpected error during initialization
+         return jsonify({
+            "ok": False, 
+            "error": "Unexpected Initialization Error",
+            "message": "An unexpected error occurred while initializing the Active Directory connection.",
+            "error_code": "AD_INIT_UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
 
@@ -91,7 +103,7 @@ def get_ad_computers():
         return jsonify({
             "ok": False, 
             "error": "Active Directory Query Failed",
-            "message": f"An error occurred while trying to query Active Directory.",
+            "message": f"An error occurred while trying to query Active Directory. This can be due to insufficient permissions.",
             "error_code": "AD_QUERY_FAILED",
             "details": str(e)
         }), 500
