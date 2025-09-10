@@ -5,7 +5,7 @@
 @layer base {
   @font-face {
     font-family: 'Stanley';
-    src: url('/fonts/Stanley.ttf') format('truetype');
+    src: url('/Stanley.ttf') format('truetype');
     font-weight: normal;
     font-style: normal;
   }
