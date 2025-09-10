@@ -4,8 +4,8 @@
 
 @layer base {
   @font-face {
-    font-family: 'Stanley';
-    src: url('/Stanley.ttf') format('truetype');
+    font-family: 'Branda';
+    src: url('/BRANDA.ttf') format('truetype');
     font-weight: normal;
     font-style: normal;
   }
