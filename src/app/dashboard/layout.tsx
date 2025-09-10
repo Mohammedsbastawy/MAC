@@ -1,3 +1,4 @@
+
 "use client";
 
 import DashboardHeader from "@/components/dashboard/header";
@@ -23,7 +24,13 @@ const AppSidebar = () => {
     return (
         <Sidebar>
             <SidebarHeader>
-                 <Logo className="h-full w-full" />
+                 <div className="flex items-center gap-3">
+                    <Logo className="h-12 w-12 flex-shrink-0" />
+                    <div className={cn("flex flex-col", state === 'collapsed' && "hidden")}>
+                        <span className="font-bold text-lg tracking-wider font-headline">ATLAS</span>
+                        <span className="text-xs text-muted-foreground">BY BASTAWY</span>
+                    </div>
+                 </div>
             </SidebarHeader>
             <SidebarContent className="p-2">
                 <SidebarGroup>

@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -17,6 +18,8 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import type { Area } from "react-easy-crop";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 
 /**
@@ -29,6 +32,7 @@ const getCroppedImg = (imageSrc: string, pixelCrop: Area): Promise<string> => {
     return new Promise((resolve, reject) => {
         const image = new Image();
         image.src = imageSrc;
+        image.crossOrigin = 'anonymous'; // Handle CORS for external images if needed
         image.onload = () => {
             const canvas = document.createElement("canvas");
             const ctx = canvas.getContext("2d");
@@ -91,7 +95,7 @@ const ImageCropperDialog: React.FC<{
     if (!image) return null;
 
     return (
-        <Dialog open={!!image} onOpenChange={onClose}>
+        <Dialog open={!!image} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="max-w-xl">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2"><Crop /> Crop your new logo</DialogTitle>
@@ -133,12 +137,17 @@ export default function SettingsPage() {
     const [currentLogo, setCurrentLogo] = React.useState<string | null>("");
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const [imageToCrop, setImageToCrop] = React.useState<string | null>(null);
+    const [logoFit, setLogoFit] = React.useState<'contain' | 'cover'>('contain');
 
     React.useEffect(() => {
         const savedLogo = localStorage.getItem("customLogoUrl");
+        const savedFit = localStorage.getItem("customLogoFit");
         if (savedLogo) {
             setLogoPreviewUrl(savedLogo);
             setCurrentLogo(savedLogo);
+        }
+        if (savedFit === 'contain' || savedFit === 'cover') {
+            setLogoFit(savedFit);
         }
     }, []);
 
@@ -146,11 +155,12 @@ export default function SettingsPage() {
         try {
             if (logoPreviewUrl) {
                 localStorage.setItem("customLogoUrl", logoPreviewUrl);
-                 setCurrentLogo(logoPreviewUrl);
+                setCurrentLogo(logoPreviewUrl);
             } else {
                 localStorage.removeItem("customLogoUrl");
-                 setCurrentLogo(null);
+                setCurrentLogo(null);
             }
+            localStorage.setItem("customLogoFit", logoFit);
             window.dispatchEvent(new Event('storage'));
             toast({
                 title: "Settings Saved",
@@ -167,9 +177,11 @@ export default function SettingsPage() {
 
     const handleRevert = () => {
         localStorage.removeItem("customLogoUrl");
+        localStorage.removeItem("customLogoFit");
         window.dispatchEvent(new Event('storage'));
         setLogoPreviewUrl("");
         setCurrentLogo(null);
+        setLogoFit('contain');
         toast({
             title: "Logo Reverted",
             description: "The logo has been reverted to the default.",
@@ -197,6 +209,8 @@ export default function SettingsPage() {
             }
             reader.readAsDataURL(file);
         }
+         // Reset the input value to allow re-uploading the same file
+        event.target.value = '';
     };
     
     const handleCropComplete = (croppedImage: string) => {
@@ -228,8 +242,9 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
                 <div className="space-y-4">
+                     <h4 className="font-medium text-foreground">Configuration</h4>
                     <input 
                         type="file" 
                         ref={fileInputRef} 
@@ -238,16 +253,36 @@ export default function SettingsPage() {
                         accept="image/png, image/jpeg, image/gif"
                     />
                     <div className="flex flex-col gap-2 pt-2 md:pt-0">
-                        <Button onClick={handleUploadClick} className="w-full md:w-auto">
+                        <Button onClick={handleUploadClick} className="w-full">
                             <UploadCloud className="mr-2 h-4 w-4" />
                             Upload New Logo
                         </Button>
-                        <Button onClick={handleSave} disabled={!logoPreviewUrl} className="w-full md:w-auto">Save Changes</Button>
-                        <Button variant="destructive" onClick={handleRevert} disabled={!currentLogo} className="w-full md:w-auto">
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Logo Fit</Label>
+                         <RadioGroup value={logoFit} onValueChange={(value) => setLogoFit(value as 'contain' | 'cover')} className="flex gap-4">
+                            <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="contain" id="r1" />
+                                <Label htmlFor="r1">Contain (Show full logo)</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="cover" id="r2" />
+                                <Label htmlFor="r2">Cover (Fill space)</Label>
+                            </div>
+                        </RadioGroup>
+                    </div>
+
+                    <Separator className="!my-6" />
+
+                     <div className="flex flex-col gap-2">
+                        <Button onClick={handleSave} disabled={!logoPreviewUrl} className="w-full">Save Changes</Button>
+                        <Button variant="destructive" onClick={handleRevert} disabled={!currentLogo} className="w-full">
                             Revert to Default
                         </Button>
                     </div>
                 </div>
+
                  <div className="grid grid-cols-2 gap-4 text-center">
                      <div>
                         <h4 className="text-sm font-medium text-muted-foreground mb-2">Current Logo</h4>
@@ -263,7 +298,7 @@ export default function SettingsPage() {
                                     src={logoPreviewUrl} 
                                     alt="New logo preview" 
                                     className="max-w-full max-h-full"
-                                    style={{ objectFit: 'contain' }}
+                                    style={{ objectFit: logoFit }}
                                 />
                             ) : (
                                 <div className="text-muted-foreground flex flex-col items-center">
@@ -275,8 +310,6 @@ export default function SettingsPage() {
                     </div>
                 </div>
            </div>
-
-           <Separator className="my-6"/>
         </CardContent>
       </Card>
     </div>

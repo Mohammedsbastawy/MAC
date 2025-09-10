@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
@@ -24,12 +25,15 @@ const DefaultLogo: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 
 export const Logo: React.FC<{ className?: string }> = ({ className }) => {
     const [logoUrl, setLogoUrl] = React.useState<string | null>(null);
+    const [logoFit, setLogoFit] = React.useState<'contain' | 'cover'>('contain');
     const [isMounted, setIsMounted] = React.useState(false);
 
     const updateLogo = React.useCallback(() => {
         try {
             const storedUrl = localStorage.getItem("customLogoUrl");
+            const storedFit = localStorage.getItem("customLogoFit");
             setLogoUrl(storedUrl);
+            setLogoFit((storedFit === 'cover' || storedFit === 'contain') ? storedFit : 'contain');
         } catch (error) {
             console.warn("Could not access localStorage for custom logo.");
         }
@@ -62,7 +66,7 @@ export const Logo: React.FC<{ className?: string }> = ({ className }) => {
                     fill
                     sizes="100%"
                     style={{ 
-                        objectFit: "contain",
+                        objectFit: logoFit,
                     }}
                     className="rounded-md"
                     unoptimized // Use this for external URLs and data URIs
