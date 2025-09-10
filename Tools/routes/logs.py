@@ -5,9 +5,8 @@ logs_bp = Blueprint('logs', __name__, url_prefix='/api/logs')
 
 def get_log_file_path():
     """Returns the absolute path to the log file."""
-    # يفترض أن هذا الملف في routes، واللوج في Tools
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    tools_dir = os.path.join(project_root, 'Tools')
+    # This file is in routes, so we go up one directory to get to Tools
+    tools_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(tools_dir, 'dominion-tools.log')
 
 @logs_bp.before_request
