@@ -274,15 +274,15 @@ def check_host_status_ping(ip):
     """
     try:
         # The '-n 1' sends only one echo request.
-        # The '-w 1000' sets a timeout of 1000ms (1 second).
-        command = ["ping", "-n", "1", "-w", "1000", ip]
+        # The '-w 3000' sets a timeout of 3000ms (3 seconds).
+        command = ["ping", "-n", "1", "-w", "3000", ip]
         
         # Use CREATE_NO_WINDOW to prevent flash of a command prompt window
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            timeout=2,
+            timeout=4,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         # A successful ping usually returns 0.
@@ -296,14 +296,14 @@ def check_host_status_psinfo(ip, user, domain, pwd):
     """
     Checks if a host is responsive by trying to run a basic psinfo command.
     This is a fallback for when ping (ICMP) is disabled. Returns True on success.
-    The most basic 'psinfo' call (without any args like -d) is used, as it's the
+    The most basic 'psinfo' call (without any args) is used, as it's the
     most likely to succeed if the host is reachable at all.
     """
     try:
-        # We use a short timeout and suppress decoding errors.
+        # We use a longer timeout and suppress decoding errors.
         # We only care about the return code, not the output.
         # We call psinfo without any arguments, which is the most basic check.
-        rc, _, _ = run_ps_command("psinfo", ip, user, domain, pwd, [], timeout=15, suppress_errors=True)
+        rc, _, _ = run_ps_command("psinfo", ip, user, domain, pwd, [], timeout=30, suppress_errors=True)
         return rc == 0
     except Exception:
         # If any exception occurs (e.g., in run_ps_command), assume offline.
@@ -366,3 +366,4 @@ def api_check_status():
     
 
     
+
