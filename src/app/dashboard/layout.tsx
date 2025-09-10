@@ -2,16 +2,17 @@
 
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar, SidebarHeader } from "@/components/ui/sidebar";
 import { Globe, Users, NotebookText, HelpCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { Logo } from "@/components/ui/logo";
 
 
 const AppSidebar = () => {
     const pathname = usePathname();
-    const { isMobile, setOpenMobile } = useSidebar();
+    const { isMobile, setOpenMobile, state } = useSidebar();
 
     const closeSidebar = () => {
       if (isMobile) {
@@ -21,6 +22,10 @@ const AppSidebar = () => {
 
     return (
         <Sidebar>
+            <SidebarHeader>
+                 <Logo />
+                 <span className={cn("font-semibold text-lg", state === 'collapsed' && "hidden")}>Atlas</span>
+            </SidebarHeader>
             <SidebarContent className="p-2">
                 <SidebarGroup>
                    <SidebarMenu>
@@ -28,7 +33,7 @@ const AppSidebar = () => {
                             <Link href="/dashboard/devices" passHref legacyBehavior>
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/devices')} onClick={closeSidebar}>
                                     <Globe />
-                                    <span>Network Devices</span>
+                                    <span className={cn(state === 'collapsed' && "hidden")}>Network Devices</span>
                                 </SidebarMenuButton>
                             </Link>
                         </SidebarMenuItem>
@@ -36,7 +41,7 @@ const AppSidebar = () => {
                              <Link href="/dashboard/ad" passHref legacyBehavior>
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/ad')} onClick={closeSidebar}>
                                     <Users />
-                                    <span>Active Directory</span>
+                                    <span className={cn(state === 'collapsed' && "hidden")}>Active Directory</span>
                                 </SidebarMenuButton>
                             </Link>
                         </SidebarMenuItem>
@@ -44,7 +49,7 @@ const AppSidebar = () => {
                             <Link href="/dashboard/logs" passHref legacyBehavior>
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/logs')} onClick={closeSidebar}>
                                     <NotebookText />
-                                    <span>System Logs</span>
+                                    <span className={cn(state === 'collapsed' && "hidden")}>System Logs</span>
                                 </SidebarMenuButton>
                             </Link>
                         </SidebarMenuItem>
@@ -52,7 +57,7 @@ const AppSidebar = () => {
                             <Link href="/dashboard/help" passHref legacyBehavior>
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
                                     <HelpCircle />
-                                    <span>Help & Prerequisites</span>
+                                    <span className={cn(state === 'collapsed' && "hidden")}>Help & Prerequisites</span>
                                 </SidebarMenuButton>
                             </Link>
                         </SidebarMenuItem>
@@ -79,7 +84,7 @@ export default function DashboardLayout({
   );
 }
 
-const DashboardLayoutContent = ({ children }: { children: React.Node }) => {
+const DashboardLayoutContent = ({ children }: { children: React.ReactNode }) => {
   const { state } = useSidebar();
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">

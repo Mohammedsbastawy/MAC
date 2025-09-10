@@ -191,7 +191,7 @@ export const SidebarHeader = React.forwardRef<
     <div
       ref={ref}
       data-sidebar="header"
-      className={cn("flex h-14 items-center border-b px-4", 
+      className={cn("flex h-14 items-center gap-3 border-b border-sidebar-border px-4", 
         state === 'collapsed' && "h-[52px] justify-center px-2",
         className)}
       {...props}
@@ -244,7 +244,7 @@ export const SidebarFooter = React.forwardRef<
         <div
             ref={ref}
             data-sidebar="footer"
-            className={cn("mt-auto flex h-14 items-center border-t",
+            className={cn("mt-auto flex h-14 items-center border-t border-sidebar-border",
              state === "collapsed" ? "justify-center" : "px-4",
             className)}
             {...props}
