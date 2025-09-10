@@ -80,7 +80,7 @@ type ScanErrorState = {
 const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
     id: adComputer.dns_hostname || adComputer.name,
     name: adComputer.name,
-    ipAddress: adComputer.dns_hostname, // Primary identifier for status check
+    ipAddress: adComputer.dns_hostname || adComputer.name, // Use name as fallback IP/hostname
     macAddress: "-",
     status: 'unknown', // Initially unknown
     type: determineDeviceType(adComputer.name),
