@@ -119,12 +119,18 @@ def _get_ad_computers_data():
         for entry in conn.entries:
             last_logon_timestamp = entry.lastLogonTimestamp.value
             last_logon_dt = None
-            if last_logon_timestamp and int(last_logon_timestamp) > 0:
-                try:
-                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
-                except Exception:
-                    last_logon_dt = None
 
+            # Correctly handle lastLogonTimestamp which can be an int or a datetime object
+            if last_logon_timestamp:
+                if isinstance(last_logon_timestamp, datetime):
+                    last_logon_dt = last_logon_timestamp
+                elif isinstance(last_logon_timestamp, (int, float)) and int(last_logon_timestamp) > 0:
+                    try:
+                        # Value is in 100-nanosecond intervals since Jan 1, 1601
+                        last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
+                    except Exception:
+                        last_logon_dt = None # Reset on error
+                
             computers_list.append({
                 "name": str(entry.name.value) if entry.name.value else "",
                 "dns_hostname": str(entry.dNSHostName.value) if entry.dNSHostName.value else "",
