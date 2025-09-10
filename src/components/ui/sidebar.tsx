@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { VariantProps, cva } from "class-variance-authority"
-import { PanelLeft } from "lucide-react"
+import { PanelLeft, PanelRight } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
@@ -234,6 +234,35 @@ export const SidebarGroup = React.forwardRef<
   )
 })
 SidebarGroup.displayName = "SidebarGroup"
+
+export const SidebarFooter = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<"div">
+>(({ className, ...props }, ref) => {
+    const { state, toggleSidebar } = useSidebar()
+    return (
+        <div
+            ref={ref}
+            data-sidebar="footer"
+            className={cn("mt-auto flex h-14 items-center border-t",
+             state === "collapsed" ? "justify-center" : "px-4",
+            className)}
+            {...props}
+        >
+             <SidebarMenuButton 
+                onClick={toggleSidebar}
+                tooltip={{ children: state === 'expanded' ? "Collapse Sidebar" : "Expand Sidebar" }}
+                className={cn(state === 'collapsed' && "w-10 h-10 p-0 justify-center")}
+             >
+                {state === 'expanded' ? <PanelRight /> : <PanelLeft />}
+                <span className={cn(state === "collapsed" && "sr-only")}>
+                    {state === 'expanded' ? "Collapse" : "Expand"}
+                </span>
+            </SidebarMenuButton>
+        </div>
+    )
+})
+SidebarFooter.displayName = "SidebarFooter"
 
 
 export const SidebarMenu = React.forwardRef<

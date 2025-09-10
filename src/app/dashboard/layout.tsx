@@ -2,7 +2,7 @@
 
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarSection, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarSection, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Briefcase, FolderCog, HelpCircle, Network, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -50,6 +50,7 @@ const AppSidebar = () => {
                    </SidebarMenu>
                 </SidebarGroup>
             </SidebarContent>
+            <SidebarFooter />
         </Sidebar>
     )
 }
