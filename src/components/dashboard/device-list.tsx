@@ -244,18 +244,26 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           }
           
           const onlineIps = new Set(data.online_ips);
+          
+          const sortDevices = (a: Device, b: Device) => {
+              const aIsOnline = a.status === 'online';
+              const bIsOnline = b.status === 'online';
+              if (aIsOnline && !bIsOnline) return -1;
+              if (!aIsOnline && bIsOnline) return 1;
+              return a.name.localeCompare(b.name);
+          };
 
           setDomainDevices(prev => prev.map(d => ({ 
               ...d, 
               status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
               isLoadingDetails: false 
-          })));
+          })).sort(sortDevices));
 
           setWorkgroupDevices(prev => prev.map(d => ({ 
               ...d, 
               status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
               isLoadingDetails: false
-          })));
+          })).sort(sortDevices));
 
           toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} devices online.` });
 
