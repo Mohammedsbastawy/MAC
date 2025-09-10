@@ -3,6 +3,13 @@
 @tailwind utilities;
 
 @layer base {
+  @font-face {
+    font-family: 'Rhythmic Regal';
+    src: url('/Rhythmic-Regal.ttf') format('truetype'); /* Ensure you have Rhythmic-Regal.ttf in /public */
+    font-weight: normal;
+    font-style: normal;
+  }
+
   :root {
     --background: 30 27% 95%; /* #F3F2EC */
     --foreground: 210 10% 23%;
