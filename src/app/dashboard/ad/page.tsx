@@ -31,6 +31,7 @@ import {
   useReactTable,
   type ColumnFiltersState,
   type SortingState,
+  type Row,
 } from "@tanstack/react-table";
 import {
     AlertDialog,
@@ -53,7 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { ADComputer, ADUser } from "@/lib/types";
+import type { ADComputer, ADUser, ADGroup } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -449,10 +450,181 @@ const UserTabContent: React.FC<{users: ADUser[], onUpdate: () => void}> = ({user
     );
 }
 
+const GroupTabContent: React.FC<{ groups: ADGroup[] }> = ({ groups }) => {
+    const { toast } = useToast();
+    const [sorting, setSorting] = React.useState<SortingState>([]);
+    const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+    const [selectedGroup, setSelectedGroup] = React.useState<ADGroup | null>(null);
+    const [isLoadingMembers, setIsLoadingMembers] = React.useState(false);
+    const [groupMembers, setGroupMembers] = React.useState<string[]>([]);
+    const [membersError, setMembersError] = React.useState<string | null>(null);
+
+    const fetchGroupMembers = async (groupName: string) => {
+        setIsLoadingMembers(true);
+        setMembersError(null);
+        setGroupMembers([]);
+        try {
+            const res = await fetch("/api/ad/get-group-members", {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ group_name: groupName })
+            });
+            const data = await res.json();
+            if (data.ok) {
+                setGroupMembers(data.members);
+            } else {
+                setMembersError(data.error || "Failed to fetch group members.");
+            }
+        } catch (error) {
+            setMembersError("A client-side error occurred while fetching group members.");
+        } finally {
+            setIsLoadingMembers(false);
+        }
+    };
+
+    const handleRowClick = (row: Row<ADGroup>) => {
+        const group = row.original;
+        setSelectedGroup(group);
+        fetchGroupMembers(group.name);
+    };
+
+    const groupColumns: ColumnDef<ADGroup>[] = [
+        { accessorKey: "name", header: "Group Name" },
+        { accessorKey: "description", header: "Description" },
+        { accessorKey: "created", header: "Date Created" },
+    ];
+
+    const table = useReactTable({
+        data: groups,
+        columns: groupColumns,
+        getCoreRowModel: getCoreRowModel(),
+        getPaginationRowModel: getPaginationRowModel(),
+        onSortingChange: setSorting,
+        getSortedRowModel: getSortedRowModel(),
+        onColumnFiltersChange: setColumnFilters,
+        getFilteredRowModel: getFilteredRowModel(),
+        state: {
+            sorting,
+            columnFilters,
+        },
+    });
+
+    return (
+        <div className="grid md:grid-cols-2 gap-6">
+            <Card>
+                <CardHeader>
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <CardTitle className="flex items-center gap-2">
+                                <Shield /> Domain Groups
+                            </CardTitle>
+                            <CardDescription>
+                                A list of all groups found in the domain. Found {table.getRowModel().rows.length} groups.
+                            </CardDescription>
+                        </div>
+                         <Input
+                            placeholder="Filter group name..."
+                            value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
+                            onChange={(event) => table.getColumn("name")?.setFilterValue(event.target.value)}
+                            className="max-w-sm"
+                        />
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <div className="rounded-md border">
+                        <Table>
+                            <TableHeader>
+                                {table.getHeaderGroups().map((headerGroup) => (
+                                    <TableRow key={headerGroup.id}>
+                                        {headerGroup.headers.map((header) => (
+                                            <TableHead key={header.id} onClick={() => header.column.toggleSorting(header.column.getIsSorted() === "asc")}>
+                                                {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                                            </TableHead>
+                                        ))}
+                                    </TableRow>
+                                ))}
+                            </TableHeader>
+                            <TableBody>
+                                {table.getRowModel().rows?.length ? (
+                                    table.getRowModel().rows.map((row) => (
+                                        <TableRow key={row.id} onClick={() => handleRowClick(row)} className="cursor-pointer" data-state={selectedGroup?.name === row.original.name && "selected"}>
+                                            {row.getVisibleCells().map((cell) => (
+                                                <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                                            ))}
+                                        </TableRow>
+                                    ))
+                                ) : (
+                                    <TableRow>
+                                        <TableCell colSpan={groupColumns.length} className="h-24 text-center">No results.</TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+                    <div className="flex items-center justify-end space-x-2 py-4">
+                         <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>Previous</Button>
+                         <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
+                    </div>
+                </CardContent>
+            </Card>
+
+             <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Users /> Group Members
+                    </CardTitle>
+                    <CardDescription>
+                        {selectedGroup ? `Members of "${selectedGroup.name}"` : "Select a group to see its members."}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                     {selectedGroup ? (
+                        isLoadingMembers ? (
+                            <div className="flex items-center justify-center h-48">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : membersError ? (
+                             <Alert variant="destructive">
+                                <ServerCrash className="h-4 w-4" />
+                                <AlertTitle>Error</AlertTitle>
+                                <AlertDescription>{membersError}</AlertDescription>
+                            </Alert>
+                        ) : groupMembers.length > 0 ? (
+                            <div className="rounded-md border h-96 overflow-y-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow><TableHead>Username</TableHead></TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {groupMembers.map((member, index) => (
+                                            <TableRow key={index}><TableCell>{member}</TableCell></TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        ) : (
+                             <div className="text-center text-muted-foreground py-10">This group has no members.</div>
+                        )
+                    ) : (
+                        <div className="flex flex-col items-center justify-center text-center text-muted-foreground p-10 border-2 border-dashed rounded-lg h-96">
+                            <Shield className="h-12 w-12 mb-4" />
+                            <h3 className="text-lg font-semibold">No Group Selected</h3>
+                            <p className="text-sm">Click on a group from the list to view its members here.</p>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+        </div>
+    );
+};
+
+
 export default function ActiveDirectoryPage() {
   const { user } = useAuth();
   const [computers, setComputers] = React.useState<ADComputer[]>([]);
   const [users, setUsers] = React.useState<ADUser[]>([]);
+  const [groups, setGroups] = React.useState<ADGroup[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<ADError | null>(null);
   const [showErrorDetails, setShowErrorDetails] = React.useState(false);
@@ -466,25 +638,24 @@ export default function ActiveDirectoryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [computersRes, usersRes] = await Promise.all([
+      const [computersRes, usersRes, groupsRes] = await Promise.all([
         fetch("/api/ad/get-computers", { method: "POST" }),
         fetch("/api/ad/get-users", { method: "POST" }),
+        fetch("/api/ad/get-groups", { method: "POST" }),
       ]);
 
-      const computersData = await computersRes.json();
-      const usersData = await usersRes.json();
+      const results = await Promise.all([computersRes.json(), usersRes.json(), groupsRes.json()]);
+      const [computersData, usersData, groupsData] = results;
 
-      if (computersData.ok) {
-        setComputers(computersData.computers);
-      } else {
-        throw computersData; // Throw the error object to be caught below
-      }
+      if (computersData.ok) setComputers(computersData.computers);
+      else throw computersData;
       
-      if (usersData.ok) {
-        setUsers(usersData.users);
-      } else {
-        throw usersData; // Throw the error object
-      }
+      if (usersData.ok) setUsers(usersData.users);
+      else throw usersData;
+
+      if (groupsData.ok) setGroups(groupsData.groups);
+       else throw groupsData;
+
 
     } catch (err: any) {
       setError({
@@ -591,7 +762,7 @@ export default function ActiveDirectoryPage() {
                 </TabsTrigger>
                  <TabsTrigger value="groups">
                     <Shield className="mr-2 h-4 w-4" />
-                    Groups
+                    Groups ({groups.length})
                 </TabsTrigger>
                  <TabsTrigger value="ous">
                     <Folder className="mr-2 h-4 w-4" />
@@ -605,7 +776,7 @@ export default function ActiveDirectoryPage() {
                 <UserTabContent users={users} onUpdate={() => setKey(prev => prev + 1)} />
             </TabsContent>
             <TabsContent value="groups" className="mt-4">
-                 <PlaceholderTab title="Groups Management" icon={Shield} />
+                 <GroupTabContent groups={groups} />
             </TabsContent>
             <TabsContent value="ous" className="mt-4">
                  <PlaceholderTab title="Organizational Units" icon={Folder} />

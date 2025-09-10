@@ -54,50 +54,38 @@ def get_ldap_connection():
     logger.info(f"Attempting LDAP connection to domain '{domain}' with user '{user_principal_name}'.")
     
     # Let ldap3 discover the server from the domain
-    server = Server(domain, get_info=ALL)
-    conn = None
-    last_error = None
-    
-    # Attempt 1: Connect with TLS (recommended)
     try:
-        logger.info("Trying LDAP connection with StartTLS...")
-        conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=AUTO_BIND_TLS_BEFORE_BIND, check_names=True)
+        server = Server(domain, get_info=ALL, use_ssl=True)
+        conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
         if conn.bound:
-             logger.info("LDAP connection with StartTLS successful.")
+            logger.info(f"LDAP connection with SSL successful to {server.host}.")
+            return conn, None, 200
+        else:
+             logger.warning(f"LDAP connection with SSL to {server.host} failed. Trying without SSL.")
+    except Exception as e:
+        logger.warning(f"LDAP connection with SSL failed: {e}. Trying without SSL.")
+
+    # Fallback to non-SSL
+    try:
+        server = Server(domain, get_info=ALL)
+        conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
+        if conn.bound:
+            logger.info(f"LDAP connection without SSL successful to {server.host}.")
+            return conn, None, 200
     except Exception as e:
         last_error = str(e)
-        logger.warning(f"LDAP connection with StartTLS failed: {last_error}")
-        if conn:
-            conn.unbind()
-        conn = None
-
-    # Attempt 2: If TLS failed, try a simple bind without encryption
-    if not conn or not conn.bound:
-        try:
-            logger.info("StartTLS failed, trying standard LDAP simple bind...")
-            # Recreate the connection object
-            conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
-            if conn.bound:
-                logger.info("Standard LDAP simple bind successful.")
-        except Exception as e:
-            last_error = str(e)
-            logger.warning(f"Standard LDAP simple bind failed: {last_error}")
-            if conn:
-                conn.unbind()
-            conn = None
-
-    # Check the final result
-    if conn and conn.bound:
-        return conn, None, 200
-    else:
         logger.error(f"LDAP bind failed for domain '{domain}'. Last error: {last_error}")
         return None, {
             'ok': False,
             'error': 'LDAP Connection Failed',
-            'message': f"Could not bind to the domain '{domain}' with either SSL or non-SSL methods. Please check credentials and domain controller connectivity.",
+            'message': f"Could not bind to the domain '{domain}'. Please check credentials and domain controller connectivity.",
             'details': f"Last encountered error: {last_error or 'No specific error message was captured.'}",
             'error_code': 'LDAP_BIND_FAILED'
         }, 401
+    
+    # If both failed
+    logger.error(f"All LDAP connection attempts failed for domain '{domain}'.")
+    return None, { 'ok': False, 'error': 'LDAP Connection Failed', 'message': f"Could not bind to '{domain}' with or without SSL.", 'error_code': 'LDAP_BIND_FAILED' }, 401
 
 
 def _get_ad_computers_data():
@@ -411,4 +399,99 @@ def set_user_status():
             conn.unbind()
             logger.info("LDAP connection unbound after user status operation.")
 
-    
+@ad_bp.route('/api/ad/get-groups', methods=['POST'])
+def get_ad_groups():
+    """
+    API endpoint to fetch all group objects from Active Directory.
+    """
+    logger.info("Received request for /api/ad/get-groups.")
+    conn, error, status = get_ldap_connection()
+    if error:
+        return jsonify(error), status
+
+    try:
+        base_dn = conn.server.info.other.get('defaultNamingContext')[0]
+        
+        search_filter = "(objectCategory=group)"
+        attributes = ["sAMAccountName", "description", "whenCreated", "member"]
+        
+        logger.info(f"Searching AD for groups with base DN '{base_dn}'.")
+        conn.search(search_base=base_dn, search_filter=search_filter, attributes=attributes)
+        
+        groups_list = []
+        for entry in conn.entries:
+            groups_list.append({
+                "name": str(entry.sAMAccountName.value) if entry.sAMAccountName.value else "",
+                "description": str(entry.description.value) if entry.description.value else "",
+                "created": format_datetime(entry.whenCreated.value),
+            })
+        
+        logger.info(f"Found {len(groups_list)} group objects in AD.")
+        return jsonify({"ok": True, "groups": groups_list}), 200
+
+    except Exception as e:
+        logger.error(f"Unexpected error during AD group query: {e}", exc_info=True)
+        return jsonify({
+            "ok": False, 
+            "error": "Unexpected LDAP Query Error",
+            "message": "An unexpected error occurred during the Active Directory group query.",
+            "error_code": "AD_QUERY_UNEXPECTED_ERROR",
+            "details": str(e)
+        }), 500
+    finally:
+        if conn:
+            conn.unbind()
+
+@ad_bp.route('/api/ad/get-group-members', methods=['POST'])
+def get_group_members():
+    """
+    API endpoint to fetch members of a specific group.
+    """
+    data = request.get_json() or {}
+    group_name = data.get('group_name')
+    if not group_name:
+        return jsonify({'ok': False, 'error': 'Group name is required.'}), 400
+
+    logger.info(f"Received request for members of group '{group_name}'.")
+    conn, error, status = get_ldap_connection()
+    if error:
+        return jsonify(error), status
+
+    try:
+        base_dn = conn.server.info.other.get('defaultNamingContext')[0]
+        search_filter = f"(&(objectCategory=group)(sAMAccountName={group_name}))"
+        
+        logger.info(f"Searching for group '{group_name}' to get members.")
+        conn.search(search_base=base_dn, search_filter=search_filter, attributes=['member'])
+
+        if not conn.entries:
+            logger.warning(f"Group '{group_name}' not found.")
+            return jsonify({'ok': False, 'error': 'Group not found'}), 404
+
+        group_entry = conn.entries[0]
+        member_dns = group_entry.member.values
+
+        members = []
+        if member_dns:
+            # We need to resolve each member DN to a sAMAccountName
+            for member_dn in member_dns:
+                # The search scope is the member's DN itself
+                conn.search(search_base=member_dn, search_filter='(objectClass=*)', search_scope='BASE', attributes=['sAMAccountName'])
+                if conn.entries:
+                    members.append(str(conn.entries[0].sAMAccountName.value))
+        
+        logger.info(f"Found {len(members)} members in group '{group_name}'.")
+        return jsonify({"ok": True, "members": members}), 200
+
+    except Exception as e:
+        logger.error(f"Unexpected error during AD group member query: {e}", exc_info=True)
+        return jsonify({
+            "ok": False, 
+            "error": "Unexpected LDAP Query Error",
+            "message": "An unexpected error occurred while fetching group members.",
+            "error_code": "AD_QUERY_UNEXPECTED_ERROR",
+            "details": str(e)
+        }), 500
+    finally:
+        if conn:
+            conn.unbind()

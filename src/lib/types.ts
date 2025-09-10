@@ -38,3 +38,10 @@ export type ADUser = {
   created: string;
   domain?: string;
 };
+
+export type ADGroup = {
+  name: string;
+  description: string;
+  created: string;
+  members?: string[];
+};
