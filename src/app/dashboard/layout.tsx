@@ -22,7 +22,7 @@ const AppSidebar = () => {
 
     return (
         <Sidebar>
-            <SidebarHeader>
+            <SidebarHeader className="p-0">
                  <Logo className="h-14 w-full" />
             </SidebarHeader>
             <SidebarContent className="p-2">
