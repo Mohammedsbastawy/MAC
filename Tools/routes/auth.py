@@ -4,25 +4,34 @@ import subprocess
 import re
 import os
 
-try:
-    import win32security
-    import win32con
-    PYWIN32_AVAILABLE = True
-except ImportError:
-    PYWIN32_AVAILABLE = False
-
+# We will check for pywin32 availability right when we need it.
+# This makes the error messages more accurate.
 
 auth_bp = Blueprint('auth', __name__)
 
+def check_pywin32_availability():
+    """Checks if pywin32 can be imported."""
+    try:
+        import win32security
+        import win32con
+        return True, None
+    except ImportError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
+
 def check_is_domain_admin_with_cred(username, password, domain="."):
     """Checks credentials and domain admin status."""
-    if not PYWIN32_AVAILABLE:
-        # Fallback for non-windows environments - THIS WILL NOT WORK FOR PRODUCTION
-        # We will assume success for local development if pywin32 is not installed
+    pywin32_ok, pywin32_error = check_pywin32_availability()
+    if not pywin32_ok:
+        # Fallback for non-windows environments or if pywin32 has issues
         if os.environ.get("FLASK_ENV") == "development":
+             # Allow login in dev mode if pywin32 is not available
              return True, None
-        return False, "مكتبة pywin32 غير مثبتة على الخادم، لا يمكن التحقق من كلمة المرور."
+        return False, f"مكتبة pywin32 غير متوفرة أو فشلت في التهيئة. التفاصيل: {pywin32_error}"
 
+    import win32security
+    import win32con
     try:
         # 1. Authenticate user credentials
         hUser = win32security.LogonUser(
@@ -32,17 +41,13 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
             win32con.LOGON32_LOGON_NETWORK, # Use this for domain authentication
             win32con.LOGON32_PROVIDER_DEFAULT
         )
-        # If LogonUser succeeds, credentials are valid.
         
         # 2. Check if the user is a member of the "Domain Admins" group.
-        # Use the combined domain\user format for checking group membership
         is_admin, error_msg = check_is_domain_admin_group_member(f"{domain}\\{username}")
         
-        # Close the handle from LogonUser
         hUser.Close()
 
         if error_msg:
-             # The user is authenticated, but we couldn't check admin status
              return False, f"تم التحقق من الحساب ولكن: {error_msg}"
         
         if not is_admin:
@@ -61,15 +66,11 @@ def check_is_domain_admin_with_cred(username, password, domain="."):
 def check_is_domain_admin_group_member(full_username):
     """Checks if a user is a member of the Domain Admins group using 'net group'."""
     try:
-        # Use 'net group' which is reliable for checking domain group membership.
-        # The full_username should be in "DOMAIN\user" format
         user_to_check = full_username.split('\\')[-1]
 
         cmd = f'net group "Domain Admins" /domain'
         proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
 
-        # The command can fail if the machine is not on a domain.
-        # In that case, we fall back to checking the local Administrators group.
         if proc.returncode != 0:
             cmd = f'net localgroup "Administrators"'
             proc = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -84,7 +85,6 @@ def check_is_domain_admin_group_member(full_username):
                 user_section_started = True
                 continue
             if user_section_started:
-                # Users can be in columns, so we split by spaces and filter out empty strings
                 user_list.extend(filter(None, line.strip().split('  ')))
         
         return any(user_to_check.lower() == admin.lower() for admin in user_list), None
@@ -107,10 +107,9 @@ def api_login():
     if not password:
         return jsonify({"ok": False, "error": "كلمة المرور مطلوبة."})
 
-    # Extract username and domain from email
     parts = email.split('@')
     username = parts[0]
-    domain = parts[1] if len(parts) > 1 else "." # Use current domain if not specified
+    domain = parts[1] if len(parts) > 1 else "."
 
     is_admin, error_msg = check_is_domain_admin_with_cred(username, password, domain)
 
@@ -118,23 +117,20 @@ def api_login():
         error_to_show = error_msg or "فشل تسجيل الدخول."
         return jsonify({"ok": False, "error": error_to_show})
 
-    # If the user is a domain admin and password is correct, create a session
     session.permanent = True
     session['user'] = username
     session['email'] = email
     session['domain'] = domain
-    # IMPORTANT: Store the password in the session for PsTools commands
     session['password'] = password
     return jsonify({"ok": True, "user": username, "email": email, "domain": domain})
 
 @auth_bp.route('/api/check-session', methods=['GET'])
 def api_check_session():
     if 'user' in session and 'email' in session:
-        # Don't return the password to the client, but confirm session is ok
         return jsonify({"ok": True, "user": session['user'], "email": session['email'], "domain": session.get('domain')})
     return jsonify({"ok": False})
 
-@auth_bp.route('/api/logout', methods=['POST'])
+@auth_p.route('/api/logout', methods=['POST'])
 def api_logout():
     session.clear()
     return jsonify({"ok": True})
