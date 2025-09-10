@@ -122,15 +122,21 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
             shell=False,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        def decode_output(raw):
-            if not raw: return ""
-            if raw.startswith(b'\xff\xfe'): # UTF-16 LE BOM
-                try: return raw.decode('utf-16-le')
-                except Exception: pass
-            try: return raw.decode('utf-8')
-            except Exception:
-                try: return raw.decode('cp1252') # Common on Windows
-                except Exception: return raw.decode(errors='replace')
+        def decode_output(raw_bytes):
+            if not raw_bytes:
+                return ""
+            # List of encodings to try
+            encodings = ['utf-16-le', 'utf-8', 'cp1252', 'latin-1']
+            for encoding in encodings:
+                try:
+                    # Check for BOM in UTF-16
+                    if encoding == 'utf-16-le' and not raw_bytes.startswith(b'\xff\xfe'):
+                        continue
+                    return raw_bytes.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+            # If all fail, decode with replacement characters
+            return raw_bytes.decode('utf-8', errors='replace')
         
         out = decode_output(completed.stdout)
         err = decode_output(completed.stderr)
