@@ -293,17 +293,3 @@ def api_device_details():
         device_details['os'] = f"Error: {str(e)}"
 
     return jsonify(device_details)
-
-    
-
-    
-
-
-
-
-    
-
-
-
-
-
