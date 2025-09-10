@@ -1,4 +1,3 @@
-
 "use client";
 
 import DashboardHeader from "@/components/dashboard/header";
@@ -27,7 +26,7 @@ const AppSidebar = () => {
                  <div className={cn("flex w-full items-center justify-center gap-4", state === "collapsed" && "hidden")}>
                     <Logo className="h-16 w-16" />
                     <div className="flex flex-col items-start">
-                        <span className="text-2xl tracking-wider" style={{ fontFamily: 'Branda, serif' }}>ATLAS</span>
+                        <span className="text-2xl tracking-wider font-bold">ATLAS</span>
                         <span className="text-xs text-muted-foreground">BY BASTAWY</span>
                     </div>
                 </div>
@@ -86,14 +85,6 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthProvider>
-      <style jsx global>{`
-        @font-face {
-          font-family: 'Branda';
-          src: url('/BRANDA.ttf') format('truetype');
-          font-weight: normal;
-          font-style: normal;
-        }
-      `}</style>
       <SidebarProvider>
         <DashboardLayoutContent>{children}</DashboardLayoutContent>
       </SidebarProvider>
