@@ -127,20 +127,22 @@ def _get_ad_computers_data():
             elif isinstance(last_logon_timestamp, (int, float)) and int(last_logon_timestamp) > 0:
                 try:
                     # Value is in 100-nanosecond intervals since Jan 1, 1601
-                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
+                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=int(last_logon_timestamp) / 10)
                 except Exception:
                     last_logon_dt = None # Reset on error
             
             hostname = str(entry.dNSHostName.value) if entry.dNSHostName.value else ""
-            ip_address = hostname
+            ip_address = ""
             # Try to resolve hostname to IP, but don't fail if it's not possible
             if hostname:
                 try:
                     ip_address = socket.gethostbyname(hostname)
                 except socket.gaierror:
                     logger.warning(f"Could not resolve hostname '{hostname}' to an IP address.")
-                    ip_address = hostname # fallback to hostname
-
+                    ip_address = hostname # fallback to hostname for display if resolution fails
+            
+            # The 'dns_hostname' field will now hold the IP if resolved, or the hostname if not.
+            # The UI expects ipAddress in this field.
             computers_list.append({
                 "name": str(entry.name.value) if entry.name.value else "",
                 "dns_hostname": ip_address,
