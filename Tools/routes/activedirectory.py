@@ -11,7 +11,7 @@ ad_bp = Blueprint('activedirectory', __name__)
 def check_ldap3_availability():
     """Checks if ldap3 can be imported."""
     try:
-        from ldap3 import Server, Connection, ALL, NTLM, Tls
+        from ldap3 import Server, Connection, ALL, NTLM, Tls, SASL, KERBEROS, SIMPLE
         import ssl
         return True, None
     except ImportError as e:
@@ -36,18 +36,16 @@ def get_ldap_connection():
     if not ldap3_ok:
         return None, {'ok': False, 'error': 'LDAP3 Library Not Available', 'message': ldap3_error, 'error_code': 'LDAP3_INIT_FAILED'}, 500
 
-    if 'user' not in session or 'password' not in session or 'domain' not in session:
+    if 'user' not in session or 'password' not in session or 'domain' not in session or 'email' not in session:
         return None, {'ok': False, 'error': 'Authentication required. Please log in first.', 'error_code': 'AUTH_REQUIRED'}, 401
 
-    from ldap3 import Server, Connection, ALL, NTLM, Tls
+    from ldap3 import Server, Connection, ALL, SIMPLE, Tls
     import ssl
 
-    username = session.get("user")
+    # For SIMPLE bind, we use the User Principal Name (UPN), e.g., user@domain.com
+    user_principal_name = session.get("email")
     password = session.get("password")
     domain = session.get("domain")
-    
-    # NTLM authentication requires the format: DOMAIN\user
-    ntlm_user = f"{domain}\\{username}"
     
     conn = None
     last_error = None
@@ -57,7 +55,7 @@ def get_ldap_connection():
         # Use TLS for security, but be flexible with protocol
         tls_config = Tls(validate=ssl.CERT_NONE, version=ssl.PROTOCOL_TLS)
         server = Server(domain, get_info=ALL, use_ssl=True, port=636, tls=tls_config)
-        conn = Connection(server, user=ntlm_user, password=password, authentication=NTLM, auto_bind=True)
+        conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
     except Exception as e:
         last_error = str(e)
         conn = None # Ensure connection is None on error
@@ -66,7 +64,7 @@ def get_ldap_connection():
     if not conn or not conn.bound:
         try:
             server = Server(domain, get_info=ALL, port=389)
-            conn = Connection(server, user=ntlm_user, password=password, authentication=NTLM, auto_bind=True)
+            conn = Connection(server, user=user_principal_name, password=password, authentication=SIMPLE, auto_bind=True)
         except Exception as e:
             last_error = str(e) # Update with the latest error
             conn = None
@@ -111,16 +109,20 @@ def get_ad_computers():
             last_logon_timestamp = entry.lastLogonTimestamp.value
             if last_logon_timestamp:
                 try:
-                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
+                    # Timestamps of 0 or -1 mean 'never'
+                    if int(last_logon_timestamp) > 0:
+                        last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=last_logon_timestamp / 10)
+                    else:
+                        last_logon_dt = None
                 except:
                     last_logon_dt = None
             else:
                 last_logon_dt = None
 
             computers_list.append({
-                "name": entry.name.value,
-                "dns_hostname": entry.dNSHostName.value,
-                "os": entry.operatingSystem.value,
+                "name": str(entry.name.value) if entry.name.value else "",
+                "dns_hostname": str(entry.dNSHostName.value) if entry.dNSHostName.value else "",
+                "os": str(entry.operatingSystem.value) if entry.operatingSystem.value else "",
                 "last_logon": format_datetime(last_logon_dt),
                 "created": format_datetime(entry.whenCreated.value)
             })
