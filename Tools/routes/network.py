@@ -230,12 +230,16 @@ def api_discover_devices():
         ad_computers_data = _get_ad_computers_data()
         ad_computers_map = {}
         if ad_computers_data.get('ok'):
-             # Create a map of DNS hostname to computer object for quick lookups
+             # Create a map for quick lookups using both FQDN and short name
              for comp in ad_computers_data.get('computers', []):
-                # DNS hostname is more reliable for matching
-                hostname = comp.get('dns_hostname')
-                if hostname:
-                    ad_computers_map[hostname.lower()] = comp
+                # DNS hostname is more reliable for matching (FQDN)
+                dns_hostname = comp.get('dns_hostname')
+                if dns_hostname:
+                    ad_computers_map[dns_hostname.lower()] = comp
+                # Add the short name (SAMAccountName) as well, without the trailing $
+                short_name = comp.get('name')
+                if short_name:
+                    ad_computers_map[short_name.lower()] = comp
         else:
              # If fetching AD data failed, return that error
              return jsonify(ad_computers_data), 500
@@ -244,8 +248,14 @@ def api_discover_devices():
         # Enrich the discovered hosts with AD data
         enriched_hosts = []
         for host in online_hosts_basic_info:
+            # Check for a match using both the FQDN and the short name
             hostname_lower = host['hostname'].lower() if host['hostname'] else ''
-            ad_info = ad_computers_map.get(hostname_lower)
+            
+            # The resolved hostname might be FQDN or short, so we check both possibilities.
+            # We also check just the first part of the FQDN in case that's what matches.
+            short_hostname_lower = hostname_lower.split('.')[0]
+
+            ad_info = ad_computers_map.get(hostname_lower) or ad_computers_map.get(short_hostname_lower)
             
             if ad_info:
                 # This device is in Active Directory
@@ -295,5 +305,3 @@ def api_discover_devices():
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
-
-    

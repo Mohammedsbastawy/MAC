@@ -2,15 +2,16 @@
 
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarSection, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Briefcase, FolderCog, HelpCircle, Network, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 
 const AppSidebar = () => {
     const pathname = usePathname();
-    const { state, isMobile, setOpenMobile } = useSidebar();
+    const { isMobile, setOpenMobile } = useSidebar();
 
     const closeSidebar = () => {
       if (isMobile) {
@@ -61,12 +62,15 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const { state } = useSidebar();
   return (
     <AuthProvider>
       <SidebarProvider>
         <div className="flex min-h-screen w-full flex-col bg-muted/40">
            <AppSidebar />
-           <div className="flex flex-col sm:gap-4 sm:py-4 sm:pl-14">
+           <div className={cn("flex flex-col sm:gap-4 sm:py-4 transition-[padding-left]",
+                state === 'expanded' ? "sm:pl-56" : "sm:pl-14"
+           )}>
              <DashboardHeader />
              <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
            </div>
