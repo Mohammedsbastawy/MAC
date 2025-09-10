@@ -5,9 +5,11 @@ logs_bp = Blueprint('logs', __name__, url_prefix='/api/logs')
 
 def get_log_file_path():
     """Returns the absolute path to the log file."""
-    # This file is in routes, so we go up one directory to get to Tools
-    tools_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # This file is in Tools/routes. The log file is in Tools/.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    tools_dir = os.path.dirname(current_dir) # This should be the Tools directory
     return os.path.join(tools_dir, 'dominion-tools.log')
+
 
 @logs_bp.before_request
 def require_login():
@@ -20,15 +22,13 @@ def get_logs():
     Reads the last N lines from the log file and returns them.
     """
     log_file = get_log_file_path()
-    num_lines = 500  # عدد الأسطر التي سيتم عرضها
+    num_lines = 500  # Number of lines to retrieve
 
     if not os.path.exists(log_file):
         return jsonify({'ok': True, 'logs': 'Log file not found. No logs to display yet.'})
 
     try:
-        # قراءة الأسطر من الملف
         with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
-            # استخدام deque لقراءة آخر N أسطر بكفاءة
             from collections import deque
             lines = deque(f, num_lines)
         

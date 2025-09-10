@@ -341,37 +341,9 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     }
   };
 
-  const fetchLogs = React.useCallback(async () => {
-    try {
-        const res = await fetch('/api/logs/get-logs');
-        const data = await res.json();
-        if (data.ok) {
-            setErrorDialog(prev => ({ ...prev, content: data.logs }));
-        } else {
-            setErrorDialog(prev => ({ ...prev, content: `Failed to fetch logs: ${data.error}` }));
-        }
-    } catch (e: any) {
-        setErrorDialog(prev => ({ ...prev, content: `Could not connect to backend: ${e.message}` }));
-    }
-  }, []);
-
-  React.useEffect(() => {
-    let interval: NodeJS.Timeout | undefined;
-    if (errorDialog.isOpen) {
-      // Fetch immediately, then set an interval
-      fetchLogs();
-      interval = setInterval(fetchLogs, 3000); // Poll every 3 seconds
-    }
-    // Cleanup function to clear the interval
-    return () => {
-      if (interval) {
-        clearInterval(interval);
-      }
-    };
-  }, [errorDialog.isOpen, fetchLogs]);
 
   const handleViewLogs = () => {
-     setErrorDialog({ isOpen: true, title: "Backend Logs", content: "Loading logs..." });
+    window.open('/dashboard/logs', '_blank');
   }
 
   const renderContent = () => {

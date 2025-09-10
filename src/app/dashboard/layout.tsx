@@ -3,7 +3,7 @@
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import { Briefcase, FolderCog, HelpCircle, Network, Users } from "lucide-react";
+import { Briefcase, FolderCog, HelpCircle, Network, Users, NotebookText } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,14 @@ const AppSidebar = () => {
                             </Link>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
+                            <Link href="/dashboard/logs" passHref legacyBehavior>
+                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/logs')} onClick={closeSidebar}>
+                                    <NotebookText />
+                                    <span>System Logs</span>
+                                </SidebarMenuButton>
+                            </Link>
+                        </SidebarMenuItem>
+                         <SidebarMenuItem>
                             <Link href="/dashboard/help" passHref legacyBehavior>
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
                                     <HelpCircle />
@@ -71,7 +79,7 @@ export default function DashboardLayout({
   );
 }
 
-const DashboardLayoutContent = ({ children }: { children: React.ReactNode }) => {
+const DashboardLayoutContent = ({ children }: { children: React.Node }) => {
   const { state } = useSidebar();
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
