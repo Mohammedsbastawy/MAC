@@ -10,7 +10,7 @@ import json
 from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_psinfo_output, get_hostname_from_ip, get_mac_address
-from .activedirectory import get_ad_computers as fetch_ad_computers_data
+from .activedirectory import _get_ad_computers_data
 
 network_bp = Blueprint('network', __name__)
 
@@ -227,16 +227,19 @@ def api_discover_devices():
                     print(f'{future_to_ip[future]} generated an exception: {exc}')
 
         # Fetch all computer data from Active Directory once
-        ad_computers_response, ad_status_code = fetch_ad_computers_data()
-        ad_computers_data = ad_computers_response.get_json()
+        ad_computers_data = _get_ad_computers_data()
         ad_computers_map = {}
-        if ad_status_code == 200 and ad_computers_data.get('ok'):
+        if ad_computers_data.get('ok'):
              # Create a map of DNS hostname to computer object for quick lookups
              for comp in ad_computers_data.get('computers', []):
                 # DNS hostname is more reliable for matching
                 hostname = comp.get('dns_hostname')
                 if hostname:
                     ad_computers_map[hostname.lower()] = comp
+        else:
+             # If fetching AD data failed, return that error
+             return jsonify(ad_computers_data), 500
+
 
         # Enrich the discovered hosts with AD data
         enriched_hosts = []
@@ -292,3 +295,5 @@ def api_discover_devices():
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
+
+    

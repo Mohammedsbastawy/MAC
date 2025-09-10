@@ -81,15 +81,14 @@ def get_ldap_connection():
             'error_code': 'LDAP_BIND_FAILED'
         }, 401
 
-
-@ad_bp.route('/api/ad/get-computers', methods=['POST'])
-def get_ad_computers():
+def _get_ad_computers_data():
     """
-    Fetches all computer objects from Active Directory using ldap3.
+    Internal function that fetches all computer objects from Active Directory
+    and returns a Python dictionary. It does not return a Flask response.
     """
     conn, error, status = get_ldap_connection()
     if error:
-        return jsonify(error), status
+        return error # Return the error dictionary directly
 
     try:
         # Discover the default naming context (e.g., "DC=example,DC=com")
@@ -127,19 +126,30 @@ def get_ad_computers():
                 "created": format_datetime(entry.whenCreated.value)
             })
 
-        return jsonify({"ok": True, "computers": computers_list})
+        return {"ok": True, "computers": computers_list}
 
     except Exception as e:
-        return jsonify({
+        return {
             "ok": False, 
             "error": "Unexpected LDAP Query Error",
             "message": "An unexpected error occurred during the Active Directory computer query.",
             "error_code": "AD_QUERY_UNEXPECTED_ERROR",
             "details": str(e)
-        }), 500
+        }
     finally:
         if conn:
             conn.unbind()
+
+
+@ad_bp.route('/api/ad/get-computers', methods=['POST'])
+def get_ad_computers():
+    """
+    API endpoint to fetch all computer objects from Active Directory using ldap3.
+    This wraps the internal data-fetching function with a JSON response.
+    """
+    result = _get_ad_computers_data()
+    status_code = 401 if result.get("error_code") == 'AUTH_REQUIRED' else 500 if not result.get("ok") else 200
+    return jsonify(result), status_code
 
 
 @ad_bp.route('/api/ad/set-user-password', methods=['POST'])
@@ -212,3 +222,5 @@ def set_user_password():
     finally:
         if conn:
             conn.unbind()
+
+    
