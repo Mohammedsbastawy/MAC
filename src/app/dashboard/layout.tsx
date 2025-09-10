@@ -23,8 +23,7 @@ const AppSidebar = () => {
     return (
         <Sidebar>
             <SidebarHeader>
-                 <Logo />
-                 <span className={cn("font-semibold text-lg", state === 'collapsed' && "hidden")}>Atlas</span>
+                 <Logo className="h-12 -ml-2" />
             </SidebarHeader>
             <SidebarContent className="p-2">
                 <SidebarGroup>
