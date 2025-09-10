@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -113,7 +114,8 @@ const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device
         <Card
             onClick={onSelect}
             className={cn("cursor-pointer transition-all hover:shadow-md hover:-translate-y-1 flex flex-col",
-             device.status === 'offline' && "opacity-60 hover:opacity-100"
+             device.status === 'offline' && "opacity-60 hover:opacity-100",
+             device.status === 'online' && "border-2 border-[#b0e22b]"
             )}
         >
             <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
