@@ -54,26 +54,21 @@ def get_mac_address(ip):
 def get_tools_path(exe_name: str) -> str:
     """
     Constructs the full path to a Tools executable.
-    It assumes the executables are in the 'Tools' directory.
+    It assumes the executables are in the 'Tools/bin' directory.
     The executable name should include .exe
     """
     # This assumes the script is in Tools/utils, so we go up two directories.
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    app_dir = os.path.join(project_root, 'Tools')
+    tools_dir = os.path.join(project_root, 'Tools')
+    bin_dir = os.path.join(tools_dir, 'bin')
 
-    # First, check in the root of Tools
-    candidate = os.path.join(app_dir, exe_name)
+    # The primary location for tools is now Tools/bin
+    candidate = os.path.join(bin_dir, exe_name)
     if os.path.isfile(candidate):
         return candidate
     
-    # Fallback to checking inside Tools/Sysinternals
-    candidate_sys = os.path.join(app_dir, "Sysinternals", exe_name)
-    if os.path.isfile(candidate_sys):
-        return candidate_sys
-
-    # If not found, return the path relative to the app_dir, 
-    # allowing subprocess to potentially find it if the working directory is correct.
-    return os.path.join(app_dir, exe_name)
+    # If not found, return the expected path, allowing subprocess to fail with a clear "not found" error.
+    return candidate
 
 def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90):
     """
@@ -143,7 +138,7 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
     except subprocess.TimeoutExpired:
         return 124, "", f"Command timed out after {timeout}s"
     except FileNotFoundError:
-        return 127, "", f"Executable not found: {cmd_list[0]}"
+        return 127, "", f"Executable not found: {cmd_list[0]}. Ensure it is placed in the Tools/bin directory."
     except Exception as e:
         return 1, "", f"Unexpected error: {e}"
 

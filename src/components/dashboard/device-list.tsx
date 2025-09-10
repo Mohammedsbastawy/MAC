@@ -139,56 +139,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   };
 
 
-  const fetchDeviceDetails = React.useCallback(async (deviceToUpdate: Device) => {
-    // Set loading state for the specific device
-    setDevices(prev => prev.map(d => d.id === deviceToUpdate.id ? { ...d, isLoadingDetails: true } : d));
-
-    try {
-        const res = await fetch('/api/device-details', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip: deviceToUpdate.ipAddress }),
-        });
-        
-        let details;
-        try {
-          details = await res.json();
-        } catch (e) {
-          details = {ok: false, os: `Non-JSON response from server.`};
-        }
-        
-        const updatedDevice = { 
-            ...deviceToUpdate, 
-            isLoadingDetails: false, 
-            os: details.os || 'Fetch failed', 
-            domain: details.domain, 
-            isDomainMember: details.isDomainMember 
-        };
-
-        setDevices(prev => 
-            prev.map(d => 
-                d.id === deviceToUpdate.id 
-                ? updatedDevice
-                : d
-            )
-        );
-        
-        onSelectDevice(updatedDevice);
-
-    } catch (e) {
-        console.error(`Error fetching details for ${deviceToUpdate.ipAddress}:`, e);
-         const updatedDevice = { ...deviceToUpdate, isLoadingDetails: false, os: "Error fetching details" };
-         setDevices(prev => 
-            prev.map(d => 
-                d.id === deviceToUpdate.id 
-                ? updatedDevice
-                : d
-            )
-        );
-        onSelectDevice(updatedDevice);
-    }
-  }, [onSelectDevice]);
-
   const handleScan = async (manualRouterMac: string | null = null) => {
     if (!selectedCidr) {
         toast({ variant: "destructive", title: "No Network Selected", description: "Please select a network to scan."});
@@ -627,7 +577,3 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
-
-    
-
-    

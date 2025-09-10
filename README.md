@@ -54,17 +54,19 @@ Follow these steps in order to get the application working correctly. All comman
 
 These are external tools that give the application its core functionality.
 
+**First, create a new folder named `bin` inside the `Tools` directory.** All executables will be placed here.
+
 1.  **PsTools**:
     *   Download **PsTools** from the official Microsoft website.
     *   Unzip the downloaded file.
-    *   **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them directly into the `Tools` folder in this project.
+    *   **Important:** Copy all the executable files (files ending in `.exe`) from the folder you unzipped and paste them into the `Tools/bin` folder you just created.
 2.  **Masscan (Required for Fast Network Discovery)**:
     *   **Masscan:** The application uses `masscan` for extremely fast network discovery.
         *   Download the latest **Masscan** Windows release from its [official GitHub releases page](https://github.com/robertdavidgraham/masscan/releases).
         *   On the releases page, find the latest version and download the file named `masscan-*.zip` (e.g., `masscan-2.0.5-win.zip`).
         *   Unzip the downloaded file.
         *   Find the `bin` directory, and inside it, you will find `masscan.exe`.
-        *   **Important:** Copy `masscan.exe` and paste it directly into the `Tools` folder in this project.
+        *   **Important:** Copy `masscan.exe` and paste it into the `Tools/bin` folder you just created.
 
 ### Step 2: Install Required Libraries
 

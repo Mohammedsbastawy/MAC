@@ -119,7 +119,7 @@ def run_masscan(target_range, source_ip=None, router_mac=None):
     """Runs masscan to discover devices and returns a list of IPs."""
     masscan_path = get_tools_path("masscan.exe")
     if not os.path.exists(masscan_path):
-        raise FileNotFoundError("masscan.exe not found.")
+        raise FileNotFoundError("masscan.exe not found in the Tools/bin directory.")
 
     output_file = "masscan_scan.json"
     
@@ -230,9 +230,9 @@ def api_discover_devices():
         return jsonify({
             "ok": False, 
             "error": "Masscan Not Found",
-            "message": "masscan.exe was not found in the Tools directory.",
+            "message": "masscan.exe was not found in the Tools/bin directory.",
             "error_code": "MASSCAN_NOT_FOUND",
-            "details": "Please download the Masscan Windows binary from the official GitHub releases page and place the 'masscan.exe' file in the 'Tools' folder."
+            "details": "Please download the Masscan Windows binary from the official GitHub releases page and place the 'masscan.exe' file in the 'Tools/bin' folder."
         }), 500
     except RuntimeError as e:
         return jsonify({
