@@ -21,9 +21,9 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "14rem" // Adjusted width
+const SIDEBAR_WIDTH = "16rem" // Adjusted width from 14rem
 const SIDEBAR_WIDTH_MOBILE = "16rem"
-const SIDEBAR_WIDTH_ICON = "3.5rem" // Adjusted icon width for a bit more space
+const SIDEBAR_WIDTH_ICON = "3.5rem" // Kept as is, can be changed if needed
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContext = {
@@ -170,7 +170,7 @@ export const Sidebar = React.forwardRef<
     <aside 
       ref={ref}
       className={cn("fixed left-0 top-0 z-20 h-screen hidden flex-col border-r bg-sidebar text-sidebar-foreground transition-[width] sm:flex",
-       state === 'expanded' ? "w-56" : "w-14",
+       state === 'expanded' ? "w-64" : "w-14",
        className
       )}
       {...props}
@@ -191,8 +191,8 @@ export const SidebarHeader = React.forwardRef<
     <div
       ref={ref}
       data-sidebar="header"
-      className={cn("flex h-14 items-center gap-3 border-b border-sidebar-border", 
-        state === 'collapsed' && "h-[52px] justify-center px-2",
+      className={cn("flex h-20 items-center justify-center gap-3 border-b border-sidebar-border p-4", 
+        state === 'collapsed' && "h-20 justify-center px-2",
         className)}
       {...props}
     />
