@@ -234,22 +234,22 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   };
   
   const handleMassGpUpdate = async () => {
-    const onlineDevices = devices.filter(d => d.status === 'online');
-    if (onlineDevices.length === 0) {
-      toast({ title: "No Online Devices", description: "There are no online devices to update." });
+    const domainDevices = devices.filter(d => d.status === 'online' && d.isDomainMember);
+    if (domainDevices.length === 0) {
+      toast({ title: "No Devices to Update", description: "There are no online domain member devices to update." });
       return;
     }
 
     setIsGpUpdating(true);
-    toast({ title: "Starting Mass GpUpdate", description: `Updating ${onlineDevices.length} devices...` });
+    toast({ title: "Starting Mass GpUpdate", description: `Updating ${domainDevices.length} domain devices...` });
 
     const initialStatus: Record<string, GpUpdateResult> = {};
-    onlineDevices.forEach(d => {
+    domainDevices.forEach(d => {
       initialStatus[d.id] = { status: 'loading' };
     });
     setGpUpdateStatus(initialStatus);
 
-    for (const device of onlineDevices) {
+    for (const device of domainDevices) {
         try {
             const response = await fetch('/api/psexec', {
                 method: 'POST',
@@ -279,7 +279,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     }
     
     setIsGpUpdating(false);
-    toast({ title: "Mass GpUpdate Complete", description: "Finished updating all devices." });
+    toast({ title: "Mass GpUpdate Complete", description: "Finished updating all targeted devices." });
   };
 
   const renderStatusIcon = (device: Device) => {
@@ -572,3 +572,5 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
+
+    
