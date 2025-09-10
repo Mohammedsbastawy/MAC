@@ -48,37 +48,39 @@ def get_ldap_connection():
     
     user_principal_name = f"{username}@{domain}"
     
+    conn = None
+    last_error = None
+    
+    # Attempt 1: Connect with SSL (LDAPS)
     try:
-        # Use TLS for security
-        tls_config = Tls(validate=ssl.CERT_NONE, version=ssl.PROTOCOL_TLSv1_2)
-        server = Server(domain, get_info=ALL, use_ssl=True, tls=tls_config)
-        
-        # Connect and bind
+        # Use TLS for security, but be flexible with protocol
+        tls_config = Tls(validate=ssl.CERT_NONE, version=ssl.PROTOCOL_TLS)
+        server = Server(domain, get_info=ALL, use_ssl=True, port=636, tls=tls_config)
         conn = Connection(server, user=user_principal_name, password=password, authentication=NTLM, auto_bind=True)
-
-        if not conn.bound:
-            # Try without SSL as a fallback for some environments
-            server = Server(domain, get_info=ALL)
-            conn = Connection(server, user=user_principal_name, password=password, authentication=NTLM, auto_bind=True)
-            if not conn.bound:
-                 return None, {
-                    'ok': False,
-                    'error': 'LDAP Bind Failed',
-                    'message': f"Could not bind to the domain '{domain}'. Please check credentials and domain controller connectivity.",
-                    'details': str(conn.result),
-                    'error_code': 'LDAP_BIND_FAILED'
-                }, 401
-        
-        return conn, None, 200
-
     except Exception as e:
+        last_error = str(e)
+        conn = None # Ensure connection is None on error
+    
+    # Attempt 2: If SSL failed, connect without SSL (standard LDAP)
+    if not conn or not conn.bound:
+        try:
+            server = Server(domain, get_info=ALL, port=389)
+            conn = Connection(server, user=user_principal_name, password=password, authentication=NTLM, auto_bind=True)
+        except Exception as e:
+            last_error = str(e) # Update with the latest error
+            conn = None
+
+    # Check the final result
+    if conn and conn.bound:
+        return conn, None, 200
+    else:
         return None, {
             'ok': False,
-            'error': 'LDAP Connection Error',
-            'message': 'Failed to connect to the LDAP server. This could be due to an incorrect domain name, firewall issues, or the server being offline.',
-            'details': str(e),
-            'error_code': 'LDAP_CONNECTION_ERROR'
-        }, 500
+            'error': 'LDAP Connection Failed',
+            'message': f"Could not bind to the domain '{domain}' with either SSL or non-SSL methods. Please check credentials and domain controller connectivity.",
+            'details': f"Last encountered error: {last_error or 'No specific error message was captured.'}",
+            'error_code': 'LDAP_BIND_FAILED'
+        }, 401
 
 
 @ad_bp.route('/api/ad/get-computers', methods=['POST'])
