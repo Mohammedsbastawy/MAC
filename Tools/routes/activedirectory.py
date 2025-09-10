@@ -10,19 +10,15 @@ ad_bp = Blueprint('activedirectory', __name__)
 def check_pyad_availability():
     """Checks if pyad can be imported and its core components are available."""
     try:
+        # Import the necessary components
         from pyad import aduser, adcomputer, adquery, pyad_setdefaults, pyadexceptions
-        # Perform a basic check to see if we can access the exception class
-        _ = pyadexceptions.PyADError
         return True, None
     except ImportError as e:
+        # This catches if pyad or pywin32 is not installed at all
         return False, str(e)
-    except AttributeError as e:
-        # This catches issues like 'PyADError' not being in pyadexceptions
-        return False, f"A component of the pyad library is missing or has changed. Details: {str(e)}"
     except Exception as e:
-        # Catch other potential init errors
+        # Catch other potential init errors, though less likely
         return False, f"An unexpected error occurred during pyad initialization. Details: {str(e)}"
-
 
 def format_datetime(dt_obj):
     """Formats a datetime object into a human-readable string."""
@@ -58,7 +54,9 @@ def require_login_and_set_ad_credentials():
     # This is the format pyad expects for the username
     user_principal_name = f"{username}@{domain}"
     
-    from pyad import pyad_setdefaults, pyadexceptions
+    # Import here since we know the library is available
+    from pyad import pyad_setdefaults
+    from pyad import pyadexceptions
 
     try:
         # 4. Set the credentials for all subsequent pyad calls in this request.
@@ -162,8 +160,8 @@ def set_user_password():
 
         return jsonify({'ok': True, 'message': f'Password for user "{target_username}" has been changed successfully.'})
 
-    except pyadexceptions.PyADInvalidUser:
-        return jsonify({'ok': False, 'error': f'User "{target_username}" not found in Active Directory.'}), 404
+    except pyadexceptions.PyADInvalidUser as e:
+        return jsonify({'ok': False, 'error': f'User "{target_username}" not found in Active Directory.', 'details': str(e)}), 404
     except pyadexceptions.PyADInvalidPassword as e:
         return jsonify({
             'ok': False, 
