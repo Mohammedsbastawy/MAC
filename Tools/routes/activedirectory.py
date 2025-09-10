@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 try:
     from pyad import aduser, adcomputer, adquery, pyad_setdefaults
-    from pyad.pyadexceptions import PyADError
+    from pyad.pyadexceptions import PyADError, PyADInvalidUser, PyADInvalidPassword
     PYAD_AVAILABLE = True
 except ImportError:
     PYAD_AVAILABLE = False
@@ -33,24 +33,30 @@ def require_login():
             'error': 'مكتبة pyad غير مثبتة على الخادم، لا يمكن تنفيذ استعلامات Active Directory.',
             'error_code': 'PYAD_NOT_FOUND'
         }), 500
+    
+    # Set pyad defaults for all AD routes
+    username = session.get("user")
+    password = session.get("password")
+    domain = session.get("domain")
+    user_principal_name = f"{username}@{domain}"
+    try:
+        pyad_setdefaults(username=user_principal_name, password=password)
+    except PyADError as e:
+        return jsonify({
+            "ok": False, 
+            "error": "Active Directory Authentication Failed",
+            "message": f"Could not authenticate with domain '{domain}'. Please check credentials or DC connectivity.",
+            "error_code": "AD_AUTH_FAILED",
+            "details": str(e)
+        }), 500
+
 
 @ad_bp.route('/api/ad/get-computers', methods=['POST'])
 def get_ad_computers():
     """
     Fetches all computer objects from Active Directory.
     """
-    username = session.get("user")
-    password = session.get("password")
-    domain = session.get("domain")
-    
-    # pyad requires the full user principal name (user@domain) for setting defaults
-    user_principal_name = f"{username}@{domain}"
-
     try:
-        # Set the default credentials for pyad for this session
-        # This will throw an error if the DC cannot be contacted or credentials are bad
-        pyad_setdefaults(username=user_principal_name, password=password)
-
         q = adquery.ADQuery()
         q.execute_query(
             attributes=["name", "dNSHostName", "operatingSystem", "lastLogonTimestamp", "whenCreated"],
@@ -82,27 +88,59 @@ def get_ad_computers():
         return jsonify({"ok": True, "computers": computers_list})
 
     except PyADError as e:
-         # Provide a more specific error message
-        error_message = str(e)
-        if "No domain controller could be found" in error_message:
-            details = "The application could not contact a Domain Controller for the domain '{domain}'. Please ensure the server has network connectivity to the DC."
-        elif "Invalid credentials" in error_message:
-            details = "The stored credentials are invalid for querying Active Directory."
-        else:
-            details = error_message
-            
         return jsonify({
             "ok": False, 
             "error": "Active Directory Query Failed",
-            "message": f"An error occurred while trying to query Active Directory for domain '{domain}'.",
+            "message": f"An error occurred while trying to query Active Directory.",
             "error_code": "AD_QUERY_FAILED",
-            "details": details
+            "details": str(e)
         }), 500
     except Exception as e:
         return jsonify({
             "ok": False, 
             "error": "Unexpected Error",
             "message": "An unexpected error occurred during the Active Directory query.",
+            "error_code": "UNEXPECTED_ERROR",
+            "details": str(e)
+        }), 500
+
+
+@ad_bp.route('/api/ad/set-user-password', methods=['POST'])
+def set_user_password():
+    """
+    Sets the password for a target user in Active Directory.
+    """
+    data = request.get_json() or {}
+    target_username = data.get('username')
+    new_password = data.get('new_password')
+
+    if not target_username or not new_password:
+        return jsonify({'ok': False, 'error': 'Username and new password are required.'}), 400
+
+    try:
+        # Find the user
+        target_user = aduser.ADUser.from_cn(target_username)
+        
+        # Set the password
+        # The password must meet domain complexity requirements.
+        # The user performing this action needs the necessary permissions in AD.
+        target_user.set_password(new_password)
+
+        return jsonify({'ok': True, 'message': f'Password for user "{target_username}" has been changed successfully.'})
+
+    except PyADInvalidUser:
+        return jsonify({'ok': False, 'error': f'User "{target_username}" not found in Active Directory.'}), 404
+    except PyADInvalidPassword as e:
+        # This can happen if the password does not meet complexity requirements
+        return jsonify({'ok': False, 'error': 'Failed to set password.', 'details': str(e)}), 400
+    except PyADError as e:
+        # Catch other AD-related errors (e.g., permissions)
+        return jsonify({'ok': False, 'error': 'An Active Directory error occurred.', 'details': str(e)}), 500
+    except Exception as e:
+        return jsonify({
+            "ok": False, 
+            "error": "Unexpected Error",
+            "message": "An unexpected error occurred while setting the user password.",
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }), 500
