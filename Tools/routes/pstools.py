@@ -3,7 +3,7 @@ import os
 import re
 import subprocess
 from flask import Blueprint, request, jsonify, current_app, session
-from Tools.utils.helpers import is_valid_ip, get_pstools_path, run_ps_command, parse_pslist_output, parse_psloggedon_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output
+from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psloggedon_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output
 
 def json_result(rc, out, err, structured_data=None):
     return jsonify({"rc": rc, "stdout": out, "stderr": err, "eula_required": False, "structured_data": structured_data})
@@ -232,7 +232,7 @@ def api_psping():
     try:
         # PsPing does not use -u/-p, it relies on the context. But we can target an IP.
         # It's better to run it locally and target the remote IP.
-        base_path = get_pstools_path("PsPing.exe")
+        base_path = get_tools_path("PsPing.exe")
         args = [base_path] 
         if extra:
             args += extra.split(' ')

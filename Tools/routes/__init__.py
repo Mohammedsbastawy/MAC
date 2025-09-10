@@ -18,6 +18,6 @@ def create_app():
 
     @app.route("/")
     def index():
-        return "PsTools Flask Backend is running."
+        return "Dominion Tools Flask Backend is running."
 
     return app

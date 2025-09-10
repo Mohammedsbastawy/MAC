@@ -51,9 +51,9 @@ def get_mac_address(ip):
     return None # Return None if not found or an error occurred
 
 
-def get_pstools_path(exe_name: str) -> str:
+def get_tools_path(exe_name: str) -> str:
     """
-    Constructs the full path to a PsTools executable.
+    Constructs the full path to a Tools executable.
     It assumes the executables are in the 'Tools' directory.
     The executable name should include .exe
     """
@@ -86,7 +86,7 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
     if tool_name.lower() == 'psping':
         cmd_list = extra_args # psping api passes the full command list
     else:
-        base_path = get_pstools_path(exe_name)
+        base_path = get_tools_path(exe_name)
         cmd_list = [base_path, "-accepteula"]
 
         # Build credential args

@@ -9,7 +9,7 @@ import time
 import json
 from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from Tools.utils.helpers import is_valid_ip, get_pstools_path, run_ps_command, parse_psinfo_output, get_hostname_from_ip, get_mac_address
+from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_psinfo_output, get_hostname_from_ip, get_mac_address
 
 network_bp = Blueprint('network', __name__)
 
@@ -117,7 +117,7 @@ def api_network_interfaces():
 
 def run_masscan(target_range, source_ip=None, router_mac=None):
     """Runs masscan to discover devices and returns a list of IPs."""
-    masscan_path = get_pstools_path("masscan.exe")
+    masscan_path = get_tools_path("masscan.exe")
     if not os.path.exists(masscan_path):
         raise FileNotFoundError("masscan.exe not found.")
 
