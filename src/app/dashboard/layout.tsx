@@ -22,11 +22,8 @@ const AppSidebar = () => {
 
     return (
         <Sidebar>
-            <SidebarHeader className="p-4 flex items-center gap-2">
-                 <Logo className="h-10 w-10 shrink-0" />
-                 <div className={cn("flex flex-col", state === 'collapsed' && "hidden")}>
-                    <h2 className="font-bold text-lg tracking-tight text-sidebar-foreground">ATLAS</h2>
-                 </div>
+            <SidebarHeader className="p-4 flex items-center justify-center">
+                 <Logo className="h-12 w-12" />
             </SidebarHeader>
             <SidebarContent className="p-2">
                 <SidebarGroup>
@@ -94,7 +91,7 @@ export default function DashboardLayout({
   );
 }
 
-const DashboardLayoutContent = ({ children }: { children: React.Node }) => {
+const DashboardLayoutContent = ({ children }: { children: React.ReactNode }) => {
   const { state } = useSidebar();
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">

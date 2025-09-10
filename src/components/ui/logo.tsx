@@ -6,7 +6,7 @@ const DefaultLogo: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" {...props}>
         <title>Atlas Systems Control Logo</title>
         <style>
-            {`.st0{fill:#FFFFFF;}.st1{font-family:'Impact';}.st2{font-size:85px;}.st3{fill:none;stroke:#FFFFFF;stroke-width:8;stroke-miterlimit:10;}.st4{font-size:36px;}.st5{font-size:24px;}`}
+            {`.st0{fill:hsl(var(--sidebar-foreground));}.st1{font-family:'Impact';}.st2{font-size:85px;}.st3{fill:none;stroke:hsl(var(--sidebar-foreground));stroke-width:8;stroke-miterlimit:10;}.st4{font-size:36px;}.st5{font-size:24px;}`}
         </style>
         <path className="st0" d="M256,134.4c-30.7,0-57.3,10-79,29.9c-21.7,20-33.1,45.4-33.1,73.6s11.4,53.7,33.1,73.6 c21.7,20,48.2,29.9,79,29.9s57.3-10,79-29.9c21.7-20,33.1-45.4,33.1-73.6s-11.4-53.7-33.1-73.6 C313.3,144.4,286.7,134.4,256,134.4z M256,290.4c-42.5,0-77-34.5-77-77s34.5-77,77-77s77,34.5,77,77S298.5,290.4,256,290.4z"/>
         <path className="st0" d="M256,126.9c-29.6,0-55.3,9.2-76.3,27.7c-21,18.5-32.3,42.1-32.3,68.3s11.3,49.8,32.3,68.3 c21,18.5,46.7,27.7,76.3,27.7s55.3-9.2,76.3-27.7c21-18.5,32.3-42.1,32.3-68.3s-11.3-49.8-32.3-68.3 C311.3,136.1,285.6,126.9,256,126.9z M256,295.6c-45.3,0-82.1-36.8-82.1-82.1s36.8-82.1,82.1-82.1s82.1,36.8,82.1,82.1 S301.3,295.6,256,295.6z"/>
@@ -62,7 +62,7 @@ export const Logo: React.FC<{ className?: string }> = ({ className }) => {
                     alt="Custom Atlas Logo"
                     fill
                     sizes="100%"
-                    style={{ objectFit: 'contain' }}
+                    style={{ objectFit: 'cover' }}
                     className="rounded-md"
                     unoptimized // Use this for external URLs and data URIs
                 />
@@ -72,4 +72,3 @@ export const Logo: React.FC<{ className?: string }> = ({ className }) => {
     
     return <DefaultLogo className={className} />;
 };
-
