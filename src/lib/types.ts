@@ -29,3 +29,12 @@ export type ADComputer = {
   created: string;
   domain?: string;
 };
+
+export type ADUser = {
+  username: string;
+  display_name: string;
+  email: string;
+  enabled: boolean;
+  created: string;
+  domain?: string;
+};

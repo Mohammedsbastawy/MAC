@@ -181,6 +181,73 @@ def get_ad_computers():
     status_code = 401 if result.get("error_code") == 'AUTH_REQUIRED' else 500 if not result.get("ok") else 200
     return jsonify(result), status_code
 
+def _get_ad_users_data():
+    """
+    Internal function that fetches all user objects from Active Directory
+    and returns a Python dictionary.
+    """
+    logger.info("Fetching user data from Active Directory.")
+    conn, error, status = get_ldap_connection()
+    if error:
+        return error
+
+    try:
+        base_dn = conn.server.info.other.get('defaultNamingContext')[0]
+        user_domain = session.get("domain", "Unknown")
+        
+        search_filter = "(&(objectCategory=person)(objectClass=user))"
+        attributes = ["sAMAccountName", "displayName", "userPrincipalName", "whenCreated", "userAccountControl"]
+        
+        logger.info(f"Searching AD with base DN '{base_dn}' and filter '{search_filter}'.")
+        conn.search(search_base=base_dn,
+                    search_filter=search_filter,
+                    attributes=attributes)
+        
+        users_list = []
+        # The ACCOUNTDISABLE flag in userAccountControl
+        ACCOUNT_DISABLE = 0x0002
+
+        for entry in conn.entries:
+            uac = entry.userAccountControl.value if entry.userAccountControl.value else 0
+            is_enabled = not (uac & ACCOUNT_DISABLE)
+            
+            users_list.append({
+                "username": str(entry.sAMAccountName.value) if entry.sAMAccountName.value else "",
+                "display_name": str(entry.displayName.value) if entry.displayName.value else "",
+                "email": str(entry.userPrincipalName.value) if entry.userPrincipalName.value else "",
+                "enabled": is_enabled,
+                "created": format_datetime(entry.whenCreated.value),
+                "domain": user_domain
+            })
+        
+        logger.info(f"Found {len(users_list)} user objects in AD.")
+        return {"ok": True, "users": users_list}
+
+    except Exception as e:
+        logger.error(f"Unexpected error during AD user query: {e}", exc_info=True)
+        return {
+            "ok": False, 
+            "error": "Unexpected LDAP Query Error",
+            "message": "An unexpected error occurred during the Active Directory user query.",
+            "error_code": "AD_QUERY_UNEXPECTED_ERROR",
+            "details": str(e)
+        }
+    finally:
+        if conn:
+            conn.unbind()
+            logger.info("LDAP connection unbound after user query.")
+
+
+@ad_bp.route('/api/ad/get-users', methods=['POST'])
+def get_ad_users():
+    """
+    API endpoint to fetch all user objects from Active Directory.
+    """
+    logger.info("Received request for /api/ad/get-users.")
+    result = _get_ad_users_data()
+    status_code = 401 if result.get("error_code") == 'AUTH_REQUIRED' else 500 if not result.get("ok") else 200
+    return jsonify(result), status_code
+
 
 @ad_bp.route('/api/ad/set-user-password', methods=['POST'])
 def set_user_password():
@@ -260,4 +327,84 @@ def set_user_password():
             conn.unbind()
             logger.info("LDAP connection unbound after password operation.")
 
+@ad_bp.route('/api/ad/set-user-status', methods=['POST'])
+def set_user_status():
+    """
+    Enables or disables a target user account in Active Directory.
+    """
+    data = request.get_json() or {}
+    target_username = data.get('username')
+    action = data.get('action') # 'enable' or 'disable'
     
+    logger.info(f"Received request to {action} user '{target_username}'.")
+
+    if not target_username or action not in ['enable', 'disable']:
+        logger.warning("Set user status request failed: Missing username or invalid action.")
+        return jsonify({'ok': False, 'error': 'Target username and a valid action (enable/disable) are required.'}), 400
+
+    conn, error, status = get_ldap_connection()
+    if error:
+        return jsonify(error), status
+        
+    try:
+        base_dn = conn.server.info.other.get('defaultNamingContext')[0]
+        search_filter = f"(&(objectCategory=person)(objectClass=user)(sAMAccountName={target_username}))"
+        
+        logger.info(f"Searching for user '{target_username}' to change status.")
+        conn.search(search_base=base_dn,
+                    search_filter=search_filter,
+                    attributes=['distinguishedName', 'userAccountControl'])
+
+        if not conn.entries:
+            logger.warning(f"User '{target_username}' not found in AD for status change.")
+            return jsonify({'ok': False, 'error': f'User "{target_username}" not found in Active Directory.', 'error_code': 'USER_NOT_FOUND'}), 404
+
+        user_dn = conn.entries[0].distinguishedName.value
+        current_uac = conn.entries[0].userAccountControl.value or 0
+        ACCOUNT_DISABLE = 0x0002
+
+        if action == 'disable':
+            new_uac = current_uac | ACCOUNT_DISABLE
+        else: # enable
+            new_uac = current_uac & ~ACCOUNT_DISABLE
+        
+        logger.info(f"Found user DN: {user_dn}. Current UAC: {current_uac}, New UAC: {new_uac}.")
+        
+        if new_uac == current_uac:
+            message = f"User '{target_username}' is already {action}d."
+            logger.info(message)
+            return jsonify({'ok': True, 'message': message})
+
+        success = conn.modify(user_dn, {'userAccountControl': [('MODIFY_REPLACE', [new_uac])]})
+
+        if success:
+            message = f"Successfully {action}d account for user '{target_username}'."
+            logger.info(message)
+            return jsonify({'ok': True, 'message': message})
+        else:
+            logger.error(f"Failed to {action} user '{target_username}': {conn.result.get('message')}")
+            return jsonify({
+                'ok': False, 
+                'error': 'Active Directory Error', 
+                'message': f'Failed to {action} the account. You may not have sufficient permissions.',
+                'error_code': 'AD_GENERIC_ERROR',
+                'details': conn.result.get('message', 'No details provided.')
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error while setting user status: {e}", exc_info=True)
+        return jsonify({
+            "ok": False, 
+            "error": "Unexpected Error",
+            "message": "An unexpected error occurred while changing the user status.",
+            "error_code": "UNEXPECTED_ERROR",
+            "details": str(e)
+        }), 500
+    finally:
+        if conn:
+            conn.unbind()
+            logger.info("LDAP connection unbound after user status operation.")
+
+    
+
+```
