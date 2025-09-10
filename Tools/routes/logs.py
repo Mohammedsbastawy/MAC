@@ -1,13 +1,16 @@
 import os
 from flask import Blueprint, jsonify, session
+from Tools.utils.helpers import get_tools_path
 
 logs_bp = Blueprint('logs', __name__, url_prefix='/api/logs')
 
 def get_log_file_path():
     """Returns the absolute path to the log file."""
-    # This file is in Tools/routes. The log file is in Tools/.
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    tools_dir = os.path.dirname(current_dir) # This should be the Tools directory
+    # The log file is in the parent directory of the 'bin' folder where tools are.
+    # get_tools_path can give us a reliable anchor.
+    any_tool_path = get_tools_path("psexec.exe") # Use any tool to get base path
+    bin_dir = os.path.dirname(any_tool_path)
+    tools_dir = os.path.dirname(bin_dir)
     return os.path.join(tools_dir, 'dominion-tools.log')
 
 
