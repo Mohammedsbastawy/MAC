@@ -907,46 +907,47 @@ const WinRMDiagnosticsDialog: React.FC<{
         return <XCircle className="h-4 w-4 text-destructive" />;
     };
 
-    const hasFailure = state.service.status === 'failure' || state.listener.status === 'failure' || state.firewall.status === 'failure';
-
-    const CheckRow: React.FC<{ label: string; check: { status: WinRMCheckStatus; message: string } }> = ({ label, check }) => (
-        <div className={cn(
-            "flex items-center justify-between p-3 rounded-lg border",
-            check.status === 'failure' ? 'border-destructive/50 bg-destructive/10 cursor-pointer hover:bg-destructive/20' : 'border-border'
-        )}
-            onClick={() => check.status === 'failure' && onOpenLog(check.message)}
-        >
-            <div className="flex items-center gap-3">
+    const CheckRow: React.FC<{ label: string; check: { status: WinRMCheckStatus; message: string }, onFixClick?: () => void; isFixing?: boolean; showFixButton?: boolean }> = 
+        ({ label, check, onFixClick, isFixing, showFixButton = false }) => (
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+            <div 
+                className={cn("flex items-center gap-3", check.status === 'failure' && 'cursor-pointer')}
+                onClick={() => check.status === 'failure' && onOpenLog(check.message)}
+            >
                 <StatusIcon status={check.status} />
                 <span className="font-medium">{label}</span>
             </div>
-            <span className={cn(
-                "text-sm",
-                check.status === 'success' && 'text-muted-foreground',
-                check.status === 'failure' && 'text-destructive'
-            )}>
-                {check.status === 'checking' ? 'Checking...' : check.status === 'success' ? 'OK' : 'Failed'}
-            </span>
+            <div className="flex items-center gap-2">
+                <span className={cn(
+                    "text-sm",
+                    check.status === 'success' && 'text-muted-foreground',
+                    check.status === 'failure' && 'text-destructive'
+                )}>
+                    {check.status === 'checking' ? 'Checking...' : check.status === 'success' ? 'OK' : 'Failed'}
+                </span>
+                {showFixButton && check.status === 'failure' && (
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button onClick={onFixClick} disabled={isFixing} size="icon" variant="ghost" className="h-8 w-8 text-primary">
+                                    {isFixing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                <p>Attempt to fix</p>
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                )}
+            </div>
         </div>
     );
 
     return (
         <div className="space-y-3">
-            <CheckRow label="WMI / RPC Service" check={state.service} />
-            <CheckRow label="WinRM Listener" check={state.listener} />
-            <CheckRow label="Firewall Rule (HTTP-In)" check={state.firewall} />
-
-            {hasFailure && (
-                 <div className="pt-4">
-                    <Button onClick={onFix} disabled={isFixing} className="w-full">
-                        {isFixing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
-                        Attempt to Enable WinRM
-                    </Button>
-                    <p className="text-xs text-muted-foreground mt-2 text-center">
-                        This will run `winrm quickconfig -q` remotely via WMI to fix common issues.
-                    </p>
-                 </div>
-            )}
+            <CheckRow label="WMI / RPC Service" check={state.service} onOpenLog={onOpenLog} />
+            <CheckRow label="WinRM Listener" check={state.listener} onOpenLog={onOpenLog} onFixClick={onFix} isFixing={isFixing} showFixButton={true} />
+            <CheckRow label="Firewall Rule (HTTP-In)" check={state.firewall} onOpenLog={onOpenLog} />
         </div>
     );
 };
@@ -986,6 +987,7 @@ export default function DeviceActionsPanel({
     if (!device || !user) return;
     
     setDiagnosticsState(initialDiagnosticsState);
+    setIsDiagnosticsOpen(true);
 
     try {
         const res = await fetch('/api/network/check-winrm', {
@@ -1021,7 +1023,7 @@ export default function DeviceActionsPanel({
   const handleEnableWinRM = async () => {
     if (!device) return;
     setIsEnablingWinRM(true);
-    toast({ title: "Attempting to Enable WinRM...", description: `Sending command to ${device.name}. This might take a moment.` });
+    toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
     try {
         const res = await fetch('/api/pstools/enable-winrm', {
             method: 'POST',
@@ -1030,13 +1032,13 @@ export default function DeviceActionsPanel({
         });
         const data = await res.json();
         if (data.ok) {
-            toast({ title: "Command Sent Successfully", description: "WinRM is being enabled. You can re-run diagnostics in a moment." });
-            setIsDiagnosticsOpen(false); // Close the dialog after sending the command
+            toast({ title: "Command Sent Successfully", description: "WinRM configuration commands sent. You can re-run diagnostics in a moment to check the status." });
+            runWinRMDiagnostics(); // Re-run diagnostics after attempting a fix
         } else {
              toast({ variant: "destructive", title: "Failed to Enable WinRM", description: data.details || data.error });
         }
-    } catch (e) {
-         toast({ variant: "destructive", title: "Client Error", description: "Could not send request to the server." });
+    } catch (e: any) {
+         toast({ variant: "destructive", title: "Client Error", description: e.message || "Could not send request to the server." });
     } finally {
         setIsEnablingWinRM(false);
     }
