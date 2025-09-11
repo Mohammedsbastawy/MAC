@@ -71,7 +71,7 @@ def get_tools_path(exe_name: str) -> str:
     # If not found, return the expected path, allowing subprocess to fail with a clear "not found" error.
     return candidate
 
-def run_winrm_command(host, user, password, script, timeout=60):
+def run_winrm_command(host, user, password, script, timeout=10):
     """
     Executes a PowerShell script on a remote host using pywinrm.
     Returns (return_code, stdout, stderr).
@@ -80,6 +80,8 @@ def run_winrm_command(host, user, password, script, timeout=60):
     try:
         import winrm
         from winrm.exceptions import WinRMTransportError, WinRMOperationTimeoutError, WinRMError
+        # requests is a dependency of pywinrm
+        from requests.exceptions import ConnectTimeout
     except ImportError:
         logger.error("The 'pywinrm' library is not installed. Please run 'pip install pywinrm'.")
         return 1, "", "The pywinrm library is not installed on the server."
@@ -93,8 +95,11 @@ def run_winrm_command(host, user, password, script, timeout=60):
             auth=(user, password),
             transport='ntlm',
             server_cert_validation='ignore',
+            # The operation timeout should be the main timeout control.
+            # Connect timeout is handled by requests library under the hood.
             operation_timeout_sec=timeout,
-            read_timeout_sec=timeout + 10
+            # Set a slightly longer read timeout.
+            read_timeout_sec=timeout + 5
         )
         
         result = session.run_ps(script)
@@ -110,9 +115,13 @@ def run_winrm_command(host, user, password, script, timeout=60):
         
         return result.status_code, stdout, stderr
 
-    except WinRMOperationTimeoutError:
-        err_msg = f"Connection timed out. The host {host} did not respond within {timeout} seconds. Check firewall and WinRM service."
+    except ConnectTimeout:
+        err_msg = f"Connection timed out. The host {host} did not respond on port 5985. This usually means a firewall is blocking the connection or the WinRM service is not running."
         logger.error(f"WinRM timeout on {host}: {err_msg}")
+        return 1, "", err_msg
+    except WinRMOperationTimeoutError:
+        err_msg = f"Operation timed out. The host {host} responded but the command '{script[:30]}...' took longer than {timeout} seconds to complete."
+        logger.error(f"WinRM operation timeout on {host}: {err_msg}")
         return 1, "", err_msg
     except WinRMTransportError as e:
         error_str = str(e).lower()
@@ -388,3 +397,4 @@ def parse_psloglist_output(output):
     
 
     
+
