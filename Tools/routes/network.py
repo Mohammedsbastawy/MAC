@@ -406,7 +406,12 @@ def api_check_status_ports():
 
 @network_bp.route('/api/network/check-winrm', methods=['POST'])
 def api_check_winrm():
-    """Checks if WinRM is enabled and accessible on a target host."""
+    """
+    Performs a detailed diagnostic check of WinRM on a target host.
+    Checks: 1. Service Status (via WMI)
+            2. Listener Config (via WinRM)
+            3. Firewall Rule (via WinRM)
+    """
     data = request.get_json() or {}
     ip = data.get("ip")
     if not ip:
@@ -420,12 +425,74 @@ def api_check_winrm():
         winrm_user = user
     else:
         winrm_user = f"{user}@{domain}"
+    
+    wmi_user = f"{domain}\\{user}"
 
-    # Use a short timeout for this check
-    rc, _, err = run_winrm_command(ip, winrm_user, pwd, "hostname", timeout=10)
+    # --- Result Structure ---
+    checks = {
+        "serviceRunning": False,
+        "listenerConfigured": False,
+        "firewallOpen": False
+    }
+    
+    # --- Check 1: Service Status (WMI) ---
+    logger.info(f"Checking WinRM service status on {ip} via WMI.")
+    try:
+        import win32com.client
+        import pythoncom
+        pythoncom.CoInitialize()
+        wmi_service = win32com.client.Dispatch("WbemScripting.SWbemLocator").ConnectServer(ip, "root\\cimv2", wmi_user, pwd)
+        services = wmi_service.ExecQuery("SELECT State, StartMode FROM Win32_Service WHERE Name='WinRM'")
+        if len(services) > 0:
+            service = list(services)[0]
+            if service.State == "Running" and service.StartMode == "Auto":
+                checks["serviceRunning"] = True
+    except Exception as e:
+        error_details = str(e)
+        logger.warning(f"WMI check for WinRM service on {ip} failed: {error_details}")
+        if "The RPC server is unavailable" in error_details or "Access is denied" in error_details:
+            return jsonify({
+                "ok": True, 
+                "overallStatus": "error", 
+                "checks": checks,
+                "error": "WMI/RPC connection failed. Check prerequisites for Remote Registry and firewall."
+            }), 200
+        # For other WMI errors, we continue to the WinRM checks
+    finally:
+         try: pythoncom.CoUninitialize()
+         except: pass
 
-    if rc == 0:
-        return jsonify({"ok": True, "winrm_status": "enabled"})
+    # --- Check 2 & 3: Listener and Firewall (WinRM) ---
+    # These checks rely on a successful WinRM connection. If it fails, both will be false.
+    logger.info(f"Checking WinRM listener and firewall on {ip} via WinRM.")
+    
+    # Check Listener
+    rc_listener, out_listener, err_listener = run_winrm_command(ip, winrm_user, pwd, "winrm enumerate winrm/config/listener", timeout=10)
+    if rc_listener == 0 and "Listener" in out_listener:
+        checks["listenerConfigured"] = True
+
+    # Check Firewall
+    ps_firewall_cmd = "Get-NetFirewallRule -DisplayName 'Windows Remote Management (HTTP-In)' | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' }"
+    rc_firewall, out_firewall, err_firewall = run_winrm_command(ip, winrm_user, pwd, ps_firewall_cmd, timeout=10)
+    if rc_firewall == 0 and "Enabled: True" in out_firewall:
+         checks["firewallOpen"] = True
+
+    # --- Determine Overall Status ---
+    if all(checks.values()):
+        overall_status = "enabled"
+    elif not checks["serviceRunning"] and not checks["listenerConfigured"]:
+         overall_status = "disabled" # Likely completely disabled
     else:
-        # We can be more specific if we want, but for now, any error means it's not ready.
-        return jsonify({"ok": True, "winrm_status": "disabled", "details": err})
+        overall_status = "error" # Partially configured or error state
+
+    # If the primary WinRM connection failed, it's a strong indicator of a core issue.
+    if rc_listener != 0:
+        overall_status = "error"
+        return jsonify({
+            "ok": True,
+            "overallStatus": overall_status,
+            "checks": checks,
+            "error": err_listener or "WinRM connection failed. Check credentials, firewall (port 5985), and service status."
+        }), 200
+
+    return jsonify({"ok": True, "overallStatus": overall_status, "checks": checks})

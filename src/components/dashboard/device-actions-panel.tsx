@@ -50,6 +50,7 @@ import {
   Database,
   Lightbulb,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import {
   Sheet,
@@ -97,6 +98,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
 
 type DeviceActionsPanelProps = {
@@ -195,7 +197,18 @@ type DialogState = {
     } | null;
 }
 
-type WinRMStatus = 'checking' | 'enabled' | 'disabled' | 'error';
+type WinRMCheckResult = {
+    serviceRunning: boolean;
+    listenerConfigured: boolean;
+    firewallOpen: boolean;
+}
+
+type WinRMStatus = {
+    overallStatus: 'checking' | 'enabled' | 'disabled' | 'error';
+    checks?: WinRMCheckResult;
+    errorDetails?: string;
+}
+
 
 const ActionButton: React.FC<{
     icon: React.ElementType,
@@ -885,6 +898,49 @@ const ServiceInfoDialog: React.FC<{
 };
 
 
+const WinRMStatusPopover: React.FC<{status: WinRMStatus}> = ({ status }) => {
+    const StatusItem: React.FC<{label: string, success: boolean}> = ({ label, success }) => (
+        <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">{label}</span>
+             {success ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+            ) : (
+                <XCircle className="h-4 w-4 text-destructive" />
+            )}
+        </div>
+    );
+    
+    return (
+        <PopoverContent className="w-80">
+            <div className="space-y-4">
+                <div className="space-y-1">
+                    <h4 className="font-medium leading-none">WinRM Diagnostics</h4>
+                    <p className="text-sm text-muted-foreground">
+                        Status of WinRM components on the remote host.
+                    </p>
+                </div>
+                {status.checks ? (
+                    <div className="space-y-2">
+                        <StatusItem label="Service Running" success={status.checks.serviceRunning} />
+                        <StatusItem label="Listener Configured" success={status.checks.listenerConfigured} />
+                        <StatusItem label="Firewall Rule Open" success={status.checks.firewallOpen} />
+                    </div>
+                ) : (
+                    <p className="text-sm text-muted-foreground">{status.errorDetails || "Could not retrieve diagnostic details."}</p>
+                )}
+                 {status.overallStatus === 'error' && status.errorDetails && (
+                    <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>
+                            {status.errorDetails}
+                        </AlertDescription>
+                    </Alert>
+                )}
+            </div>
+        </PopoverContent>
+    );
+}
+
 export default function DeviceActionsPanel({
   device,
   isOpen,
@@ -902,14 +958,14 @@ export default function DeviceActionsPanel({
   });
   const [serviceInfo, setServiceInfo] = React.useState<PsServiceData | null>(null);
   const [browsePath, setBrowsePath] = React.useState("drives");
-  const [winrmStatus, setWinrmStatus] = React.useState<WinRMStatus>('checking');
+  const [winrmStatus, setWinrmStatus] = React.useState<WinRMStatus>({ overallStatus: 'checking' });
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
 
   // This function is now memoized with useCallback to avoid re-creating it on every render.
   // It checks the WinRM status for the *currently selected* device.
   const checkWinRMStatus = React.useCallback(async () => {
     if (!device || !user) return;
-    setWinrmStatus('checking');
+    setWinrmStatus({ overallStatus: 'checking' });
     try {
         const res = await fetch('/api/network/check-winrm', {
             method: 'POST',
@@ -918,12 +974,16 @@ export default function DeviceActionsPanel({
         });
         const data = await res.json();
         if (data.ok) {
-            setWinrmStatus(data.winrm_status);
+            setWinrmStatus({
+                overallStatus: data.overallStatus,
+                checks: data.checks,
+                errorDetails: data.error, // The backend might return a high-level error
+            });
         } else {
-            setWinrmStatus('error');
+             setWinrmStatus({ overallStatus: 'error', errorDetails: data.details || data.error });
         }
     } catch (e) {
-        setWinrmStatus('error');
+        setWinrmStatus({ overallStatus: 'error', errorDetails: "Failed to connect to the backend server." });
     }
   }, [device, user]);
 
@@ -934,7 +994,7 @@ export default function DeviceActionsPanel({
     if (isOpen && device?.status === 'online') {
         checkWinRMStatus();
     } else if (device?.status !== 'online') {
-        setWinrmStatus('error'); // Can't check if the device is offline.
+        setWinrmStatus({ overallStatus: 'error', errorDetails: "Device is offline."});
     }
   }, [isOpen, device, checkWinRMStatus]);
 
@@ -1093,25 +1153,18 @@ export default function DeviceActionsPanel({
                         </span>
                     </div>
                     <div className="flex items-center gap-2">
-                         <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger>
-                                     <Lightbulb className={cn("h-4 w-4",
-                                        winrmStatus === 'checking' && 'text-yellow-400 animate-pulse',
-                                        winrmStatus === 'enabled' && 'text-green-500',
-                                        winrmStatus === 'disabled' && 'text-red-500',
-                                        winrmStatus === 'error' && 'text-gray-400'
-                                    )} />
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    {winrmStatus === 'checking' && <p>Checking WinRM status...</p>}
-                                    {winrmStatus === 'enabled' && <p>WinRM is enabled.</p>}
-                                    {winrmStatus === 'disabled' && <p>WinRM is disabled.</p>}
-                                    {winrmStatus === 'error' && <p>WinRM status is unknown (device may be offline).</p>}
-                                </TooltipContent>
-                            </Tooltip>
-                         </TooltipProvider>
-                        {winrmStatus === 'disabled' && (
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                 <Button variant="ghost" size="icon" className="h-6 w-6" disabled={winrmStatus.overallStatus === 'checking'}>
+                                    {winrmStatus.overallStatus === 'checking' && <Loader2 className="h-4 w-4 animate-spin text-yellow-400" />}
+                                    {winrmStatus.overallStatus === 'enabled' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                                    {winrmStatus.overallStatus === 'disabled' && <AlertCircle className="h-4 w-4 text-yellow-500" />}
+                                    {winrmStatus.overallStatus === 'error' && <XCircle className="h-4 w-4 text-destructive" />}
+                                </Button>
+                            </PopoverTrigger>
+                           <WinRMStatusPopover status={winrmStatus} />
+                        </Popover>
+                        {winrmStatus.overallStatus === 'disabled' && (
                             <Button 
                                 size="sm" 
                                 variant="destructive" 
@@ -1146,7 +1199,7 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Actions</h4>
               <div className="grid grid-cols-1 gap-2">
-                <Button variant={"outline"} className="justify-start" onClick={() => handlePstoolAction('psbrowse', { path: 'drives'})} disabled={winrmStatus !== 'enabled'}>
+                <Button variant={"outline"} className="justify-start" onClick={() => handlePstoolAction('psbrowse', { path: 'drives'})} disabled={winrmStatus.overallStatus !== 'enabled'}>
                     <Folder className="mr-2 h-4 w-4" />
                     <span>Browse Files</span>
                     <ChevronRight className="ml-auto h-4 w-4" />
@@ -1235,6 +1288,3 @@ export default function DeviceActionsPanel({
     
 
     
-
-
-
