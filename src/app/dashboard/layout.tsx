@@ -1,3 +1,4 @@
+
 "use client";
 
 import DashboardHeader from "@/components/dashboard/header";
@@ -38,7 +39,7 @@ const AppSidebar = () => {
                 <SidebarGroup>
                    <SidebarMenu>
                         <SidebarMenuItem>
-                            <Link href="/dashboard/devices" passHref legacyBehavior>
+                            <Link href="/dashboard/devices">
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/devices')} onClick={closeSidebar}>
                                     <Globe />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Network Devices</span>
@@ -46,7 +47,7 @@ const AppSidebar = () => {
                             </Link>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
-                             <Link href="/dashboard/ad" passHref legacyBehavior>
+                             <Link href="/dashboard/ad">
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/ad')} onClick={closeSidebar}>
                                     <Users />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Active Directory</span>
@@ -54,7 +55,7 @@ const AppSidebar = () => {
                             </Link>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
-                            <Link href="/dashboard/logs" passHref legacyBehavior>
+                            <Link href="/dashboard/logs">
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/logs')} onClick={closeSidebar}>
                                     <NotebookText />
                                     <span className={cn(state === 'collapsed' && "hidden")}>System Logs</span>
@@ -62,7 +63,7 @@ const AppSidebar = () => {
                             </Link>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
-                            <Link href="/dashboard/help" passHref legacyBehavior>
+                            <Link href="/dashboard/help">
                                 <SidebarMenuButton isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
                                     <HelpCircle />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Help & Prerequisites</span>
