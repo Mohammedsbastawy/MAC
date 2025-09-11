@@ -897,13 +897,17 @@ const ServiceInfoDialog: React.FC<{
 const WinRMDiagnosticsDialog: React.FC<{
     state: WinRMDiagnosticsState;
     onOpenLog: (log: string) => void;
-}> = ({ state, onOpenLog }) => {
+    onFix: () => void;
+    isFixing: boolean;
+}> = ({ state, onOpenLog, onFix, isFixing }) => {
 
     const StatusIcon = ({ status }: { status: WinRMCheckStatus }) => {
         if (status === 'checking') return <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />;
         if (status === 'success') return <CheckCircle2 className="h-4 w-4 text-green-500" />;
         return <XCircle className="h-4 w-4 text-destructive" />;
     };
+
+    const hasFailure = state.service.status === 'failure' || state.listener.status === 'failure' || state.firewall.status === 'failure';
 
     const CheckRow: React.FC<{ label: string; check: { status: WinRMCheckStatus; message: string } }> = ({ label, check }) => (
         <div className={cn(
@@ -931,6 +935,18 @@ const WinRMDiagnosticsDialog: React.FC<{
             <CheckRow label="WMI / RPC Service" check={state.service} />
             <CheckRow label="WinRM Listener" check={state.listener} />
             <CheckRow label="Firewall Rule (HTTP-In)" check={state.firewall} />
+
+            {hasFailure && (
+                 <div className="pt-4">
+                    <Button onClick={onFix} disabled={isFixing} className="w-full">
+                        {isFixing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
+                        Attempt to Enable WinRM
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-2 text-center">
+                        This will run `winrm quickconfig -q` remotely via WMI to fix common issues.
+                    </p>
+                 </div>
+            )}
         </div>
     );
 };
@@ -969,7 +985,6 @@ export default function DeviceActionsPanel({
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device || !user) return;
     
-    setIsDiagnosticsOpen(true);
     setDiagnosticsState(initialDiagnosticsState);
 
     try {
@@ -979,28 +994,15 @@ export default function DeviceActionsPanel({
             body: JSON.stringify({ ip: device.ipAddress })
         });
         
-        // Check if the response is not JSON, indicating a server error
-        if (!res.headers.get("content-type")?.includes("application/json")) {
-             const textError = await res.text();
-             const errorState: WinRMDiagnosticsState = {
-                service: { status: 'failure', message: textError },
-                listener: { status: 'failure', message: textError },
-                firewall: { status: 'failure', message: textError },
-            };
-            setDiagnosticsState(errorState);
-            return;
-        }
-        
         const data = await res.json();
         
         if (data.ok) {
             setDiagnosticsState(data.results);
         } else {
-            // Handle structured errors from the backend
             const errorState: WinRMDiagnosticsState = {
-                service: { status: 'failure', message: data.error || 'An unknown backend error occurred.' },
-                listener: { status: 'failure', message: data.error || 'An unknown backend error occurred.' },
-                firewall: { status: 'failure', message: data.error || 'An unknown backend error occurred.' },
+                service: { status: 'failure', message: data.message || data.error || 'An unknown backend error occurred.' },
+                listener: { status: 'failure', message: data.message || data.error || 'An unknown backend error occurred.' },
+                firewall: { status: 'failure', message: data.message || data.error || 'An unknown backend error occurred.' },
             };
             setDiagnosticsState(errorState);
         }
@@ -1014,6 +1016,7 @@ export default function DeviceActionsPanel({
         setDiagnosticsState(errorState);
     }
   }, [device, user, initialDiagnosticsState]);
+
 
   const handleEnableWinRM = async () => {
     if (!device) return;
@@ -1203,14 +1206,13 @@ export default function DeviceActionsPanel({
                             </DialogDescription>
                         </DialogHeader>
                         <div className="py-4">
-                             <WinRMDiagnosticsDialog state={diagnosticsState} onOpenLog={(log) => setLogDetail({ title: "Error Log", content: log })} />
+                             <WinRMDiagnosticsDialog 
+                                state={diagnosticsState} 
+                                onOpenLog={(log) => setLogDetail({ title: "Error Log", content: log })} 
+                                onFix={handleEnableWinRM}
+                                isFixing={isEnablingWinRM}
+                             />
                         </div>
-                        <AlertDialogFooter>
-                             <Button variant="destructive" onClick={handleEnableWinRM} disabled={isEnablingWinRM}>
-                                {isEnablingWinRM ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
-                                Attempt to Enable WinRM
-                            </Button>
-                        </AlertDialogFooter>
                     </DialogContent>
                 </Dialog>
 

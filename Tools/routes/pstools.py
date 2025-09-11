@@ -377,9 +377,6 @@ def api_enable_winrm():
         pythoncom.CoInitialize()
 
         # Connect to the WMI service on the remote machine
-        connection_string = f"winmgmts:{{impersonationLevel=impersonate}}!\\\\{ip}\\root\\cimv2"
-        logger.debug(f"WMI connection string: {connection_string}")
-
         wmi_service = win32com.client.Dispatch("WbemScripting.SWbemLocator").ConnectServer(
             ip, "root\\cimv2", f"{domain}\\{user}", pwd
         )
@@ -389,7 +386,7 @@ def api_enable_winrm():
         win32_process = wmi_service.Get("Win32_Process")
         
         # Command to enable WinRM silently
-        command = 'powershell.exe -Command "winrm quickconfig -q -force"'
+        command = 'powershell.exe -Command "winrm quickconfig -q"'
         
         # Create the process on the remote machine
         result = win32_process.Create(command)
@@ -428,8 +425,6 @@ def api_enable_winrm():
             details_message = "The RPC server is unavailable. This usually means the target computer is offline, behind a firewall, or the WMI service is not running."
         elif "Access is denied" in error_details:
             details_message = "Access is denied. Please ensure the provided credentials have administrative rights on the target machine."
-        elif "CoInitialize has not been called" in error_details:
-             details_message = "A COM initialization error occurred on the server. This is a server-side issue that needs to be fixed."
         else:
             details_message = f"An unexpected error occurred: {error_details}"
 
@@ -453,6 +448,7 @@ def api_enable_winrm():
 
 
     
+
 
 
 
