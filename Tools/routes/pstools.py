@@ -371,6 +371,10 @@ def api_enable_winrm():
 
     try:
         import win32com.client
+        import pythoncom
+        
+        # Initialize COM for the current thread
+        pythoncom.CoInitialize()
 
         # Connect to the WMI service on the remote machine
         connection_string = f"winmgmts:{{impersonationLevel=impersonate}}!\\\\{ip}\\root\\cimv2"
@@ -416,7 +420,6 @@ def api_enable_winrm():
             }), 500
 
     except Exception as e:
-        # This will catch pywintypes.com_error for auth failures or connection issues
         error_details = str(e)
         logger.error(f"Failed to enable WinRM on {ip} via WMI. Exception: {error_details}", exc_info=True)
         
@@ -425,6 +428,8 @@ def api_enable_winrm():
             details_message = "The RPC server is unavailable. This usually means the target computer is offline, behind a firewall, or the WMI service is not running."
         elif "Access is denied" in error_details:
             details_message = "Access is denied. Please ensure the provided credentials have administrative rights on the target machine."
+        elif "CoInitialize has not been called" in error_details:
+             details_message = "A COM initialization error occurred on the server. This is a server-side issue that needs to be fixed."
         else:
             details_message = f"An unexpected error occurred: {error_details}"
 
@@ -433,6 +438,12 @@ def api_enable_winrm():
             "error": "Failed to enable WinRM via WMI.",
             "details": details_message
         }), 500
+    finally:
+        # Uninitialize COM for the current thread
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
 
     
 
@@ -442,6 +453,7 @@ def api_enable_winrm():
 
 
     
+
 
 
 
