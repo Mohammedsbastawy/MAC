@@ -382,17 +382,14 @@ def api_enable_winrm():
         )
         logger.info(f"Successfully connected to WMI on {ip}.")
 
-        # Get the Win32_Process class
-        win32_process = wmi_service.Get("Win32_Process")
+        # Get the Win32_Process class object
+        win32_process_class = wmi_service.Get("Win32_Process")
         
         # Command to enable WinRM silently
         command = 'powershell.exe -Command "winrm quickconfig -q"'
         
         # Create the process on the remote machine
-        result = win32_process.Create(command)
-        
-        return_code = result[0]
-        process_id = result[1]
+        return_code, process_id = win32_process_class.Create(CommandLine=command)
 
         if return_code == 0:
             logger.info(f"Successfully started process (PID: {process_id}) to enable WinRM on {ip}.")
@@ -454,3 +451,6 @@ def api_enable_winrm():
 
 
 
+
+
+    
