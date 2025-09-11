@@ -354,7 +354,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             return; 
         }
         
-        const discoveredDevices = data.devices.map((d: any) => ({
+        const discoveredRaw = data.devices.map((d: any) => ({
             id: d.mac || d.ip,
             name: d.hostname === "Unknown" ? d.ip : d.hostname,
             ipAddress: d.ip,
@@ -369,14 +369,25 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             source: 'scan',
         } as Device));
 
-        toast({ title: "Workgroup Scan Complete", description: `Found ${discoveredDevices.length} non-domain devices.`});
-        setWorkgroupDevices(discoveredDevices);
-        setIsScanLoading(false);
+        // **Robust Filtering Logic**
+        const domainIps = new Set(domainDevices.map(d => d.ipAddress).filter(Boolean));
+        const domainNames = new Set(domainDevices.map(d => d.name.toLowerCase()));
+
+        const filteredWorkgroupDevices = discoveredRaw.filter((scannedDevice: Device) => {
+            const isIpInDomain = domainIps.has(scannedDevice.ipAddress);
+            const isNameInDomain = domainNames.has(scannedDevice.name.toLowerCase());
+            return !isIpInDomain && !isNameInDomain;
+        });
+
+
+        toast({ title: "Workgroup Scan Complete", description: `Found ${filteredWorkgroupDevices.length} new non-domain devices.`});
+        setWorkgroupDevices(filteredWorkgroupDevices);
 
     } catch (err: any) {
         setScanError({ isError: true, title: "Client Error", message: err.message || "An unknown client-side error occurred." });
         console.error(err);
-        setIsScanLoading(false);
+    } finally {
+      setIsScanLoading(false);
     }
   };
 
@@ -385,15 +396,18 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     window.open('/dashboard/logs', '_blank');
   }
 
-  const renderContent = () => {
-    const allDevices = [...domainDevices, ...workgroupDevices];
+  const allDevices = [...domainDevices, ...workgroupDevices];
+  // Create a unique ID for each device for the key prop
+  const getUniqueKey = (device: Device) => `${device.source}-${device.id}`;
 
+
+  const renderContent = () => {
     return (
       <div className="space-y-8">
         {allDevices.length > 0 ? (
            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {allDevices.map((device) => (
-                  <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
+                  <DeviceCard key={getUniqueKey(device)} device={device} onSelect={() => onSelectDevice(device)} />
               ))}
           </div>
         ) : isAdLoading ? (
