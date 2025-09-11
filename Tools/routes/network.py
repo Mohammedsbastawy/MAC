@@ -226,46 +226,25 @@ def api_discover_devices():
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
     try:
-        # Step 1: Get known domain computers to filter them out
-        ad_data = _get_ad_computers_data()
-        known_ad_ips = set()
-        known_ad_hostnames = set()
-        if ad_data.get("ok"):
-            for comp in ad_data.get("computers", []):
-                if comp.get("dns_hostname"): # This might be an IP or a hostname
-                    known_ad_ips.add(comp["dns_hostname"])
-                if comp.get("name"):
-                    known_ad_hostnames.add(comp["name"].lower())
-
-        # Step 2: Run the network scan
+        # Step 1: Run the network scan
         source_ip = get_source_ip_for_cidr(scan_cidr)
         router_mac = get_router_mac_address()
         online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
-        # Step 3: Get info for discovered IPs and filter out domain members
+        # Step 2: Get info for discovered IPs
         online_hosts_info = []
         with ThreadPoolExecutor(max_workers=50) as executor:
             future_to_ip = {executor.submit(get_device_info, ip): ip for ip in online_ips}
             for future in as_completed(future_to_ip):
                 try:
                     result = future.result()
-                    if not result:
-                        continue
-
-                    # Filtering logic:
-                    # Exclude if the IP is known in AD
-                    if result['ip'] in known_ad_ips:
-                        continue
-                    # Exclude if the resolved hostname (without domain) is known in AD
-                    if result['hostname'] and result['hostname'].split('.')[0].lower() in known_ad_hostnames:
-                        continue
-                    
-                    online_hosts_info.append(result)
+                    if result:
+                        online_hosts_info.append(result)
 
                 except Exception as e:
                     logger.warning(f"Error processing device info future: {e}")
 
-        logger.info(f"Discovered {len(online_hosts_info)} new non-domain devices.")
+        logger.info(f"Discovered {len(online_hosts_info)} devices on the network.")
         sorted_hosts = sorted(online_hosts_info, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})
 
@@ -442,10 +421,10 @@ def api_check_winrm():
     wmi_user = f"{domain}\\{user}"
 
     # --- Result Structure ---
-    checks = {
-        "serviceRunning": False,
-        "listenerConfigured": False,
-        "firewallOpen": False
+    results = {
+        "service": {"status": "checking", "message": ""},
+        "listener": {"status": "checking", "message": ""},
+        "firewall": {"status": "checking", "message": ""},
     }
     
     # --- Check 1: Service Status (WMI) ---
@@ -459,62 +438,52 @@ def api_check_winrm():
         services = wmi_service.ExecQuery("SELECT State, StartMode FROM Win32_Service WHERE Name='WinRM'")
         if len(services) > 0:
             service = list(services)[0]
-            if service.State == "Running" and service.StartMode == "Auto":
-                checks["serviceRunning"] = True
+            if service.State == "Running":
+                results["service"] = {"status": "success", "message": f"Service is {service.State} and Start Mode is {service.StartMode}."}
+            else:
+                results["service"] = {"status": "failure", "message": f"Service is not running. Current state: {service.State}."}
+        else:
+            results["service"] = {"status": "failure", "message": "WinRM service not found on the target host."}
     except Exception as e:
         error_details = str(e)
         logger.warning(f"WMI check for WinRM service on {ip} failed: {error_details}")
-        if "The RPC server is unavailable" in error_details or "Access is denied" in error_details:
-             try:
-                pythoncom.CoUninitialize()
-             except NameError: # If pythoncom failed to import
-                pass
-             return jsonify({
-                "ok": True, 
-                "overallStatus": "error", 
-                "checks": checks,
-                "error": "WMI/RPC connection failed. Check prerequisites for Remote Registry and firewall."
-            }), 200
-        # For other WMI errors, we continue to the WinRM checks
+        message = f"WMI/RPC connection failed: {error_details}. Check prerequisites for Remote Registry and firewall (port 135)."
+        results["service"] = {"status": "failure", "message": message}
+        # If WMI fails, we can't trust the other checks will work, but we try anyway
+        # We also pass the error to the other checks as it's the likely root cause
+        results["listener"] = {"status": "failure", "message": message}
+        results["firewall"] = {"status": "failure", "message": message}
+        return jsonify({"ok": True, "results": results}), 200 # Return 200 so UI can parse it
     finally:
-         try:
+        try:
             pythoncom.CoUninitialize()
-         except NameError: # If pythoncom wasn't imported or initialized
+        except NameError:
+            pass
+        except Exception:
             pass
 
-    # --- Check 2 & 3: Listener and Firewall (WinRM) ---
-    # These checks rely on a successful WinRM connection. If it fails, both will be false.
-    logger.info(f"Checking WinRM listener and firewall on {ip} via WinRM.")
-    
-    # Check Listener
-    rc_listener, out_listener, err_listener = run_winrm_command(ip, winrm_user, pwd, "winrm enumerate winrm/config/listener", timeout=10)
+    # --- Check 2: Listener (WinRM) ---
+    logger.info(f"Checking WinRM listener on {ip} via WinRM.")
+    rc_listener, out_listener, err_listener = run_winrm_command(ip, winrm_user, pwd, "winrm enumerate winrm/config/listener", timeout=15)
     if rc_listener == 0 and "Listener" in out_listener:
-        checks["listenerConfigured"] = True
-
-    # Check Firewall
-    ps_firewall_cmd = "Get-NetFirewallRule -DisplayName 'Windows Remote Management (HTTP-In)' | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' }"
-    rc_firewall, out_firewall, err_firewall = run_winrm_command(ip, winrm_user, pwd, ps_firewall_cmd, timeout=10)
-    if rc_firewall == 0 and "Enabled: True" in out_firewall:
-         checks["firewallOpen"] = True
-
-    # --- Determine Overall Status ---
-    if all(checks.values()):
-        overall_status = "enabled"
-    elif not checks["serviceRunning"] and not checks["listenerConfigured"]:
-         overall_status = "disabled" # Likely completely disabled
+        results["listener"] = {"status": "success", "message": "WinRM listener is configured and responding."}
     else:
-        overall_status = "error" # Partially configured or error state
+        results["listener"] = {"status": "failure", "message": err_listener or out_listener or "Failed to enumerate WinRM listeners. The service might be stopped or blocked."}
 
-    # If the primary WinRM connection failed, it's a strong indicator of a core issue.
-    if rc_listener != 0:
-        overall_status = "error"
-        return jsonify({
-            "ok": True,
-            "overallStatus": overall_status,
-            "checks": checks,
-            "error": err_listener or "WinRM connection failed. Check credentials, firewall (port 5985), and service status."
-        }), 200
+    # --- Check 3: Firewall (WinRM) ---
+    # We only run this if the listener check was successful, as it depends on a working WinRM connection
+    if results["listener"]["status"] == "success":
+        logger.info(f"Checking WinRM firewall rule on {ip} via WinRM.")
+        ps_firewall_cmd = "Get-NetFirewallRule -DisplayName 'Windows Remote Management (HTTP-In)' | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' } | Select-Object -Property Enabled, Action"
+        rc_firewall, out_firewall, err_firewall = run_winrm_command(ip, winrm_user, pwd, ps_firewall_cmd, timeout=15)
+        if rc_firewall == 0 and out_firewall.strip():
+            results["firewall"] = {"status": "success", "message": "Firewall rule 'Windows Remote Management (HTTP-In)' is enabled and allows connections."}
+        else:
+            results["firewall"] = {"status": "failure", "message": err_firewall or "The 'Windows Remote Management (HTTP-In)' firewall rule is either disabled, not found, or does not allow connections."}
+    else:
+        # If the listener check failed, the firewall check is also considered failed because it can't be performed.
+        results["firewall"] = {"status": "failure", "message": "Cannot check firewall because the WinRM listener is not responding."}
 
-    return jsonify({"ok": True, "overallStatus": overall_status, "checks": checks})
+    return jsonify({"ok": True, "results": results})
     
     
