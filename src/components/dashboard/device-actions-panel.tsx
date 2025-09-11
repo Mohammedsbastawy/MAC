@@ -887,7 +887,7 @@ export default function DeviceActionsPanel({
   onClose,
 }: DeviceActionsPanelProps) {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, password } = useAuth();
   const [dialogState, setDialogState] = React.useState<DialogState>({
       isOpen: false,
       title: "",
@@ -928,15 +928,21 @@ export default function DeviceActionsPanel({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                   ip: device.ipAddress,
+                  // Include credentials explicitly
+                  username: user.user,
+                  domain: user.domain,
+                  pwd: password,
                   ...extraParams,
               }),
           });
           
           let result;
+          const responseClone = response.clone(); // Clone the response to read it multiple times
+
           try {
             result = await response.json();
           } catch(e) {
-            const text = await response.text();
+            const text = await responseClone.text();
              setDialogState({
                 isOpen: true,
                 title: "Invalid Response",
@@ -1123,5 +1129,7 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    
 
     
