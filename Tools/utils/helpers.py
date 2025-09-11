@@ -75,13 +75,16 @@ def run_winrm_command(host, user, password, script, timeout=60):
     """
     Executes a PowerShell script on a remote host using pywinrm.
     Returns (return_code, stdout, stderr).
+    This version includes robust error handling.
     """
     try:
         import winrm
+        from winrm.exceptions import WinRMTransportError, WinRMOperationTimeoutError, WinRMError
     except ImportError:
         logger.error("The 'pywinrm' library is not installed. Please run 'pip install pywinrm'.")
-        return 1, "", "pywinrm library not installed on the server."
+        return 1, "", "The pywinrm library is not installed on the server."
         
+    protocol = None
     try:
         protocol = winrm.Protocol(
             endpoint=f"http://{host}:5985/wsman",
@@ -90,37 +93,46 @@ def run_winrm_command(host, user, password, script, timeout=60):
             password=password,
             server_cert_validation='ignore',
             operation_timeout_sec=timeout,
-            read_timeout_sec=timeout + 5
+            read_timeout_sec=timeout + 10 # Must be greater than operation_timeout_sec
         )
         
+        # The correct method name is run_ps
         result = protocol.run_ps(script)
         
         stdout = result.std_out.decode('utf-8', errors='ignore') if result.std_out else ""
         stderr = result.std_err.decode('utf-8', errors='ignore') if result.std_err else ""
 
+        # Even with status_code 0, there might be errors in stderr from PowerShell itself
         if result.status_code != 0:
-             # Try to provide a more specific error message
-            if "401" in stderr:
-                 err_msg = "Authentication failed (401). Check username and password."
-            elif "timed out" in stderr.lower():
-                err_msg = "Connection timed out. Check firewall and WinRM service on the target."
-            else:
-                 err_msg = stderr or "WinRM command failed with an unknown error."
+            err_msg = stderr or f"WinRM command failed with non-zero status code: {result.status_code}"
             logger.error(f"WinRM command failed on {host} with RC={result.status_code}. Stderr: {err_msg}")
             return result.status_code, stdout, err_msg
-
+        
         return 0, stdout, stderr
 
-    except Exception as e:
-        error_str = str(e)
-        if "WinRMTransportError" in error_str:
-            err_msg = f"Connection Error: Could not connect to {host}. Ensure WinRM is enabled and the firewall allows port 5985."
-        elif "HttpUnauthorizedError" in error_str or "500" in error_str:
-            err_msg = "Authentication failed. Please verify the credentials and permissions for remote management."
-        else:
-            err_msg = f"An unexpected WinRM error occurred: {error_str}"
-        logger.error(f"Exception during WinRM execution on {host}: {err_msg}")
+    except WinRMOperationTimeoutError:
+        err_msg = f"Connection timed out. The host {host} did not respond within {timeout} seconds. Check firewall and WinRM service."
+        logger.error(f"WinRM timeout on {host}: {err_msg}")
         return 1, "", err_msg
+    except WinRMTransportError as e:
+        error_str = str(e).lower()
+        if "401" in error_str or "unauthorized" in error_str:
+            err_msg = "Authentication failed (401). Please check the username and password."
+        elif "connection refused" in error_str or "no route to host" in error_str:
+            err_msg = f"Connection Error: Could not connect to {host}. Ensure the host is online and WinRM is enabled (port 5985 is open)."
+        else:
+            err_msg = f"A WinRM transport error occurred: {e}"
+        logger.error(f"WinRM transport error on {host}: {err_msg}")
+        return 1, "", err_msg
+    except WinRMError as e:
+        err_msg = f"A generic WinRM error occurred: {e}"
+        logger.error(f"WinRM generic error on {host}: {err_msg}")
+        return 1, "", err_msg
+    except Exception as e:
+        err_msg = f"An unexpected error occurred during WinRM execution: {e}"
+        logger.error(f"Unexpected WinRM exception on {host}: {err_msg}", exc_info=True)
+        return 1, "", err_msg
+
 
 def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90, suppress_errors=False):
     """
@@ -376,3 +388,4 @@ def parse_psloglist_output(output):
     
 
     
+
