@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -115,7 +116,7 @@ const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device
             onClick={onSelect}
             className={cn("cursor-pointer transition-all hover:shadow-md hover:-translate-y-1 flex flex-col",
              device.status === 'offline' && "opacity-60 hover:opacity-100",
-             device.status === 'online' && "border-2 border-[#b0e22b]"
+             device.status === 'online' && "border-2 border-primary"
             )}
         >
             <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
@@ -390,45 +391,36 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
   const renderContent = () => {
     const onlineDomainDevices = domainDevices.filter(d => d.status === 'online').length;
+    const allDevices = [...domainDevices, ...workgroupDevices];
 
     return (
       <div className="space-y-8">
-        {/* Domain Devices Section */}
-        <div>
-            <CardTitle className="mb-1 text-xl flex items-center gap-2">
-                <Users /> Domain Devices ({domainDevices.length} total / {onlineDomainDevices} online)
-            </CardTitle>
-            <CardDescription className="mb-4">
-                Devices found in Active Directory. Click 'Refresh Online Status' to check which are online.
-            </CardDescription>
-            {isAdLoading ? (
-                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                        <Skeleton key={i} className="h-40" />
-                    ))}
-                </div>
-            ) : domainDevices.length > 0 ? (
-                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {domainDevices.map((device) => (
-                        <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
-                    ))}
-                </div>
-            ) : (
-                <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40">
-                    <h3 className="text-lg font-semibold text-foreground">No domain devices found</h3>
-                    <p className="mt-2 text-sm text-muted-foreground">Could not retrieve devices from Active Directory.</p>
-                </div>
-            )}
-        </div>
+        {allDevices.length > 0 ? (
+           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {allDevices.map((device) => (
+                  <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
+              ))}
+          </div>
+        ) : isAdLoading ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="h-40" />
+                ))}
+            </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40">
+              <h3 className="text-lg font-semibold text-foreground">No devices found</h3>
+              <p className="mt-2 text-sm text-muted-foreground">Scan the network to discover devices.</p>
+          </div>
+        )}
 
+        {/* Separator and Workgroup section */}
         <Separator />
-
-        {/* Workgroup Devices Section */}
-        <div>
+         <div>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                 <div>
                      <CardTitle className="mb-1 text-xl flex items-center gap-2">
-                        <Briefcase /> Discovered Workgroup Devices ({workgroupDevices.length} found)
+                        <Briefcase /> Discover Workgroup Devices
                     </CardTitle>
                     <CardDescription className="mb-4">
                         Use the network scanner to find devices that are not in the domain.
@@ -452,18 +444,18 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                     </Select>
                     <Button onClick={handleDiscoverWorkgroup} disabled={isScanLoading || !selectedCidr} size="lg" className="h-11">
                         {isScanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                        Discover Workgroup Devices
+                        Scan Network
                     </Button>
                 </div>
             </div>
-            
-            { isScanLoading ? (
+            { isScanLoading && (
                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
                     {Array.from({ length: 4 }).map((_, i) => (
                         <Skeleton key={i} className="h-40" />
                     ))}
                 </div>
-            ) : scanError?.isError ? (
+            )}
+            { scanError?.isError && (
                 <Alert variant="destructive" className="mt-4">
                     <Siren className="h-4 w-4" />
                     <AlertTitle>{scanError.title}</AlertTitle>
@@ -477,20 +469,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                         )}
                     </AlertDescription>
                 </Alert>
-            ) : workgroupDevices.length > 0 ? (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
-                    {workgroupDevices.map((device) => (
-                        <DeviceCard key={device.id} device={device} onSelect={() => onSelectDevice(device)} />
-                    ))}
-                </div>
-            ) : (
-                <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40 mt-4">
-                     <Wifi className="mx-auto h-12 w-12 text-muted-foreground" />
-                     <h3 className="mt-4 text-lg font-semibold text-foreground">No workgroup devices discovered</h3>
-                     <p className="mt-2 text-sm text-muted-foreground">
-                        Select a network and scan to find non-domain devices.
-                     </p>
-                </div>
             )}
         </div>
 
@@ -505,7 +483,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         <div className="space-y-1">
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Network Devices</h1>
           <p className="text-muted-foreground">
-            Manage domain-joined and workgroup devices.
+            Browse domain-joined and newly discovered workgroup devices.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

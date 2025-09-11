@@ -1134,7 +1134,7 @@ export default function DeviceActionsPanel({
             {device.name}
           </SheetTitle>
           <SheetDescription>
-            {device.os}
+            {device.ipAddress} | {device.os}
           </SheetDescription>
         </SheetHeader>
 
@@ -1160,11 +1160,11 @@ export default function DeviceActionsPanel({
                                     {winrmStatus.overallStatus === 'enabled' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
                                     {winrmStatus.overallStatus === 'disabled' && <AlertCircle className="h-4 w-4 text-yellow-500" />}
                                     {winrmStatus.overallStatus === 'error' && <XCircle className="h-4 w-4 text-destructive" />}
-                                </Button>
+                                 </Button>
                             </PopoverTrigger>
                            <WinRMStatusPopover status={winrmStatus} />
                         </Popover>
-                        {winrmStatus.overallStatus === 'disabled' && (
+                        {winrmStatus.overallStatus !== 'enabled' && device.status === 'online' && (
                             <Button 
                                 size="sm" 
                                 variant="destructive" 
@@ -1284,7 +1284,3 @@ export default function DeviceActionsPanel({
     </>
   );
 }
-
-    
-
-    
