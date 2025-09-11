@@ -215,7 +215,7 @@ def get_device_info(ip):
 def api_discover_devices():
     """
     Performs a fast network discovery using Masscan.
-    The frontend is now responsible for filtering out domain devices.
+    The backend now filters out known domain devices before returning results.
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
@@ -226,24 +226,46 @@ def api_discover_devices():
         return jsonify({"ok": False, "error": "CIDR is required for scanning."}), 400
 
     try:
+        # Step 1: Get known domain computers to filter them out
+        ad_data = _get_ad_computers_data()
+        known_ad_ips = set()
+        known_ad_hostnames = set()
+        if ad_data.get("ok"):
+            for comp in ad_data.get("computers", []):
+                if comp.get("dns_hostname"): # This might be an IP or a hostname
+                    known_ad_ips.add(comp["dns_hostname"])
+                if comp.get("name"):
+                    known_ad_hostnames.add(comp["name"].lower())
+
+        # Step 2: Run the network scan
         source_ip = get_source_ip_for_cidr(scan_cidr)
         router_mac = get_router_mac_address()
-        
-        # Run the network scan
         online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
+        # Step 3: Get info for discovered IPs and filter out domain members
         online_hosts_info = []
         with ThreadPoolExecutor(max_workers=50) as executor:
             future_to_ip = {executor.submit(get_device_info, ip): ip for ip in online_ips}
             for future in as_completed(future_to_ip):
                 try:
                     result = future.result()
-                    if result:
-                      online_hosts_info.append(result)
+                    if not result:
+                        continue
+
+                    # Filtering logic:
+                    # Exclude if the IP is known in AD
+                    if result['ip'] in known_ad_ips:
+                        continue
+                    # Exclude if the resolved hostname (without domain) is known in AD
+                    if result['hostname'] and result['hostname'].split('.')[0].lower() in known_ad_hostnames:
+                        continue
+                    
+                    online_hosts_info.append(result)
+
                 except Exception as e:
                     logger.warning(f"Error processing device info future: {e}")
 
-        logger.info(f"Discovered {len(online_hosts_info)} devices. Frontend will filter domain members.")
+        logger.info(f"Discovered {len(online_hosts_info)} new non-domain devices.")
         sorted_hosts = sorted(online_hosts_info, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})
 
@@ -429,9 +451,10 @@ def api_check_winrm():
     # --- Check 1: Service Status (WMI) ---
     logger.info(f"Checking WinRM service status on {ip} via WMI.")
     try:
+        # Import COM libraries here to avoid issues in non-Windows envs if not used
         import win32com.client
         import pythoncom
-        pythoncom.CoInitialize()
+        pythoncom.CoInitialize() # Initialize COM for the current thread
         wmi_service = win32com.client.Dispatch("WbemScripting.SWbemLocator").ConnectServer(ip, "root\\cimv2", wmi_user, pwd)
         services = wmi_service.ExecQuery("SELECT State, StartMode FROM Win32_Service WHERE Name='WinRM'")
         if len(services) > 0:
@@ -442,7 +465,11 @@ def api_check_winrm():
         error_details = str(e)
         logger.warning(f"WMI check for WinRM service on {ip} failed: {error_details}")
         if "The RPC server is unavailable" in error_details or "Access is denied" in error_details:
-            return jsonify({
+             try:
+                pythoncom.CoUninitialize()
+             except NameError: # If pythoncom failed to import
+                pass
+             return jsonify({
                 "ok": True, 
                 "overallStatus": "error", 
                 "checks": checks,
@@ -450,8 +477,10 @@ def api_check_winrm():
             }), 200
         # For other WMI errors, we continue to the WinRM checks
     finally:
-         try: pythoncom.CoUninitialize()
-         except: pass
+         try:
+            pythoncom.CoUninitialize()
+         except NameError: # If pythoncom wasn't imported or initialized
+            pass
 
     # --- Check 2 & 3: Listener and Firewall (WinRM) ---
     # These checks rely on a successful WinRM connection. If it fails, both will be false.
@@ -487,3 +516,5 @@ def api_check_winrm():
         }), 200
 
     return jsonify({"ok": True, "overallStatus": overall_status, "checks": checks})
+    
+    
