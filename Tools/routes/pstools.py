@@ -16,13 +16,23 @@ def json_result(rc, out, err, structured_data=None):
         except TypeError:
             final_stdout = str(out) # fallback to string representation
     
-    return jsonify({
+    # Improved error structure
+    ok = rc == 0
+    error_message = err if not ok else ""
+    
+    response = {
+        "ok": ok,
         "rc": rc, 
         "stdout": final_stdout, 
-        "stderr": err, 
+        "stderr": err, # Keep original stderr for raw output
+        "error": error_message, # Main error message for UI
         "eula_required": False, 
         "structured_data": structured_data
-    })
+    }
+    
+    # Return 200 even on command failure, so the frontend can parse the JSON error
+    return jsonify(response), 200
+
 
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
@@ -31,7 +41,8 @@ def require_login():
     if 'user' not in session or 'email' not in session:
         logger.warning(f"Unauthorized access attempt to {request.endpoint}")
         if request.method == 'POST':
-            return jsonify({'rc': 401, 'stdout': '', 'stderr': 'Authentication required. Please log in.'}), 401
+            # Ensure even auth errors are valid JSON for the frontend
+            return jsonify({'ok': False, 'rc': 401, 'stdout': '', 'stderr': 'Authentication required. Please log in.', 'error': 'Authentication required. Please log in.'}), 401
         return "Authentication required", 401
 
 @pstools_bp.route('/psexec', methods=['POST'])
@@ -304,10 +315,10 @@ def api_psbrowse():
         # Construct the PowerShell command to get details and convert to JSON.
         # Force is used to get hidden/system items. ErrorAction SilentlyContinue ignores permission errors on individual files.
         # Select-Object now includes Mode to differentiate files/dirs.
-        # The custom object for LastWriteTime ensures it's in a consistent, parsable format.
+        # Using a custom object for LastWriteTime ensures a consistent ISO 8601 format.
         ps_command = f"""
         Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | 
-        Select-Object Name, FullName, Length, @{{Name='LastWriteTime';Expression={{$_.LastWriteTime.ToString('o')}}}}, @{{Name='Mode';Expression={{$_.Mode.ToString()}}}} | 
+        Select-Object Name, FullName, Length, @{{Name='LastWriteTime';Expression={{$_.LastWriteTime.ToUniversalTime().ToString('o')}}}}, @{{Name='Mode';Expression={{$_.Mode.ToString()}}}} | 
         ConvertTo-Json -Compress
         """
         
@@ -333,6 +344,11 @@ def api_psbrowse():
 
                 if json_start_index != -1:
                     json_str = out[json_start_index:]
+                    # PowerShell's ConvertTo-Json can produce invalid multi-line JSON for single objects
+                    # We need to ensure it's a valid array.
+                    if not json_str.strip().startswith('['):
+                        json_str = f"[{json_str}]"
+                    
                     parsed_json = json.loads(json_str)
                     
                     # Ensure the result is always an array
@@ -340,14 +356,13 @@ def api_psbrowse():
                         parsed_json = [parsed_json]
                     structured_data = {"psbrowse": parsed_json}
                 else:
-                    logger.warning(f"psbrowse for path '{clean_path}' returned empty or non-JSON output. Output: {out}")
+                    # This case handles an empty directory, which is a success condition
+                    logger.info(f"psbrowse for path '{clean_path}' returned empty output, likely an empty directory.")
                     structured_data = {"psbrowse": []}
-                    if not err:
-                        err = f"Could not find valid JSON in output. The directory '{clean_path}' may be empty or inaccessible."
 
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse JSON from psbrowse output. Output was: {out}")
-                err = f"Failed to parse command output as JSON. {err}"
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from psbrowse output. Error: {e}. Output was: {out}")
+                err = f"Failed to parse command output as JSON. Raw output might contain an error. {err}"
                 rc = 1 # Mark as failed if JSON parsing fails
         
         elif rc != 0:
@@ -361,9 +376,9 @@ def api_psbrowse():
         logger.error(f"psbrowse on {ip} for path '{path}' failed with exception: {e}", exc_info=True)
         return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
 
-    # Special handling to return raw output in 'out' for frontend and parsed data in 'structured_data'
     return json_result(rc, out, err, structured_data)
 
     
 
     
+

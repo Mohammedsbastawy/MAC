@@ -673,15 +673,23 @@ const PsBrowseResult: React.FC<{
     const files = data.filter(item => !item.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
     const sortedData = [...folders, ...files];
 
-    // Attempt to parse the date string from PowerShell: /Date(1715084400000)/
-    const parsePsDate = (dateStr: string) => {
+    const formatBytes = (bytes: number | null, decimals = 2) => {
+        if (bytes === null || bytes === 0) return '';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+    
+    const formatDate = (dateString: string) => {
         try {
-            const timestamp = parseInt(dateStr.substring(6));
-            return new Date(timestamp).toLocaleString();
+            return new Date(dateString).toLocaleString();
         } catch {
-            return dateStr; // Fallback to raw string
+            return dateString;
         }
-    };
+    }
+
 
     return (
     <Card>
@@ -704,8 +712,8 @@ const PsBrowseResult: React.FC<{
                 <TableHeader>
                     <TableRow>
                         <TableHead>Name</TableHead>
-                        <TableHead className="text-right">Size</TableHead>
                         <TableHead>Last Modified</TableHead>
+                        <TableHead className="text-right">Size</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -719,10 +727,10 @@ const PsBrowseResult: React.FC<{
                                 {item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
                                 {item.Name}
                             </TableCell>
+                            <TableCell className="font-mono text-xs">{formatDate(item.LastWriteTime)}</TableCell>
                             <TableCell className="text-right font-mono text-xs">
-                                {item.Length !== null && !item.Mode.startsWith('d') ? `${(item.Length / 1024).toFixed(2)} KB` : ''}
+                                {item.Length !== null && !item.Mode.startsWith('d') ? formatBytes(item.Length) : ''}
                             </TableCell>
-                            <TableCell className="font-mono text-xs">{parsePsDate(item.LastWriteTime)}</TableCell>
                         </TableRow>
                     ))}
                 </TableBody>
@@ -812,10 +820,10 @@ const CommandOutputDialog: React.FC<{
 
 
                 {/* Raw output for structured data (collapsible) */}
-                {hasStructuredData && state.output && !state.error && (
+                {hasStructuredData && (state.output || state.error) && (
                     <details className="mt-4">
                         <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
-                        <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />
+                        {state.output && <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />}
                          {state.error && <Textarea readOnly value={state.error} className="mt-1 h-24 font-mono text-xs bg-destructive/10 text-destructive" />}
                     </details>
                 )}
@@ -909,11 +917,29 @@ export default function DeviceActionsPanel({
                   ...extraParams,
               }),
           });
-          const result = await response.json();
+          
+          let result;
+          try {
+            result = await response.json();
+          } catch(e) {
+            const text = await response.text();
+             setDialogState({
+                isOpen: true,
+                title: "Invalid Response",
+                description: `The server returned a non-JSON response. This usually indicates an internal server error. (HTTP ${response.status})`,
+                output: text,
+                error: `Failed to parse JSON. Error: ${(e as Error).message}`,
+                structuredData: null
+             });
+             return;
+          }
 
-          if (!response.ok && !result.stderr) {
+
+          if (!response.ok && !result.stderr && !result.error) {
               result.stderr = `The server returned an error (HTTP ${response.status}) but did not provide specific details. Check the backend logs.`;
           }
+          
+          const finalError = result.stderr || result.error || "";
 
           // If the action was a service control, we might want to refresh the list
           if (tool === 'psservice' && extraParams.action !== 'query') {
@@ -935,7 +961,7 @@ export default function DeviceActionsPanel({
             title: `Result from: ${tool}`,
             description: `Command executed on ${device.name} (${device.ipAddress}).`,
             output: result.stdout,
-            error: result.stderr,
+            error: finalError,
             structuredData: result.structured_data || null,
           });
 
