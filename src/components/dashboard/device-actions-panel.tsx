@@ -981,7 +981,7 @@ export default function DeviceActionsPanel({
                 errorDetails: data.error, // The backend might return a high-level error
             });
         } else {
-             setWinrmStatus({ overallStatus: 'error', errorDetails: data.details || data.error });
+             setWinrmStatus({ overallStatus: 'error', errorDetails: data.details || data.error || "Failed to connect to the backend server." });
         }
     } catch (e) {
         setWinrmStatus({ overallStatus: 'error', errorDetails: "Failed to connect to the backend server." });
@@ -1285,3 +1285,5 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    
