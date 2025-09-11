@@ -684,16 +684,7 @@ const PsBrowseResult: React.FC<{
 }> = ({ data, currentPath, onNavigate, onDownload, onUpload, onDeleteItem, onRenameItem, onCreateFolder, isLoading }) => {
     
     const [actionDialog, setActionDialog] = React.useState<{type: 'rename' | 'create_folder', item?: PsBrowseItem, isOpen: boolean}>({type: 'rename', isOpen: false});
-    const [uploadingFile, setUploadingFile] = React.useState<File | null>(null);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-    const isDriveView = currentPath === "drives";
-
-    const navigateTo = (item: PsBrowseItem) => {
-        if (item.Mode.startsWith('d')) {
-            onNavigate(item.FullName);
-        }
-    };
 
     const handleUploadClick = () => {
         fileInputRef.current?.click();
@@ -702,18 +693,21 @@ const PsBrowseResult: React.FC<{
     const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
-            setUploadingFile(file);
+            onUpload(currentPath, file);
+        }
+        // Reset file input to allow uploading the same file again
+        if (event.currentTarget) {
+            event.currentTarget.value = "";
         }
     };
     
-    React.useEffect(() => {
-        if (uploadingFile) {
-            onUpload(currentPath, uploadingFile);
-            setUploadingFile(null); // Reset after initiating upload
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [uploadingFile]);
+    const isDriveView = currentPath === "drives";
 
+    const navigateTo = (item: PsBrowseItem) => {
+        if (item.Mode.startsWith('d')) {
+            onNavigate(item.FullName);
+        }
+    };
 
     const pathSegments = React.useMemo(() => {
         if (isDriveView) return [{ name: "Drives", path: "drives" }];
@@ -918,7 +912,7 @@ const CommandOutputDialog: React.FC<{
     const isBrowseView = !!state.structuredData?.psbrowse;
     const isHackerTheme = !isBrowseView && !(state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
-    const handleFileAction = async (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+    const handleFileAction = async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
         setIsLoading(true);
         if (onBrowseAction) {
             await onBrowseAction(action, params);
@@ -957,7 +951,7 @@ const CommandOutputDialog: React.FC<{
                         data={state.structuredData!.psbrowse!}
                         currentPath={browsePath}
                         isLoading={isLoading}
-                        onNavigate={(path) => onBrowseAction('navigate', {path})}
+                        onNavigate={(path) => handleFileAction('navigate', {path})}
                         onDownload={(path, filename) => handleFileAction('download', {path, filename})}
                         onUpload={(path, file) => handleFileAction('upload', {path, file})}
                         onDeleteItem={(path, name, isFolder) => handleFileAction('delete', {path, name, isFolder})}
@@ -1119,17 +1113,48 @@ export default function DeviceActionsPanel({
   });
   const [serviceInfo, setServiceInfo] = React.useState<PsServiceData | null>(null);
   const [browsePath, setBrowsePath] = React.useState("drives");
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = React.useState(false);
+  const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
+  const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
   
   const initialDiagnosticsState: WinRMDiagnosticsState = {
         service: { status: 'checking', message: '' },
         listener: { status: 'checking', message: '' },
         firewall: { status: 'checking', message: '' },
     };
-
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
-  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = React.useState(false);
-  const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
-  const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
+
+  const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
+    if (!user || !device) return null;
+
+    if (showToast) {
+        toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
+    }
+
+    try {
+        const response = await fetch(`/api/pstools/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ip: device.ipAddress,
+                username: user.user,
+                domain: user.domain,
+                pwd: password,
+                ...params,
+            }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok && !result.error) {
+            result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
+        }
+        return result;
+
+    } catch (err: any) {
+        return { ok: false, error: `Client-side error: ${err.message}` };
+    }
+  }, [device, user, password, toast]);
   
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device || !user) return;
@@ -1166,140 +1191,107 @@ export default function DeviceActionsPanel({
     }
   }, [device, user, initialDiagnosticsState]);
 
-  const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
-    if (!user || !device) return null;
+  const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+    let endpoint = '';
+    let apiParams: Record<string, any> = {};
+    let toastMessage = '';
 
-    if (showToast) {
-        toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
+    switch (action) {
+        case 'navigate':
+            endpoint = 'psbrowse';
+            apiParams = { path: params.path };
+            setBrowsePath(params.path);
+            break;
+        case 'download':
+            endpoint = 'download-file';
+            apiParams = { path: params.path };
+            toastMessage = `Downloading "${params.filename}"...`;
+            break;
+         case 'upload':
+            endpoint = 'upload-file';
+            const reader = new FileReader();
+            reader.readAsDataURL(params.file);
+            reader.onload = async () => {
+                const base64 = reader.result?.toString().split(',')[1];
+                if (base64) {
+                    const uploadParams = { destinationPath: `${params.path}\\${params.file.name}`, fileContent: base64 };
+                    await handleBrowseAction('navigate', {path: ''}); // dummy call to show loading
+                    const result = await runApiAction('upload-file', uploadParams, false);
+                    if (result?.ok) {
+                        toast({ title: "Upload Successful", description: `File "${params.file.name}" uploaded.` });
+                        handleBrowseAction('navigate', { path: params.path }); // Refresh
+                    } else {
+                        toast({ variant: 'destructive', title: 'Upload Failed', description: result?.error || 'An unknown error occurred.' });
+                    }
+                }
+            };
+            return;
+        case 'delete':
+            endpoint = 'delete-item';
+            apiParams = { path: params.path };
+            toastMessage = `Deleting "${params.name}"...`;
+            break;
+        case 'rename':
+            endpoint = 'rename-item';
+            apiParams = { path: params.path, newName: params.newName };
+            toastMessage = `Renaming to "${params.newName}"...`;
+            break;
+        case 'create_folder':
+            endpoint = 'create-folder';
+            apiParams = { path: `${params.path}\\${params.folderName}` };
+            toastMessage = `Creating folder "${params.folderName}"...`;
+            break;
     }
 
-    try {
-        const response = await fetch(`/api/pstools/${endpoint}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ip: device.ipAddress,
-                username: user.user,
-                domain: user.domain,
-                pwd: password,
-                ...params,
-            }),
+    if (toastMessage) {
+        toast({ title: "In Progress", description: toastMessage });
+    }
+
+    const result = await runApiAction(endpoint, apiParams, false);
+    if (!result) return;
+    
+    if (action === 'download') {
+        if (result.ok && result.content) {
+            const byteCharacters = atob(result.content);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray]);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = params.filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            toast({ title: "Success", description: `"${params.filename}" downloaded.`});
+        } else {
+            toast({ variant: 'destructive', title: 'Download Failed', description: result.error });
+        }
+        return;
+    }
+
+    if (result.ok) {
+        if (action !== 'navigate') {
+            toast({ title: "Success", description: result.message || "Action completed successfully." });
+        }
+        setDialogState({
+            isOpen: true,
+            title: `File Browser`,
+            description: `Browsing ${browsePath} on ${device?.name}`,
+            output: result.stdout || '',
+            error: result.stderr || result.error || '',
+            structuredData: result.structured_data || null,
         });
 
-        const result = await response.json();
-
-        if (!response.ok && !result.error) {
-            result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
-        }
-        return result;
-
-    } catch (err: any) {
-        return { ok: false, error: `Client-side error: ${err.message}` };
+    } else {
+        setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
+        toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
     }
-  }, [device, user, password, toast]);
-
-    const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
-        let endpoint = '';
-        let apiParams: Record<string, any> = {};
-        let toastMessage = '';
-
-        switch (action) {
-            case 'navigate':
-                endpoint = 'psbrowse';
-                apiParams = { path: params.path };
-                setBrowsePath(params.path);
-                break;
-            case 'download':
-                endpoint = 'download-file';
-                apiParams = { path: params.path };
-                toastMessage = `Downloading "${params.filename}"...`;
-                break;
-             case 'upload':
-                endpoint = 'upload-file';
-                const reader = new FileReader();
-                reader.readAsDataURL(params.file);
-                reader.onload = async () => {
-                    const base64 = reader.result?.toString().split(',')[1];
-                    if (base64) {
-                        const uploadParams = { destinationPath: `${params.path}\\${params.file.name}`, fileContent: base64 };
-                        const result = await runApiAction('upload-file', uploadParams, false);
-                        if (result?.ok) {
-                            toast({ title: "Upload Successful", description: `File "${params.file.name}" uploaded.` });
-                            handleBrowseAction('navigate', { path: params.path }); // Refresh
-                        } else {
-                            toast({ variant: 'destructive', title: 'Upload Failed', description: result?.error || 'An unknown error occurred.' });
-                        }
-                    }
-                };
-                return; // Special handling for upload
-            case 'delete':
-                endpoint = 'delete-item';
-                apiParams = { path: params.path };
-                toastMessage = `Deleting "${params.name}"...`;
-                break;
-            case 'rename':
-                endpoint = 'rename-item';
-                apiParams = { path: params.path, newName: params.newName };
-                toastMessage = `Renaming to "${params.newName}"...`;
-                break;
-            case 'create_folder':
-                endpoint = 'create-folder';
-                apiParams = { path: `${params.path}\\${params.folderName}` };
-                toastMessage = `Creating folder "${params.folderName}"...`;
-                break;
-        }
-
-        if (toastMessage) {
-            toast({ title: "In Progress", description: toastMessage });
-        }
-
-        const result = await runApiAction(endpoint, apiParams, false);
-        if (!result) return;
-        
-        if (action === 'download') {
-            if (result.ok && result.content) {
-                const byteCharacters = atob(result.content);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                    byteNumbers[i] = byteCharacters.charCodeAt(i);
-                }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray]);
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = params.filename;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                toast({ title: "Success", description: `"${params.filename}" downloaded.`});
-            } else {
-                toast({ variant: 'destructive', title: 'Download Failed', description: result.error });
-            }
-            return;
-        }
-
-        if (result.ok) {
-            if (action !== 'navigate') {
-                toast({ title: "Success", description: result.message || "Action completed successfully." });
-            }
-            // For browse, we need to update the dialog state with the new file list
-            setDialogState({
-                isOpen: true,
-                title: `File Browser`,
-                description: `Browsing ${browsePath} on ${device?.name}`,
-                output: result.stdout || '',
-                error: result.stderr || result.error || '',
-                structuredData: result.structured_data || null,
-            });
-
-        } else {
-            setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
-            toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
-        }
-    }, [runApiAction, browsePath, toast, device]);
-
+  }, [runApiAction, browsePath, toast, device]);
 
   const handleOpenDiagnostics = () => {
     setIsDiagnosticsOpen(true);
@@ -1315,7 +1307,7 @@ export default function DeviceActionsPanel({
     
     if (result?.ok) {
         toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
-        runWinRMDiagnostics();
+        await runWinRMDiagnostics();
     } else {
         toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
     }
@@ -1369,6 +1361,7 @@ export default function DeviceActionsPanel({
         }
     }
 
+    // This is the correct place for this check, after all hooks have been called.
     if (!device) return null;
 
     const Icon = ICONS[device.type] || Laptop;
