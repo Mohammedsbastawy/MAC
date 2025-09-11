@@ -388,10 +388,13 @@ def api_enable_winrm():
         # Command to enable WinRM silently
         command = 'powershell.exe -Command "winrm quickconfig -q"'
         
-        # Create the process on the remote machine
-        return_code, process_id = win32_process_class.Create(CommandLine=command)
+        # Create the process on the remote machine. The Create method returns a tuple (return_value, process_id)
+        result = win32_process_class.Create(CommandLine=command)
+        return_code = result[0]
+
 
         if return_code == 0:
+            process_id = result[1]
             logger.info(f"Successfully started process (PID: {process_id}) to enable WinRM on {ip}.")
             return jsonify({
                 "ok": True,
