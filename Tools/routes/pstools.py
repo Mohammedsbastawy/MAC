@@ -397,11 +397,12 @@ def api_enable_winrm():
 
         def run_remote_command(command_to_run):
             logger.info(f"Executing remote command on {ip}: '{command_to_run}'")
-            # The Create method returns a tuple (return_value, process_id)
-            return_code, process_id = process_class.Create(CommandLine=f"cmd.exe /c {command_to_run}")
+            # Correctly call the Create method and unpack the tuple
+            result_tuple = process_class.Create(CommandLine=f"cmd.exe /c {command_to_run}")
+            return_code = result_tuple[0]
             
             if return_code == 0:
-                logger.info(f"Command '{command_to_run}' executed with PID: {process_id}. Success (Code 0).")
+                logger.info(f"Command '{command_to_run}' executed. Success (Code 0).")
                 return True, ""
             else:
                 error_map = {
@@ -471,4 +472,5 @@ def api_enable_winrm():
 
 
     
+
 
