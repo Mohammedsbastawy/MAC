@@ -28,6 +28,7 @@ export type ADComputer = {
   last_logon: string;
   created: string;
   domain?: string;
+  dn: string; // Add distinguishedName
 };
 
 export type ADUser = {

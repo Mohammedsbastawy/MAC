@@ -81,7 +81,7 @@ type ScanErrorState = {
 }
 
 const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
-    id: adComputer.dns_hostname || adComputer.name,
+    id: adComputer.dn, // Use the guaranteed unique Distinguished Name
     name: adComputer.name,
     ipAddress: adComputer.dns_hostname,
     macAddress: "-",
@@ -398,7 +398,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
   const allDevices = [...domainDevices, ...workgroupDevices];
   // Create a unique ID for each device for the key prop
-  const getUniqueKey = (device: Device) => `${device.source}-${device.id}`;
+  const getUniqueKey = (device: Device) => device.id;
 
 
   const renderContent = () => {

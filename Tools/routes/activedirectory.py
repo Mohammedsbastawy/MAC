@@ -103,7 +103,7 @@ def _get_ad_computers_data():
         user_domain = session.get("domain", "Unknown")
         
         search_filter = "(objectCategory=computer)"
-        attributes = ["name", "dNSHostName", "operatingSystem", "lastLogonTimestamp", "whenCreated"]
+        attributes = ["name", "dNSHostName", "operatingSystem", "lastLogonTimestamp", "whenCreated", "distinguishedName"]
         
         logger.info(f"Searching AD with base DN '{base_dn}' and filter '{search_filter}'.")
         conn.search(search_base=base_dn,
@@ -143,7 +143,8 @@ def _get_ad_computers_data():
                 "os": str(entry.operatingSystem.value) if entry.operatingSystem.value else "",
                 "last_logon": format_datetime(last_logon_dt),
                 "created": format_datetime(entry.whenCreated.value),
-                "domain": user_domain
+                "domain": user_domain,
+                "dn": str(entry.distinguishedName.value) if entry.distinguishedName.value else ""
             })
         
         logger.info(f"Found {len(computers_list)} computer objects in AD.")
