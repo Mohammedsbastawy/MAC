@@ -301,12 +301,13 @@ def api_psbrowse():
              clean_path = "C:\\"
 
 
-        # Construct the PowerShell command
+        # Construct the PowerShell command.
         # Force is used to get hidden/system items. ErrorAction SilentlyContinue ignores permission errors on individual files.
         ps_command = f"Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | Select-Object Name, FullName, Length, LastWriteTime, Mode | ConvertTo-Json -Compress"
-        full_cmd = f"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"{ps_command}\""
         
-        cmd_args = ["cmd", "/c", full_cmd]
+        # Use powershell.exe directly as the command for psexec. This is more reliable for capturing output.
+        cmd_args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command]
+
         rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, suppress_errors=True)
         
         structured_data = None
@@ -314,36 +315,52 @@ def api_psbrowse():
             try:
                 # The output from ConvertTo-Json might be a single object or an array of objects
                 # It might also be prefixed with unwanted text from psexec banner
-                json_start_index = out.find('[')
-                json_end_index = out.rfind(']')
-                if json_start_index == -1 or json_end_index == -1:
-                    # Maybe it's a single object
-                    json_start_index = out.find('{')
-                    json_end_index = out.rfind('}')
+                # We find the first occurrence of '{' or '[' to locate the start of JSON.
+                json_start_index = -1
+                first_bracket = out.find('[')
+                first_curly = out.find('{')
 
-                if json_start_index != -1 and json_end_index != -1:
-                    json_str = out[json_start_index : json_end_index + 1]
+                if first_bracket != -1 and (first_curly == -1 or first_bracket < first_curly):
+                    json_start_index = first_bracket
+                elif first_curly != -1:
+                    json_start_index = first_curly
+
+                if json_start_index != -1:
+                    json_str = out[json_start_index:]
                     parsed_json = json.loads(json_str)
+                    
+                    # Ensure the result is always an array
                     if not isinstance(parsed_json, list):
                         parsed_json = [parsed_json]
                     structured_data = {"psbrowse": parsed_json}
                 else:
-                    # If we can't find valid json, treat it as an error
-                    logger.warning(f"psbrowse output for path '{clean_path}' did not contain valid JSON. Output: {out}")
-                    err += f"\nCould not find valid JSON in output. The directory '{clean_path}' may be empty or inaccessible."
-                
+                    # If we can't find valid json, treat it as an error condition for the UI
+                    # But it could also just be an empty directory, which is not an error.
+                    # The command successfully ran (rc==0), so we return an empty list.
+                    logger.warning(f"psbrowse for path '{clean_path}' returned empty. Output: {out}")
+                    structured_data = {"psbrowse": []}
+                    if not err:
+                        err = f"Could not find valid JSON in output. The directory '{clean_path}' may be empty or inaccessible."
+
             except json.JSONDecodeError:
                 logger.error(f"Failed to parse JSON from psbrowse output. Output was: {out}")
                 err = f"Failed to parse command output as JSON. {err}"
                 rc = 1 # Mark as failed if JSON parsing fails
-        elif rc !=0:
+        
+        elif rc != 0:
              logger.error(f"psbrowse command failed for path '{clean_path}'. RC={rc}. Stderr: {err}")
         
+        # If the command ran but produced no stdout and no error, it's likely an empty dir.
+        elif rc == 0 and not out.strip():
+            structured_data = {"psbrowse": []}
+
     except Exception as e:
         logger.error(f"psbrowse on {ip} for path '{path}' failed with exception: {e}", exc_info=True)
         return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
 
     # Special handling to return raw output in 'out' for frontend and parsed data in 'structured_data'
     return json_result(rc, out, err, structured_data)
+
+    
 
     

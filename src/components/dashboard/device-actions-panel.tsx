@@ -770,8 +770,8 @@ const CommandOutputDialog: React.FC<{
                     />
                 }
 
-                {/* Raw output for non-structured data (hacker theme) */}
-                {(!hasStructuredData) && (
+                {/* Raw output for non-structured data (hacker theme) or if there's an error */}
+                {(!hasStructuredData || state.error) && (
                     <>
                     {state.output && (
                         <div>
@@ -799,8 +799,9 @@ const CommandOutputDialog: React.FC<{
                     </>
                 )}
 
+
                 {/* Raw output for structured data (collapsible) */}
-                {hasStructuredData && state.output && (
+                {hasStructuredData && state.output && !state.error && (
                     <details className="mt-4">
                         <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
                         <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />
@@ -1072,3 +1073,5 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    
