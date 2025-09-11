@@ -335,6 +335,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
 
     try {
         const domainHostnames = new Set(domainDevices.map(d => d.name.toLowerCase()));
+        const domainIps = new Set(domainDevices.map(d => d.ipAddress).filter(Boolean));
 
         const res = await fetch("/api/discover-devices", { 
             method: "POST",
@@ -357,7 +358,11 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
         }
         
         const discoveredButNotDomain = data.devices
-            .filter((d: any) => !domainHostnames.has(d.hostname.toLowerCase()))
+            .filter((d: any) => {
+                const hostnameLower = d.hostname.toLowerCase();
+                // Filter out if hostname or IP is already in the domain list
+                return !domainHostnames.has(hostnameLower) && !domainIps.has(d.ip);
+            })
             .map((d: any) => ({
                 id: d.mac || d.ip,
                 name: d.hostname === "Unknown" ? d.ip : d.hostname,
