@@ -43,7 +43,9 @@ import {
   Skull,
   Search,
   Zap,
-  Folder
+  Folder,
+  ChevronLeft,
+  Home,
 } from "lucide-react";
 import {
   Sheet,
@@ -162,6 +164,16 @@ type PsLogListData = {
     message: string;
 };
 
+// Type for a single file/folder item from PsBrowse
+type PsBrowseItem = {
+    Name: string;
+    FullName: string;
+    Length: number | null;
+    LastWriteTime: string;
+    Mode: string; // e.g., 'd-----', 'a----'
+};
+
+
 type DialogState = {
     isOpen: boolean;
     title: string;
@@ -175,7 +187,7 @@ type DialogState = {
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
-        psbrowse?: any | null; // Add psbrowse to structured data
+        psbrowse?: PsBrowseItem[] | null;
     } | null;
 }
 
@@ -637,32 +649,68 @@ const PsLogListResult: React.FC<{ data: PsLogListData[] }> = ({ data }) => {
     );
 }
 
-const PsBrowseResult: React.FC<{ data: any[] }> = ({ data }) => (
+const PsBrowseResult: React.FC<{
+    data: PsBrowseItem[];
+    currentPath: string;
+    onNavigate: (path: string) => void;
+}> = ({ data, currentPath, onNavigate }) => {
+    
+    const navigateTo = (item: PsBrowseItem) => {
+        if (item.Mode.startsWith('d')) { // It's a directory
+            onNavigate(item.FullName);
+        }
+    };
+
+    const navigateUp = () => {
+        // Avoid going up from the root (e.g., C:\)
+        if (currentPath.length <= 3) return;
+        const parentPath = currentPath.substring(0, currentPath.lastIndexOf('\\')) || `${currentPath.substring(0,2)}\\`;
+        onNavigate(parentPath);
+    };
+
+    const folders = data.filter(item => item.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
+    const files = data.filter(item => !item.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
+    const sortedData = [...folders, ...files];
+
+    return (
     <Card>
         <CardHeader>
             <CardTitle className="flex items-center text-lg">
                 <Folder className="mr-2 h-5 w-5" /> File Browser
             </CardTitle>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2">
+                 <Button variant="ghost" size="icon" onClick={navigateUp} disabled={currentPath.length <= 3} className="h-8 w-8">
+                    <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => onNavigate("C:\\")} className="h-8 w-8">
+                    <Home className="h-4 w-4" />
+                </Button>
+                <code className="bg-muted px-2 py-1 rounded-md">{currentPath}</code>
+            </div>
         </CardHeader>
         <CardContent>
             <Table>
                 <TableHeader>
                     <TableRow>
                         <TableHead>Name</TableHead>
-                        <TableHead>Type</TableHead>
                         <TableHead className="text-right">Size</TableHead>
                         <TableHead>Last Modified</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {data.map((item, index) => (
-                        <TableRow key={index}>
+                    {sortedData.map((item, index) => (
+                        <TableRow 
+                            key={item.FullName || index} 
+                            onClick={() => navigateTo(item)}
+                            className={cn(item.Mode.startsWith('d') && 'cursor-pointer')}
+                        >
                             <TableCell className="font-medium flex items-center gap-2">
                                 {item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
                                 {item.Name}
                             </TableCell>
-                            <TableCell>{item.Mode.startsWith('d') ? 'Directory' : 'File'}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{item.Length ? `${(item.Length / 1024).toFixed(2)} KB` : ''}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                                {item.Length !== null && !item.Mode.startsWith('d') ? `${(item.Length / 1024).toFixed(2)} KB` : ''}
+                            </TableCell>
                             <TableCell className="font-mono text-xs">{new Date(parseInt(item.LastWriteTime.substr(6))).toLocaleString()}</TableCell>
                         </TableRow>
                     ))}
@@ -670,15 +718,19 @@ const PsBrowseResult: React.FC<{ data: any[] }> = ({ data }) => (
             </Table>
         </CardContent>
     </Card>
-);
+    )
+};
+
 
 const CommandOutputDialog: React.FC<{
     state: DialogState;
     onClose: () => void;
-    onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void,
-    onServiceInfo?: (service: PsServiceData) => void,
-    onProcessKill?: (processId: string) => void,
-}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill }) => {
+    onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void;
+    onServiceInfo?: (service: PsServiceData) => void;
+    onProcessKill?: (processId: string) => void;
+    onBrowseNavigate?: (path: string) => void;
+    browsePath?: string;
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseNavigate, browsePath }) => {
     
     const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist || state.structuredData?.psbrowse;
 
@@ -710,7 +762,13 @@ const CommandOutputDialog: React.FC<{
                     />
                 }
                 {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
-                {state.structuredData?.psbrowse && <PsBrowseResult data={state.structuredData.psbrowse} />}
+                {state.structuredData?.psbrowse && onBrowseNavigate && browsePath &&
+                    <PsBrowseResult 
+                        data={state.structuredData.psbrowse}
+                        currentPath={browsePath}
+                        onNavigate={onBrowseNavigate}
+                    />
+                }
 
                 {/* Raw output for non-structured data (hacker theme) */}
                 {(!hasStructuredData) && (
@@ -807,6 +865,7 @@ export default function DeviceActionsPanel({
       structuredData: null,
   });
   const [serviceInfo, setServiceInfo] = React.useState<PsServiceData | null>(null);
+  const [browsePath, setBrowsePath] = React.useState("C:\\");
 
 
   if (!device) return null;
@@ -816,9 +875,18 @@ export default function DeviceActionsPanel({
   const handlePstoolAction = async (tool: string, extraParams: Record<string, any> = {}, showToast = true) => {
       if (!user || !device) return;
 
-      if(showToast) {
+      const isBrowse = tool === 'psbrowse';
+
+      if(showToast && !isBrowse) {
         toast({ title: "Sending Command...", description: `Running ${tool} on ${device.name}` });
       }
+
+      // For psbrowse, use the state for the path
+      if(isBrowse) {
+        extraParams.path = extraParams.path || browsePath;
+        setBrowsePath(extraParams.path);
+      }
+
 
       try {
           const response = await fetch(`/api/pstools/${tool.replace('api/','')}`, {
@@ -830,6 +898,10 @@ export default function DeviceActionsPanel({
               }),
           });
           const result = await response.json();
+
+          if (!response.ok && !result.stderr) {
+              result.stderr = `The server returned an error (HTTP ${response.status}) but did not provide specific details. Check the backend logs.`;
+          }
 
           // If the action was a service control, we might want to refresh the list
           if (tool === 'psservice' && extraParams.action !== 'query') {
@@ -916,7 +988,10 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Actions</h4>
               <div className="grid grid-cols-1 gap-2">
-                <ActionButton icon={Folder} label="Browse Files" onClick={() => handlePstoolAction('psbrowse')} />
+                <ActionButton icon={Folder} label="Browse Files" onClick={() => {
+                    setBrowsePath("C:\\");
+                    handlePstoolAction('psbrowse', { path: "C:\\"});
+                }} />
                 <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />
                 <ActionButton icon={Users} label="Logged On Users" onClick={() => handlePstoolAction('psloggedon')} />
@@ -987,6 +1062,8 @@ export default function DeviceActionsPanel({
         onServiceAction={(serviceName, action) => handlePstoolAction('psservice', { action, svc: serviceName }, true)}
         onServiceInfo={(service) => setServiceInfo(service)}
         onProcessKill={(processId) => handlePstoolAction('pskill', { proc: processId })}
+        onBrowseNavigate={(path) => handlePstoolAction('psbrowse', { path }, false)}
+        browsePath={browsePath}
     />
      <ServiceInfoDialog 
         service={serviceInfo}
@@ -995,7 +1072,3 @@ export default function DeviceActionsPanel({
     </>
   );
 }
-
-    
-
-    

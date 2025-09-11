@@ -8,7 +8,21 @@ from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, par
 from Tools.utils.logger import logger
 
 def json_result(rc, out, err, structured_data=None):
-    return jsonify({"rc": rc, "stdout": out, "stderr": err, "eula_required": False, "structured_data": structured_data})
+    # Ensure stdout is serializable, handle potential JSON in stdout for psbrowse
+    final_stdout = out
+    if isinstance(out, (dict, list)):
+        try:
+            final_stdout = json.dumps(out)
+        except TypeError:
+            final_stdout = str(out) # fallback to string representation
+    
+    return jsonify({
+        "rc": rc, 
+        "stdout": final_stdout, 
+        "stderr": err, 
+        "eula_required": False, 
+        "structured_data": structured_data
+    })
 
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
@@ -270,42 +284,66 @@ def api_psping():
 @pstools_bp.route('/psbrowse', methods=['POST'])
 def api_psbrowse():
     data = request.get_json() or {}
-    ip, path = data.get("ip", ""), data.get("path", "C:\\")
+    ip = data.get("ip", "")
+    path = data.get("path", "C:\\")
     user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     logger.info(f"Executing file browse on {ip} for path: '{path}'")
 
     try:
-        # Sanitize path to prevent command injection
-        # Basic sanitation: remove quotes and disallow traversal beyond the root
+        # Basic sanitation: remove quotes and disallow traversal beyond a root drive
         clean_path = path.replace("'", "").replace('"', '')
         if ".." in clean_path:
+            logger.warning(f"Path traversal attempt blocked for path: '{path}'")
             return json_result(1, "", "Path traversal is not allowed.")
+        if not re.match(r"^[a-zA-Z]:\\", clean_path):
+             logger.warning(f"Invalid root path specified: '{path}'")
+             # Fallback to C: drive if path is suspicious
+             clean_path = "C:\\"
+
 
         # Construct the PowerShell command
-        ps_command = f"Get-ChildItem -Path '{clean_path}' | Select-Object Name, FullName, Length, LastWriteTime, Mode | ConvertTo-Json -Compress"
+        # Force is used to get hidden/system items. ErrorAction SilentlyContinue ignores permission errors on individual files.
+        ps_command = f"Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | Select-Object Name, FullName, Length, LastWriteTime, Mode | ConvertTo-Json -Compress"
         full_cmd = f"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"{ps_command}\""
         
         cmd_args = ["cmd", "/c", full_cmd]
-        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
+        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, suppress_errors=True)
         
         structured_data = None
         if rc == 0 and out.strip():
             try:
                 # The output from ConvertTo-Json might be a single object or an array of objects
-                parsed_json = json.loads(out)
-                # Ensure it's always a list for consistent frontend handling
-                if not isinstance(parsed_json, list):
-                    parsed_json = [parsed_json]
-                structured_data = {"psbrowse": parsed_json}
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from psbrowse output: {e}. Output was: {out}")
+                # It might also be prefixed with unwanted text from psexec banner
+                json_start_index = out.find('[')
+                json_end_index = out.rfind(']')
+                if json_start_index == -1 or json_end_index == -1:
+                    # Maybe it's a single object
+                    json_start_index = out.find('{')
+                    json_end_index = out.rfind('}')
+
+                if json_start_index != -1 and json_end_index != -1:
+                    json_str = out[json_start_index : json_end_index + 1]
+                    parsed_json = json.loads(json_str)
+                    if not isinstance(parsed_json, list):
+                        parsed_json = [parsed_json]
+                    structured_data = {"psbrowse": parsed_json}
+                else:
+                    # If we can't find valid json, treat it as an error
+                    logger.warning(f"psbrowse output for path '{clean_path}' did not contain valid JSON. Output: {out}")
+                    err += f"\nCould not find valid JSON in output. The directory '{clean_path}' may be empty or inaccessible."
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse JSON from psbrowse output. Output was: {out}")
                 err = f"Failed to parse command output as JSON. {err}"
                 rc = 1 # Mark as failed if JSON parsing fails
+        elif rc !=0:
+             logger.error(f"psbrowse command failed for path '{clean_path}'. RC={rc}. Stderr: {err}")
         
     except Exception as e:
-        logger.error(f"psbrowse on {ip} failed with exception: {e}", exc_info=True)
+        logger.error(f"psbrowse on {ip} for path '{path}' failed with exception: {e}", exc_info=True)
         return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
 
+    # Special handling to return raw output in 'out' for frontend and parsed data in 'structured_data'
     return json_result(rc, out, err, structured_data)
 
     
