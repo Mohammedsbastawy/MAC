@@ -9,7 +9,7 @@ from collections import deque
 log_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'atlas-tools.log'))
 
 # --- Formatter ---
-log_formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
+log_formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s.%(funcName)s: %(message)s')
 
 # --- In-Memory Handler ---
 class FormattedMemoryHandler(logging.Handler):
@@ -40,7 +40,7 @@ console_handler.setFormatter(log_formatter)
 # This is the central logger for the entire application.
 # Other modules should get this logger by name: logging.getLogger('Tools')
 logger = logging.getLogger('Tools')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 # Avoid adding handlers if they already exist (important in Flask's hot-reload environment)
 if not logger.handlers:

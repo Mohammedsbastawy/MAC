@@ -84,6 +84,9 @@ def run_winrm_command(host, user, password, script, timeout=60):
         logger.error("The 'pywinrm' library is not installed. Please run 'pip install pywinrm'.")
         return 1, "", "The pywinrm library is not installed on the server."
         
+    logger.info(f"Initiating WinRM connection to {host} for user {user}.")
+    logger.debug(f"WinRM script to be executed on {host}: {script}")
+
     try:
         session = winrm.Session(
             f"http://{host}:5985/wsman",
@@ -99,12 +102,13 @@ def run_winrm_command(host, user, password, script, timeout=60):
         stdout = result.std_out.decode('utf-8', errors='ignore') if result.std_out else ""
         stderr = result.std_err.decode('utf-8', errors='ignore') if result.std_err else ""
 
-        if result.status_code != 0:
+        if result.status_code == 0:
+            logger.info(f"WinRM command on {host} executed successfully with RC=0.")
+        else:
             err_msg = stderr or f"WinRM command failed with non-zero status code: {result.status_code}"
             logger.error(f"WinRM command failed on {host} with RC={result.status_code}. Stderr: {err_msg}")
-            return result.status_code, stdout, err_msg
         
-        return 0, stdout, stderr
+        return result.status_code, stdout, stderr
 
     except WinRMOperationTimeoutError:
         err_msg = f"Connection timed out. The host {host} did not respond within {timeout} seconds. Check firewall and WinRM service."
