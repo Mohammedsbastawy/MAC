@@ -905,6 +905,8 @@ export default function DeviceActionsPanel({
   const [winrmStatus, setWinrmStatus] = React.useState<WinRMStatus>('checking');
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
 
+  // This function is now memoized with useCallback to avoid re-creating it on every render.
+  // It checks the WinRM status for the *currently selected* device.
   const checkWinRMStatus = React.useCallback(async () => {
     if (!device || !user) return;
     setWinrmStatus('checking');
@@ -925,11 +927,14 @@ export default function DeviceActionsPanel({
     }
   }, [device, user]);
 
+  // This effect hook runs ONLY when the panel is opened for a specific device.
+  // It ensures the WinRM check is performed on-demand.
   React.useEffect(() => {
+    // Only run the check if the panel is open and the device is online.
     if (isOpen && device?.status === 'online') {
         checkWinRMStatus();
     } else if (device?.status !== 'online') {
-        setWinrmStatus('error'); // Can't check if offline
+        setWinrmStatus('error'); // Can't check if the device is offline.
     }
   }, [isOpen, device, checkWinRMStatus]);
 
@@ -1230,5 +1235,6 @@ export default function DeviceActionsPanel({
     
 
     
+
 
 
