@@ -327,6 +327,7 @@ def api_psbrowse():
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
     
     structured_data = None
+    logger.info(f"WinRM command for psbrowse completed with RC={rc}")
     if rc == 0:
         if out.strip():
             try:
@@ -353,8 +354,8 @@ def api_psbrowse():
 @pstools_bp.route('/enable-winrm', methods=['POST'])
 def api_enable_winrm():
     """
-    Remotely enables WinRM on a target machine using PsExec.
-    This is a powerful command that configures the service and firewall.
+    Remotely enables WinRM on a target machine using WMI.
+    This is faster and more reliable than the PsExec method.
     """
     data = request.get_json() or {}
     ip = data.get("ip")
@@ -366,38 +367,82 @@ def api_enable_winrm():
     if not all([user, domain, pwd]):
         return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
 
-    logger.info(f"Attempting to enable WinRM on {ip} using PsExec.")
+    logger.info(f"Attempting to enable WinRM on {ip} using WMI.")
 
-    # The command to silently enable WinRM and configure the firewall.
-    # We use powershell.exe -Command to ensure it runs correctly.
-    winrm_command = 'powershell.exe -Command "winrm quickconfig -q -force"'
+    try:
+        import win32com.client
 
-    # We need to pass this command to psexec.
-    # The arguments for run_ps_command are tool_name, ip, user, domain, pwd, and extra_args.
-    # extra_args should be the command to execute.
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, [winrm_command], timeout=120)
+        # Connect to the WMI service on the remote machine
+        connection_string = f"winmgmts:{{impersonationLevel=impersonate}}!\\\\{ip}\\root\\cimv2"
+        logger.debug(f"WMI connection string: {connection_string}")
 
-    if rc == 0:
-        logger.info(f"Successfully sent WinRM enable command to {ip}. Output: {out}")
-        return jsonify({
-            "ok": True,
-            "message": "WinRM enable command sent successfully. It may take a moment to apply."
-        })
-    else:
-        logger.error(f"Failed to enable WinRM on {ip}. RC: {rc}, Error: {err}")
+        wmi_service = win32com.client.Dispatch("WbemScripting.SWbemLocator").ConnectServer(
+            ip, "root\\cimv2", f"{domain}\\{user}", pwd
+        )
+        logger.info(f"Successfully connected to WMI on {ip}.")
+
+        # Get the Win32_Process class
+        win32_process = wmi_service.Get("Win32_Process")
+        
+        # Command to enable WinRM silently
+        command = 'powershell.exe -Command "winrm quickconfig -q -force"'
+        
+        # Create the process on the remote machine
+        result = win32_process.Create(command)
+        
+        return_code = result[0]
+        process_id = result[1]
+
+        if return_code == 0:
+            logger.info(f"Successfully started process (PID: {process_id}) to enable WinRM on {ip}.")
+            return jsonify({
+                "ok": True,
+                "message": "WinRM enable command sent successfully via WMI. It may take a moment to apply."
+            })
+        else:
+            error_map = {
+                2: "Access Denied",
+                3: "Insufficient Privilege",
+                8: "Unknown failure",
+                9: "Path Not Found",
+                21: "Invalid Parameter",
+            }
+            error_message = error_map.get(return_code, f"WMI error code: {return_code}")
+            logger.error(f"Failed to create WMI process on {ip}. Return code: {return_code} ({error_message})")
+            return jsonify({
+                "ok": False,
+                "error": "Failed to enable WinRM via WMI.",
+                "details": f"Could not create remote process. WMI returned error: {error_message} ({return_code}). This is often a permissions issue."
+            }), 500
+
+    except Exception as e:
+        # This will catch pywintypes.com_error for auth failures or connection issues
+        error_details = str(e)
+        logger.error(f"Failed to enable WinRM on {ip} via WMI. Exception: {error_details}", exc_info=True)
+        
+        # Provide more user-friendly messages for common errors
+        if "The RPC server is unavailable" in error_details:
+            details_message = "The RPC server is unavailable. This usually means the target computer is offline, behind a firewall, or the WMI service is not running."
+        elif "Access is denied" in error_details:
+            details_message = "Access is denied. Please ensure the provided credentials have administrative rights on the target machine."
+        else:
+            details_message = f"An unexpected error occurred: {error_details}"
+
         return jsonify({
             "ok": False,
-            "error": "Failed to enable WinRM.",
-            "details": err or out
+            "error": "Failed to enable WinRM via WMI.",
+            "details": details_message
         }), 500
-    
 
     
 
+    
+
 
 
 
     
+
 
 
 
