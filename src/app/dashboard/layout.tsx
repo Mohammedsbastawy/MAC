@@ -39,36 +39,36 @@ const AppSidebar = () => {
                 <SidebarGroup>
                    <SidebarMenu>
                         <SidebarMenuItem>
-                            <Link href="/dashboard/devices">
-                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/devices')} onClick={closeSidebar}>
+                            <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/devices')} onClick={closeSidebar}>
+                                <Link href="/dashboard/devices">
                                     <Globe />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Network Devices</span>
-                                </SidebarMenuButton>
-                            </Link>
+                                </Link>
+                            </SidebarMenuButton>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
-                             <Link href="/dashboard/ad">
-                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/ad')} onClick={closeSidebar}>
+                            <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/ad')} onClick={closeSidebar}>
+                                 <Link href="/dashboard/ad">
                                     <Users />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Active Directory</span>
-                                </SidebarMenuButton>
-                            </Link>
+                                </Link>
+                            </SidebarMenuButton>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
-                            <Link href="/dashboard/logs">
-                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/logs')} onClick={closeSidebar}>
+                            <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/logs')} onClick={closeSidebar}>
+                                <Link href="/dashboard/logs">
                                     <NotebookText />
                                     <span className={cn(state === 'collapsed' && "hidden")}>System Logs</span>
-                                </SidebarMenuButton>
-                            </Link>
+                                </Link>
+                            </SidebarMenuButton>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
-                            <Link href="/dashboard/help">
-                                <SidebarMenuButton isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
+                             <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
+                                <Link href="/dashboard/help">
                                     <HelpCircle />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Help & Prerequisites</span>
-                                </SidebarMenuButton>
-                            </Link>
+                                </Link>
+                            </SidebarMenuButton>
                         </SidebarMenuItem>
                    </SidebarMenu>
                 </SidebarGroup>
