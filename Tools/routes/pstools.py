@@ -61,15 +61,11 @@ def api_psexec():
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     
     logger.info(f"Executing psexec on {ip} with command: '{cmd}'")
-    try:
-        if not cmd:
-            logger.warning(f"psexec request for {ip} failed: Command is required.")
-            return json_result(2, "", "Command is required")
-        cmd_args = ["cmd", "/c", cmd]
-        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
-    except Exception as e:
-        logger.error(f"psexec on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    if not cmd:
+        logger.warning(f"psexec request for {ip} failed: Command is required.")
+        return json_result(2, "", "Command is required")
+    cmd_args = ["cmd", "/c", cmd]
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     return json_result(rc, out, err)
 
 
@@ -86,29 +82,26 @@ def api_psservice():
     logger.info(f"Executing psservice on {ip} with action: '{action}' for service: '{svc or 'all'}'")
     if not svc and action != "query":
         return json_result(2, "", "Service name is required for start/stop/restart")
-    try:
-        if action == "restart":
-            logger.info(f"Attempting to restart service '{svc}' on {ip}.")
-            rc1, out1, err1 = run_ps_command("psservice", ip, user, domain, pwd, ["stop", svc], timeout=60)
-            rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, ["start", svc], timeout=60)
-            out = f"--- STOP ATTEMPT ---\n{out1}\n\n--- START ATTEMPT ---\n{out}"
-            err = f"--- STOP ATTEMPT ---\n{err1}\n\n--- START ATTEMPT ---\n{err}"
+    
+    if action == "restart":
+        logger.info(f"Attempting to restart service '{svc}' on {ip}.")
+        rc1, out1, err1 = run_ps_command("psservice", ip, user, domain, pwd, ["stop", svc], timeout=60)
+        rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, ["start", svc], timeout=60)
+        out = f"--- STOP ATTEMPT ---\n{out1}\n\n--- START ATTEMPT ---\n{out}"
+        err = f"--- STOP ATTEMPT ---\n{err1}\n\n--- START ATTEMPT ---\n{err}"
+        structured_data = None
+    elif action in ("start", "stop"):
+            final_args = [action, svc]
+            rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, final_args, timeout=60)
             structured_data = None
-        elif action in ("start", "stop"):
-             final_args = [action, svc]
-             rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, final_args, timeout=60)
-             structured_data = None
-        elif action == "query":
-            final_args = [action] + ([svc] if svc else [])
-            rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, final_args, timeout=120)
-            structured_data = None
-            if rc == 0 and out:
-                structured_data = parse_psservice_output(out)
-        else:
-            return json_result(2, "", "Invalid action")
-    except Exception as e:
-        logger.error(f"psservice on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    elif action == "query":
+        final_args = [action] + ([svc] if svc else [])
+        rc, out, err = run_ps_command("psservice", ip, user, domain, pwd, final_args, timeout=120)
+        structured_data = None
+        if rc == 0 and out:
+            structured_data = parse_psservice_output(out)
+    else:
+        return json_result(2, "", "Invalid action")
     
     return json_result(rc, out, err, structured_data)
 
@@ -121,11 +114,7 @@ def api_pslist():
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing pslist on {ip}.")
-    try:
-        rc, out, err = run_ps_command("pslist", ip, user, domain, pwd, ["-x"], timeout=120)
-    except Exception as e:
-        logger.error(f"pslist on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("pslist", ip, user, domain, pwd, ["-x"], timeout=120)
 
     structured_data = None
     if rc == 0 and out:
@@ -143,11 +132,7 @@ def api_pskill():
     logger.info(f"Executing pskill on {ip} for process: '{proc}'.")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
-    try:
-        rc, out, err = run_ps_command("pskill", ip, user, domain, pwd, [proc], timeout=60)
-    except Exception as e:
-        logger.error(f"pskill on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("pskill", ip, user, domain, pwd, [proc], timeout=60)
     return json_result(rc, out, err)
 
 
@@ -159,11 +144,7 @@ def api_psloglist():
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psloglist on {ip} for log type: '{kind}'.")
-    try:
-        rc, out, err = run_ps_command("psloglist", ip, user, domain, pwd, ["-d", "1", kind], timeout=120)
-    except Exception as e:
-        logger.error(f"psloglist on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("psloglist", ip, user, domain, pwd, ["-d", "1", kind], timeout=120)
 
     structured_data = None
     if rc == 0 and out:
@@ -180,11 +161,7 @@ def api_psinfo():
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psinfo on {ip}.")
-    try:
-        rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
-    except Exception as e:
-        logger.error(f"psinfo on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
     
     structured_data = None
     if rc == 0 and out:
@@ -200,11 +177,7 @@ def api_psloggedon():
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psloggedon on {ip}.")
-    try:
-        rc, out, err = run_ps_command("psloggedon", ip, user, domain, pwd, [], timeout=60)
-    except Exception as e:
-        logger.error(f"psloggedon on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("psloggedon", ip, user, domain, pwd, [], timeout=60)
 
     structured_data = None
     if rc == 0 and out:
@@ -228,11 +201,7 @@ def api_psshutdown():
     if action in ["restart", "shutdown"]:
         args.append("-f")
 
-    try:
-        rc, out, err = run_ps_command("psshutdown", ip, user, domain, pwd, args, timeout=60)
-    except Exception as e:
-        logger.error(f"psshutdown on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("psshutdown", ip, user, domain, pwd, args, timeout=60)
     return json_result(rc, out, err)
 
 @pstools_bp.route('/psfile', methods=['POST'])
@@ -243,11 +212,7 @@ def api_psfile():
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psfile on {ip}.")
-    try:
-        rc, out, err = run_ps_command("psfile", ip, user, domain, pwd, [], timeout=60)
-    except Exception as e:
-        logger.error(f"psfile on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("psfile", ip, user, domain, pwd, [], timeout=60)
     
     structured_data = None
     if rc == 0 and out:
@@ -263,11 +228,7 @@ def api_psgetsid():
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psgetsid on {ip}.")
-    try:
-        rc, out, err = run_ps_command("psgetsid", ip, user, domain, pwd, [], timeout=60)
-    except Exception as e:
-        logger.error(f"psgetsid on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("psgetsid", ip, user, domain, pwd, [], timeout=60)
     return json_result(rc, out, err)
 
 @pstools_bp.route('/pspasswd', methods=['POST'])
@@ -281,11 +242,7 @@ def api_pspasswd():
     logger.info(f"Executing pspasswd on {ip} for user '{target_user}'.")
     if not target_user or not new_pass:
         return json_result(2, "", "Target user and new password are required")
-    try:
-        rc, out, err = run_ps_command("pspasswd", ip, user, domain, pwd, [target_user, new_pass], timeout=60)
-    except Exception as e:
-        logger.error(f"pspasswd on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("pspasswd", ip, user, domain, pwd, [target_user, new_pass], timeout=60)
     return json_result(rc, out, err)
 
 @pstools_bp.route('/pssuspend', methods=['POST'])
@@ -298,11 +255,7 @@ def api_pssuspend():
     logger.info(f"Executing pssuspend on {ip} for process: '{proc}'.")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
-    try:
-        rc, out, err = run_ps_command("pssuspend", ip, user, domain, pwd, [proc], timeout=60)
-    except Exception as e:
-        logger.error(f"pssuspend on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+    rc, out, err = run_ps_command("pssuspend", ip, user, domain, pwd, [proc], timeout=60)
     return json_result(rc, out, err)
 
 @pstools_bp.route('/psping', methods=['POST'])
@@ -310,20 +263,17 @@ def api_psping():
     data = request.get_json() or {}
     ip, extra = data.get('ip',''), data.get('extra','')
     logger.info(f"Executing psping on {ip} with extra args: '{extra}'.")
-    try:
-        base_path = get_tools_path("PsPing.exe")
-        args = [base_path] 
-        if extra:
-            args += extra.split(' ')
-        
-        if ip and not any(is_valid_ip(arg) for arg in args):
-            args.append(ip)
+    
+    base_path = get_tools_path("PsPing.exe")
+    args = [base_path] 
+    if extra:
+        args += extra.split(' ')
+    
+    if ip and not any(is_valid_ip(arg) for arg in args):
+        args.append(ip)
 
-        rc, out, err = run_ps_command("psping", ip=None, extra_args=args, timeout=120)
+    rc, out, err = run_ps_command("psping", ip=None, extra_args=args, timeout=120)
 
-    except Exception as e:
-        logger.error(f"psping on {ip} failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
 
 @pstools_bp.route('/psbrowse', methods=['POST'])
@@ -338,83 +288,79 @@ def api_psbrowse():
 
     logger.info(f"Executing file browse on {ip} for path: '{path or 'drives'}'")
 
-    try:
-        if path and path != "drives": # Browsing a directory
-            # Basic sanitation: remove quotes and disallow traversal beyond a root drive
-            clean_path = path.replace("'", "").replace('"', '')
-            if ".." in clean_path:
-                logger.warning(f"Path traversal attempt blocked for path: '{path}'")
-                return json_result(1, "", "Path traversal is not allowed.")
-            if not re.match(r"^[a-zA-Z]:\\", clean_path) and not re.match(r"^[a-zA-Z]:\\.*", clean_path):
-                logger.warning(f"Invalid path specified: '{path}'")
-                return json_result(1, "", "Invalid path format.")
-            
-            ps_command = f"""
-            Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | 
-            Select-Object Name, FullName, Length, @{{Name='LastWriteTime';Expression={{$_.LastWriteTime.ToUniversalTime().ToString('o')}}}}, @{{Name='Mode';Expression={{$_.Mode.ToString()}}}} | 
-            ConvertTo-Json -Compress
-            """
-        else: # Getting drives
-             ps_command = """
-            Get-PSDrive -PSProvider FileSystem | ForEach-Object {
-                [PSCustomObject]@{
-                    Name          = $_.Name;
-                    FullName      = $_.Root;
-                    Length        = $null;
-                    LastWriteTime = (Get-Date 0).ToUniversalTime().ToString('o');
-                    Mode          = 'd-----';
-                }
-            } | ConvertTo-Json -Compress
-            """
+    
+    if path and path != "drives": # Browsing a directory
+        # Basic sanitation: remove quotes and disallow traversal beyond a root drive
+        clean_path = path.replace("'", "").replace('"', '')
+        if ".." in clean_path:
+            logger.warning(f"Path traversal attempt blocked for path: '{path}'")
+            return json_result(1, "", "Path traversal is not allowed.")
+        if not re.match(r"^[a-zA-Z]:\\", clean_path) and not re.match(r"^[a-zA-Z]:\\.*", clean_path):
+            logger.warning(f"Invalid path specified: '{path}'")
+            return json_result(1, "", "Invalid path format.")
         
-        cmd_args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command]
-        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, suppress_errors=True)
-        
-        structured_data = None
-        # Only attempt to parse JSON if the command was successful
-        if rc == 0:
-            if out.strip():
-                try:
-                    json_start_index = -1
-                    first_bracket = out.find('[')
-                    first_curly = out.find('{')
+        ps_command = f"""
+        Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | 
+        Select-Object Name, FullName, Length, @{{Name='LastWriteTime';Expression={{$_.LastWriteTime.ToUniversalTime().ToString('o')}}}}, @{{Name='Mode';Expression={{$_.Mode.ToString()}}}} | 
+        ConvertTo-Json -Compress
+        """
+    else: # Getting drives
+            ps_command = """
+        Get-PSDrive -PSProvider FileSystem | ForEach-Object {
+            [PSCustomObject]@{
+                Name          = $_.Name;
+                FullName      = $_.Root;
+                Length        = $null;
+                LastWriteTime = (Get-Date 0).ToUniversalTime().ToString('o');
+                Mode          = 'd-----';
+            }
+        } | ConvertTo-Json -Compress
+        """
+    
+    cmd_args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command]
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, suppress_errors=True)
+    
+    structured_data = None
+    # Only attempt to parse JSON if the command was successful
+    if rc == 0:
+        if out.strip():
+            try:
+                json_start_index = -1
+                first_bracket = out.find('[')
+                first_curly = out.find('{')
 
-                    if first_bracket != -1 and (first_curly == -1 or first_bracket < first_curly):
-                        json_start_index = first_bracket
-                    elif first_curly != -1:
-                        json_start_index = first_curly
+                if first_bracket != -1 and (first_curly == -1 or first_bracket < first_curly):
+                    json_start_index = first_bracket
+                elif first_curly != -1:
+                    json_start_index = first_curly
 
-                    if json_start_index != -1:
-                        json_str = out[json_start_index:]
-                        # Handle case where ps_command returns a single object not in an array
-                        if not json_str.strip().startswith('['):
-                             json_str = f"[{json_str}]"
-                        
-                        parsed_json = json.loads(json_str)
-                        
-                        if not isinstance(parsed_json, list):
-                            parsed_json = [parsed_json]
-                        structured_data = {"psbrowse": parsed_json}
-                    else:
-                        # Empty output is valid (e.g., empty directory)
-                        structured_data = {"psbrowse": []}
+                if json_start_index != -1:
+                    json_str = out[json_start_index:]
+                    # Handle case where ps_command returns a single object not in an array
+                    if not json_str.strip().startswith('['):
+                            json_str = f"[{json_str}]"
+                    
+                    parsed_json = json.loads(json_str)
+                    
+                    if not isinstance(parsed_json, list):
+                        parsed_json = [parsed_json]
+                    structured_data = {"psbrowse": parsed_json}
+                else:
+                    # Empty output is valid (e.g., empty directory)
+                    structured_data = {"psbrowse": []}
 
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse JSON from psbrowse output. Error: {e}. Output was: {out}")
-                    err = f"Failed to parse command output as JSON. Raw output might contain an error. {err}"
-                    rc = 1 # Mark as failed if JSON parsing fails
-            else: # Command succeeded but output was empty
-                structured_data = {"psbrowse": []}
-        
-        # If rc is not 0, the 'err' from run_ps_command already contains the error.
-        # We'll just pass it through to json_result.
-        elif rc != 0:
-             logger.error(f"psbrowse command failed for path '{path}'. RC={rc}. Stderr: {err}")
-        
-    except Exception as e:
-        logger.error(f"psbrowse on {ip} for path '{path}' failed with exception: {e}", exc_info=True)
-        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
-
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from psbrowse output. Error: {e}. Output was: {out}")
+                err = f"Failed to parse command output as JSON. Raw output might contain an error. {err}"
+                rc = 1 # Mark as failed if JSON parsing fails
+        else: # Command succeeded but output was empty
+            structured_data = {"psbrowse": []}
+    
+    # If rc is not 0, the 'err' from run_ps_command already contains the error.
+    # We'll just pass it through to json_result.
+    elif rc != 0:
+            logger.error(f"psbrowse command failed for path '{path}'. RC={rc}. Stderr: {err}")
+    
     return json_result(rc, out, err, structured_data)
 
     

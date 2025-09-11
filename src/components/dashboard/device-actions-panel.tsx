@@ -956,7 +956,7 @@ export default function DeviceActionsPanel({
 
 
           if (!response.ok && !result.stderr && !result.error) {
-              result.stderr = `The server returned an error (HTTP ${response.status}) but did not provide specific details. Check the backend logs.`;
+              result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details. Check the backend logs.`;
           }
           
           const finalError = result.stderr || result.error || "";
