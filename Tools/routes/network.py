@@ -276,15 +276,23 @@ def check_host_status_ping(ip):
     except Exception:
         return False
 
-def check_host_status_psinfo(ip, user, domain, pwd):
-    """Checks if a host is responsive by trying a basic psinfo command. Returns True on success."""
-    try:
-        # Correctly call run_ps_command with proper arguments
-        rc, _, _ = run_ps_command("psinfo", ip, user, domain, pwd, [], timeout=30, suppress_errors=True)
-        return rc == 0
-    except Exception as e:
-        logger.warning(f"PsInfo check for {ip} failed with exception: {e}")
-        return False
+def check_host_status_tcp_connect(ip):
+    """
+    Checks if a host is responsive by trying to connect to common Windows ports.
+    Returns True on the first successful connection.
+    """
+    # Ports: RPC (135), SMB (445), WinRM (5985), RDP (3389)
+    ports_to_check = [135, 445, 5985, 3389]
+    for port in ports_to_check:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)  # 1 second timeout for each port
+            try:
+                if s.connect_ex((ip, port)) == 0:
+                    # logger.info(f"Host {ip} is online, responded on port {port}.")
+                    return True
+            except (socket.timeout, socket.error):
+                continue
+    return False
 
 
 @network_bp.route('/api/network/check-status', methods=['POST'])
@@ -294,7 +302,6 @@ def api_check_status():
     """
     data = request.get_json() or {}
     ips = data.get("ips", [])
-    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     
     if not ips:
         return jsonify({"ok": True, "online_ips": []})
@@ -317,28 +324,28 @@ def api_check_status():
                     offline_after_ping.append(ip)
             except Exception:
                 offline_after_ping.append(ip)
-    logger.info(f"Ping sweep complete. {len(online_by_ping)} hosts online, {len(offline_after_ping)} to check with PsInfo.")
+    logger.info(f"Ping sweep complete. {len(online_by_ping)} hosts online, {len(offline_after_ping)} to check with Port Scan.")
 
-    online_by_psinfo = set()
-    # Step 2: For hosts that failed ping, try PsInfo
+    online_by_ports = set()
+    # Step 2: For hosts that failed ping, try a fast TCP Port Scan
     if offline_after_ping:
-        logger.info("Starting Phase 2: PsInfo check for offline hosts.")
-        with ThreadPoolExecutor(max_workers=20, thread_name_prefix="psinfo_worker") as executor:
+        logger.info("Starting Phase 2: TCP Port Scan for offline hosts.")
+        with ThreadPoolExecutor(max_workers=50, thread_name_prefix="port_scan_worker") as executor:
             future_to_ip = {
-                executor.submit(check_host_status_psinfo, ip, user, domain, pwd): ip
+                executor.submit(check_host_status_tcp_connect, ip): ip
                 for ip in offline_after_ping
             }
             for future in as_completed(future_to_ip):
                 ip = future_to_ip[future]
                 try:
                     if future.result():
-                        online_by_psinfo.add(ip)
+                        online_by_ports.add(ip)
                 except Exception:
                     pass
-        logger.info(f"PsInfo check complete. Found {len(online_by_psinfo)} additional hosts online.")
+        logger.info(f"Port Scan check complete. Found {len(online_by_ports)} additional hosts online.")
     
     # Step 3: Combine results
-    final_online_ips = list(online_by_ping.union(online_by_psinfo))
+    final_online_ips = list(online_by_ping.union(online_by_ports))
     logger.info(f"Total online hosts: {len(final_online_ips)}. Sending response.")
     
     return jsonify({"ok": True, "online_ips": final_online_ips})
@@ -368,34 +375,33 @@ def api_check_status_ping():
     return jsonify({"ok": True, "online_ips": list(online_by_ping)})
 
 
-@network_bp.route('/api/network/check-status-psinfo', methods=['POST'])
-def api_check_status_psinfo():
-    """Checks online status for a list of IPs using only PsInfo."""
+@network_bp.route('/api/network/check-status-ports', methods=['POST'])
+def api_check_status_ports():
+    """Checks online status for a list of IPs using only a fast TCP port scan."""
     data = request.get_json() or {}
     ips = data.get("ips", [])
-    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
     
     if not ips:
         return jsonify({"ok": True, "online_ips": []})
 
-    logger.info(f"Starting PsInfo-Only check for {len(ips)} hosts.")
-    online_by_psinfo = set()
+    logger.info(f"Starting Port-Scan-Only check for {len(ips)} hosts.")
+    online_by_ports = set()
     
-    with ThreadPoolExecutor(max_workers=20, thread_name_prefix="psinfo_worker") as executor:
+    with ThreadPoolExecutor(max_workers=50, thread_name_prefix="port_scan_worker") as executor:
         future_to_ip = {
-            executor.submit(check_host_status_psinfo, ip, user, domain, pwd): ip
+            executor.submit(check_host_status_tcp_connect, ip): ip
             for ip in ips
         }
         for future in as_completed(future_to_ip):
             ip = future_to_ip[future]
             try:
                 if future.result():
-                    online_by_psinfo.add(ip)
+                    online_by_ports.add(ip)
             except Exception:
                 pass
 
-    logger.info(f"PsInfo-Only check complete. Found {len(online_by_psinfo)} additional hosts online.")
-    return jsonify({"ok": True, "online_ips": list(online_by_psinfo)})
+    logger.info(f"Port-Scan-Only check complete. Found {len(online_by_ports)} hosts online.")
+    return jsonify({"ok": True, "online_ips": list(online_by_ports)})
 
 
 @network_bp.route('/api/network/check-winrm', methods=['POST'])

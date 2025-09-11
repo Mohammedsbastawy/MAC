@@ -267,8 +267,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           if (!pingData.ok) throw new Error(pingData.error || "Ping scan failed on the server.");
           onlineIps = new Set<string>(pingData.online_ips);
           
-          const ipsForPsInfo = ipsToCheck.filter(ip => !onlineIps.has(ip));
-          toast({ title: "Ping Scan Complete", description: `Found ${onlineIps.size} devices. Now checking ${ipsForPsInfo.length} more.` });
+          const ipsForPortScan = ipsToCheck.filter(ip => !onlineIps.has(ip));
+          toast({ title: "Ping Scan Complete", description: `Found ${onlineIps.size} devices. Now checking ${ipsForPortScan.length} more.` });
 
           // Update UI immediately after ping scan
           updateDeviceLists(d => {
@@ -279,31 +279,31 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               };
           });
 
-          // --- Phase 2: PsInfo Scan ---
-          if (ipsForPsInfo.length > 0) {
-              const psinfoRes = await fetch("/api/network/check-status-psinfo", {
+          // --- Phase 2: Port Scan ---
+          if (ipsForPortScan.length > 0) {
+              const portScanRes = await fetch("/api/network/check-status-ports", {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ ips: ipsForPsInfo })
+                  body: JSON.stringify({ ips: ipsForPortScan })
               });
               
-              let psinfoData;
+              let portScanData;
               try {
-                  psinfoData = await psinfoRes.json();
+                  portScanData = await portScanRes.json();
               } catch(e) {
-                 const resClone = psinfoRes.clone();
+                 const resClone = portScanRes.clone();
                  try {
                     const textError = await resClone.text();
-                    throw new Error(`Received an invalid response from the server during PsInfo scan. Details: ${textError}`);
+                    throw new Error(`Received an invalid response from the server during Port scan. Details: ${textError}`);
                  } catch {
-                    throw new Error("Received an invalid and unreadable response from the server during PsInfo scan.");
+                    throw new Error("Received an invalid and unreadable response from the server during Port scan.");
                  }
               }
               
-              if (!psinfoData.ok) throw new Error(psinfoData.error || "PsInfo scan failed on the server.");
+              if (!portScanData.ok) throw new Error(portScanData.error || "Port scan failed on the server.");
               
               // Add new online IPs to the existing set
-              psinfoData.online_ips.forEach((ip: string) => onlineIps.add(ip));
+              portScanData.online_ips.forEach((ip: string) => onlineIps.add(ip));
               toast({ title: "Status Refresh Complete", description: `Total online: ${onlineIps.size}.` });
           } else {
               toast({ title: "Status Refresh Complete", description: "All responsive devices found by ping." });
