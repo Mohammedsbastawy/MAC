@@ -71,6 +71,57 @@ def get_tools_path(exe_name: str) -> str:
     # If not found, return the expected path, allowing subprocess to fail with a clear "not found" error.
     return candidate
 
+def run_winrm_command(host, user, password, script, timeout=60):
+    """
+    Executes a PowerShell script on a remote host using pywinrm.
+    Returns (return_code, stdout, stderr).
+    """
+    try:
+        import winrm
+    except ImportError:
+        logger.error("The 'pywinrm' library is not installed. Please run 'pip install pywinrm'.")
+        return 1, "", "pywinrm library not installed on the server."
+        
+    try:
+        protocol = winrm.Protocol(
+            endpoint=f"http://{host}:5985/wsman",
+            transport='ntlm',
+            username=user,
+            password=password,
+            server_cert_validation='ignore',
+            read_timeout_sec=timeout,
+            operation_timeout_sec=timeout + 20
+        )
+        
+        result = protocol.run_ps(script)
+        
+        stdout = result.std_out.decode('utf-8', errors='ignore') if result.std_out else ""
+        stderr = result.std_err.decode('utf-8', errors='ignore') if result.std_err else ""
+
+        if result.status_code != 0:
+             # Try to provide a more specific error message
+            if "401" in stderr:
+                 err_msg = "Authentication failed (401). Check username and password."
+            elif "timed out" in stderr.lower():
+                err_msg = "Connection timed out. Check firewall and WinRM service on the target."
+            else:
+                 err_msg = stderr or "WinRM command failed with an unknown error."
+            logger.error(f"WinRM command failed on {host} with RC={result.status_code}. Stderr: {err_msg}")
+            return result.status_code, stdout, err_msg
+
+        return 0, stdout, stderr
+
+    except Exception as e:
+        error_str = str(e)
+        if "WinRMTransportError" in error_str:
+            err_msg = f"Connection Error: Could not connect to {host}. Ensure WinRM is enabled and the firewall allows port 5985."
+        elif "HttpUnauthorizedError" in error_str or "500" in error_str:
+            err_msg = "Authentication failed. Please verify the credentials and permissions for remote management."
+        else:
+            err_msg = f"An unexpected WinRM error occurred: {error_str}"
+        logger.error(f"Exception during WinRM execution on {host}: {err_msg}")
+        return 1, "", err_msg
+
 def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90, suppress_errors=False):
     """
     A centralized function to build and run any PsTools command.

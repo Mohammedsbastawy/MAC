@@ -4,7 +4,7 @@ import re
 import subprocess
 import json
 from flask import Blueprint, request, jsonify, current_app, session
-from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psloggedon_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output
+from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psloggedon_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, run_winrm_command
 from Tools.utils.logger import logger
 
 def json_result(rc, out, err, structured_data=None):
@@ -41,7 +41,15 @@ def get_auth_from_request(data):
     user = data.get("username") or session.get("user")
     domain = data.get("domain") or session.get("domain")
     pwd = data.get("pwd") or session.get("password")
-    return user, domain, pwd
+    
+    # For WinRM, we need user@domain format.
+    # If a UPN is provided (e.g. from session), use it. Otherwise construct it.
+    if '@' in user:
+        winrm_user = user
+    else:
+        winrm_user = f"{user}@{domain}"
+        
+    return user, domain, pwd, winrm_user
 
 @pstools_bp.before_request
 def require_login():
@@ -55,7 +63,7 @@ def require_login():
 def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
@@ -73,7 +81,7 @@ def api_psexec():
 def api_psservice():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     svc, action = data.get("svc",""), data.get("action","query")
 
     if not all([user, domain, pwd]):
@@ -110,7 +118,7 @@ def api_psservice():
 def api_pslist():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing pslist on {ip}.")
@@ -126,7 +134,7 @@ def api_pslist():
 def api_pskill():
     data = request.get_json() or {}
     ip, proc = data.get("ip",""), data.get("proc","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing pskill on {ip} for process: '{proc}'.")
@@ -140,7 +148,7 @@ def api_pskill():
 def api_psloglist():
     data = request.get_json() or {}
     ip, kind = data.get("ip",""), data.get("kind","system")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psloglist on {ip} for log type: '{kind}'.")
@@ -157,7 +165,7 @@ def api_psloglist():
 def api_psinfo():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psinfo on {ip}.")
@@ -173,7 +181,7 @@ def api_psinfo():
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psloggedon on {ip}.")
@@ -189,7 +197,7 @@ def api_psloggedon():
 def api_psshutdown():
     data = request.get_json() or {}
     ip, action = data.get("ip",""), data.get("action","restart")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     flag = {"restart": "-r", "shutdown": "-s", "logoff": "-l"}.get(action)
@@ -208,7 +216,7 @@ def api_psshutdown():
 def api_psfile():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psfile on {ip}.")
@@ -224,7 +232,7 @@ def api_psfile():
 def api_psgetsid():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing psgetsid on {ip}.")
@@ -235,7 +243,7 @@ def api_psgetsid():
 def api_pspasswd():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     target_user, new_pass = data.get("targetUser",""), data.get("newpass","")
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
@@ -249,7 +257,7 @@ def api_pspasswd():
 def api_pssuspend():
     data = request.get_json() or {}
     ip, proc = data.get("ip",""), data.get("proc","")
-    user, domain, pwd = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
     if not all([user, domain, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
     logger.info(f"Executing pssuspend on {ip} for process: '{proc}'.")
@@ -281,13 +289,12 @@ def api_psbrowse():
     data = request.get_json() or {}
     ip = data.get("ip", "")
     path = data.get("path", "") # An empty path will signal to get drives
-    user, domain, pwd = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_request(data)
 
-    if not all([user, domain, pwd]):
+    if not all([ip, winrm_user, pwd]):
          return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
 
-    logger.info(f"Executing file browse on {ip} for path: '{path or 'drives'}'")
-
+    logger.info(f"Executing file browse (WinRM) on {ip} for path: '{path or 'drives'}'")
     
     if path and path != "drives": # Browsing a directory
         # Basic sanitation: remove quotes and disallow traversal beyond a root drive
@@ -305,7 +312,7 @@ def api_psbrowse():
         ConvertTo-Json -Compress
         """
     else: # Getting drives
-            ps_command = """
+        ps_command = """
         Get-PSDrive -PSProvider FileSystem | ForEach-Object {
             [PSCustomObject]@{
                 Name          = $_.Name;
@@ -317,49 +324,29 @@ def api_psbrowse():
         } | ConvertTo-Json -Compress
         """
     
-    cmd_args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command]
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, suppress_errors=True)
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
     
     structured_data = None
-    # Only attempt to parse JSON if the command was successful
     if rc == 0:
         if out.strip():
             try:
-                json_start_index = -1
-                first_bracket = out.find('[')
-                first_curly = out.find('{')
-
-                if first_bracket != -1 and (first_curly == -1 or first_bracket < first_curly):
-                    json_start_index = first_bracket
-                elif first_curly != -1:
-                    json_start_index = first_curly
-
-                if json_start_index != -1:
-                    json_str = out[json_start_index:]
-                    # Handle case where ps_command returns a single object not in an array
-                    if not json_str.strip().startswith('['):
-                            json_str = f"[{json_str}]"
-                    
-                    parsed_json = json.loads(json_str)
-                    
-                    if not isinstance(parsed_json, list):
-                        parsed_json = [parsed_json]
-                    structured_data = {"psbrowse": parsed_json}
-                else:
-                    # Empty output is valid (e.g., empty directory)
-                    structured_data = {"psbrowse": []}
+                # The output from WinRM is usually clean JSON
+                parsed_json = json.loads(out)
+                
+                # Ensure it's always a list for consistency
+                if not isinstance(parsed_json, list):
+                    parsed_json = [parsed_json]
+                structured_data = {"psbrowse": parsed_json}
 
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from psbrowse output. Error: {e}. Output was: {out}")
+                logger.error(f"Failed to parse JSON from WinRM output. Error: {e}. Output was: {out}")
                 err = f"Failed to parse command output as JSON. Raw output might contain an error. {err}"
                 rc = 1 # Mark as failed if JSON parsing fails
-        else: # Command succeeded but output was empty
+        else: # Command succeeded but output was empty (e.g. empty folder)
             structured_data = {"psbrowse": []}
     
-    # If rc is not 0, the 'err' from run_ps_command already contains the error.
-    # We'll just pass it through to json_result.
     elif rc != 0:
-            logger.error(f"psbrowse command failed for path '{path}'. RC={rc}. Stderr: {err}")
+        logger.error(f"WinRM command failed for path '{path}'. RC={rc}. Stderr: {err}")
     
     return json_result(rc, out, err, structured_data)
 
@@ -371,3 +358,4 @@ def api_psbrowse():
 
 
     
+
