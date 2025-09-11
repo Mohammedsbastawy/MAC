@@ -93,7 +93,7 @@ def run_winrm_command(host, user, password, script, timeout=60):
             read_timeout_sec=timeout + 5
         )
         
-        result = protocol.run_ps(script)
+        result = protocol.run_power_shell_script(script)
         
         stdout = result.std_out.decode('utf-8', errors='ignore') if result.std_out else ""
         stderr = result.std_err.decode('utf-8', errors='ignore') if result.std_err else ""
@@ -370,6 +370,8 @@ def parse_psloglist_output(output):
         if all(k in event_data for k in ['record_num', 'source', 'type', 'time', 'id', 'computer', 'user', 'message']):
             events.append(event_data)
     return {"psloglist": events} if events else None
+
+    
 
     
 
