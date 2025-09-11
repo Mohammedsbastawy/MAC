@@ -89,8 +89,8 @@ def run_winrm_command(host, user, password, script, timeout=60):
             username=user,
             password=password,
             server_cert_validation='ignore',
-            read_timeout_sec=timeout,
-            operation_timeout_sec=timeout + 20
+            operation_timeout_sec=timeout,
+            read_timeout_sec=timeout + 5
         )
         
         result = protocol.run_ps(script)
