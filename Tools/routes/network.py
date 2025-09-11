@@ -9,7 +9,7 @@ import time
 import json
 from flask import Blueprint, request, jsonify, session
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_psinfo_output, get_hostname_from_ip, get_mac_address
+from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_psinfo_output, get_hostname_from_ip, get_mac_address, run_winrm_command
 from .activedirectory import _get_ad_computers_data
 from Tools.utils.logger import logger
 
@@ -397,3 +397,29 @@ def api_check_status_psinfo():
     logger.info(f"PsInfo-Only check complete. Found {len(online_by_psinfo)} additional hosts online.")
     return jsonify({"ok": True, "online_ips": list(online_by_psinfo)})
 
+
+@network_bp.route('/api/network/check-winrm', methods=['POST'])
+def api_check_winrm():
+    """Checks if WinRM is enabled and accessible on a target host."""
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    if not ip:
+        return jsonify({"ok": False, "error": "IP address is required."}), 400
+
+    user = session.get("user")
+    domain = session.get("domain")
+    pwd = session.get("password")
+    
+    if '@' in user:
+        winrm_user = user
+    else:
+        winrm_user = f"{user}@{domain}"
+
+    # Use a short timeout for this check
+    rc, _, err = run_winrm_command(ip, winrm_user, pwd, "hostname", timeout=10)
+
+    if rc == 0:
+        return jsonify({"ok": True, "winrm_status": "enabled"})
+    else:
+        # We can be more specific if we want, but for now, any error means it's not ready.
+        return jsonify({"ok": True, "winrm_status": "disabled", "details": err})

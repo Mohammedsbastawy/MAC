@@ -350,6 +350,46 @@ def api_psbrowse():
     
     return json_result(rc, out, err, structured_data)
 
+@pstools_bp.route('/enable-winrm', methods=['POST'])
+def api_enable_winrm():
+    """
+    Remotely enables WinRM on a target machine using PsExec.
+    This is a powerful command that configures the service and firewall.
+    """
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    if not ip:
+        return jsonify({"ok": False, "error": "IP address is required."}), 400
+
+    user, domain, pwd, _ = get_auth_from_request(data)
+
+    if not all([user, domain, pwd]):
+        return jsonify({'ok': False, 'rc': 401, 'error': 'Authentication required. Please log in.'}), 401
+
+    logger.info(f"Attempting to enable WinRM on {ip} using PsExec.")
+
+    # The command to silently enable WinRM and configure the firewall.
+    # We use powershell.exe -Command to ensure it runs correctly.
+    winrm_command = 'powershell.exe -Command "winrm quickconfig -q -force"'
+
+    # We need to pass this command to psexec.
+    # The arguments for run_ps_command are tool_name, ip, user, domain, pwd, and extra_args.
+    # extra_args should be the command to execute.
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, [winrm_command], timeout=120)
+
+    if rc == 0:
+        logger.info(f"Successfully sent WinRM enable command to {ip}. Output: {out}")
+        return jsonify({
+            "ok": True,
+            "message": "WinRM enable command sent successfully. It may take a moment to apply."
+        })
+    else:
+        logger.error(f"Failed to enable WinRM on {ip}. RC: {rc}, Error: {err}")
+        return jsonify({
+            "ok": False,
+            "error": "Failed to enable WinRM.",
+            "details": err or out
+        }), 500
     
 
     
@@ -358,4 +398,5 @@ def api_psbrowse():
 
 
     
+
 

@@ -48,6 +48,8 @@ import {
   ChevronLeft,
   Home,
   Database,
+  Lightbulb,
+  Loader2,
 } from "lucide-react";
 import {
   Sheet,
@@ -192,6 +194,8 @@ type DialogState = {
         psbrowse?: PsBrowseItem[] | null;
     } | null;
 }
+
+type WinRMStatus = 'checking' | 'enabled' | 'disabled' | 'error';
 
 const ActionButton: React.FC<{
     icon: React.ElementType,
@@ -898,6 +902,63 @@ export default function DeviceActionsPanel({
   });
   const [serviceInfo, setServiceInfo] = React.useState<PsServiceData | null>(null);
   const [browsePath, setBrowsePath] = React.useState("drives");
+  const [winrmStatus, setWinrmStatus] = React.useState<WinRMStatus>('checking');
+  const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
+
+  const checkWinRMStatus = React.useCallback(async () => {
+    if (!device || !user) return;
+    setWinrmStatus('checking');
+    try {
+        const res = await fetch('/api/network/check-winrm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: device.ipAddress })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            setWinrmStatus(data.winrm_status);
+        } else {
+            setWinrmStatus('error');
+        }
+    } catch (e) {
+        setWinrmStatus('error');
+    }
+  }, [device, user]);
+
+  React.useEffect(() => {
+    if (isOpen && device?.status === 'online') {
+        checkWinRMStatus();
+    } else if (device?.status !== 'online') {
+        setWinrmStatus('error'); // Can't check if offline
+    }
+  }, [isOpen, device, checkWinRMStatus]);
+
+  const handleEnableWinRM = async () => {
+    if (!device) return;
+    setIsEnablingWinRM(true);
+    toast({ title: "Attempting to Enable WinRM...", description: `Sending command to ${device.name}. This might take a moment.` });
+    try {
+        const res = await fetch('/api/pstools/enable-winrm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: device.ipAddress }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+            toast({ title: "Command Sent Successfully", description: "WinRM is being enabled. Checking status again in 10 seconds..." });
+            // Wait a bit for the service to start, then re-check
+            setTimeout(() => {
+                checkWinRMStatus();
+            }, 10000);
+        } else {
+             toast({ variant: "destructive", title: "Failed to Enable WinRM", description: data.details || data.error });
+        }
+    } catch (e) {
+         toast({ variant: "destructive", title: "Client Error", description: "Could not send request to the server." });
+    } finally {
+        setIsEnablingWinRM(false);
+    }
+  };
 
 
   if (!device) return null;
@@ -1016,15 +1077,49 @@ export default function DeviceActionsPanel({
           <div className="px-6 pb-6 space-y-4">
             <div className="space-y-2">
               <h4 className="font-semibold text-foreground">Device Status</h4>
-              <div className="flex items-center">
-                <div className={cn(
-                    "h-2.5 w-2.5 rounded-full mr-2",
-                    device.status === 'online' ? "bg-green-500" : "bg-gray-400"
-                )} />
-                <p className="text-sm text-muted-foreground capitalize">
-                  {device.status} {device.status === 'offline' && `(Last seen: ${device.lastSeen})`}
-                </p>
-              </div>
+                <div className="flex justify-between items-center text-sm">
+                    <div className="flex items-center">
+                        <div className={cn(
+                            "h-2.5 w-2.5 rounded-full mr-2",
+                            device.status === 'online' ? "bg-green-500" : "bg-gray-400"
+                        )} />
+                        <span className="text-muted-foreground capitalize">
+                          {device.status} {device.status === 'offline' && `(Last seen: ${device.lastSeen})`}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                         <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger>
+                                     <Lightbulb className={cn("h-4 w-4",
+                                        winrmStatus === 'checking' && 'text-yellow-400 animate-pulse',
+                                        winrmStatus === 'enabled' && 'text-green-500',
+                                        winrmStatus === 'disabled' && 'text-red-500',
+                                        winrmStatus === 'error' && 'text-gray-400'
+                                    )} />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {winrmStatus === 'checking' && <p>Checking WinRM status...</p>}
+                                    {winrmStatus === 'enabled' && <p>WinRM is enabled.</p>}
+                                    {winrmStatus === 'disabled' && <p>WinRM is disabled.</p>}
+                                    {winrmStatus === 'error' && <p>WinRM status is unknown (device may be offline).</p>}
+                                </TooltipContent>
+                            </Tooltip>
+                         </TooltipProvider>
+                        {winrmStatus === 'disabled' && (
+                            <Button 
+                                size="sm" 
+                                variant="destructive" 
+                                className="h-7"
+                                onClick={handleEnableWinRM}
+                                disabled={isEnablingWinRM}
+                            >
+                                {isEnablingWinRM ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3"/>}
+                                Enable WinRM
+                            </Button>
+                        )}
+                    </div>
+                </div>
             </div>
 
             <Separator />
@@ -1046,9 +1141,11 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Actions</h4>
               <div className="grid grid-cols-1 gap-2">
-                <ActionButton icon={Folder} label="Browse Files" onClick={() => {
-                    handlePstoolAction('psbrowse', { path: 'drives'});
-                }} />
+                <Button variant={"outline"} className="justify-start" onClick={() => handlePstoolAction('psbrowse', { path: 'drives'})} disabled={winrmStatus !== 'enabled'}>
+                    <Folder className="mr-2 h-4 w-4" />
+                    <span>Browse Files</span>
+                    <ChevronRight className="ml-auto h-4 w-4" />
+                </Button>
                 <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />
                 <ActionButton icon={Users} label="Logged On Users" onClick={() => handlePstoolAction('psloggedon')} />
@@ -1133,3 +1230,4 @@ export default function DeviceActionsPanel({
     
 
     
+
