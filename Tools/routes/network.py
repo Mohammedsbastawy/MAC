@@ -214,7 +214,8 @@ def get_device_info(ip):
 @network_bp.route('/api/discover-devices', methods=['POST'])
 def api_discover_devices():
     """
-    Performs a fast network discovery using Masscan.
+    Performs a fast network discovery using Masscan, then filters out
+    devices that are already known members of the Active Directory domain.
     """
     data = request.get_json() or {}
     scan_cidr = data.get("cidr")
@@ -227,17 +228,24 @@ def api_discover_devices():
     try:
         source_ip = get_source_ip_for_cidr(scan_cidr)
         router_mac = get_router_mac_address()
-        online_ips = run_masscan(scan_cidr, source_ip, router_mac)
         
+        # Get AD computer data first to use for filtering
         ad_data = _get_ad_computers_data()
         ad_hostnames = set()
+        ad_ips = set()
         if ad_data.get('ok'):
             for computer in ad_data.get('computers', []):
                 ad_hostnames.add(computer['name'].lower())
                 if computer['dns_hostname']:
+                    # Add both the FQDN and the short name
                     ad_hostnames.add(computer['dns_hostname'].lower())
-        logger.info(f"Loaded {len(ad_hostnames)} AD hostnames to filter from scan results.")
-
+                    ad_hostnames.add(computer['dns_hostname'].split('.')[0].lower())
+                    ad_ips.add(computer['dns_hostname'])
+        logger.info(f"Loaded {len(ad_hostnames)} AD hostnames and {len(ad_ips)} IPs to filter from scan results.")
+        
+        # Run the network scan
+        online_ips = run_masscan(scan_cidr, source_ip, router_mac)
+        
         online_hosts_info = []
         with ThreadPoolExecutor(max_workers=50) as executor:
             future_to_ip = {executor.submit(get_device_info, ip): ip for ip in online_ips}
@@ -245,13 +253,15 @@ def api_discover_devices():
                 try:
                     result = future.result()
                     if result:
-                      hostname = result.get('hostname', '').lower()
-                      # Filter out devices that are already in AD
-                      if hostname not in ad_hostnames and ('.' in hostname and hostname.split('.')[0] not in ad_hostnames):
+                      hostname_lower = result.get('hostname', '').lower()
+                      ip_address = result.get('ip')
+                      
+                      # Filter out devices that are already in AD by hostname or IP
+                      if ip_address not in ad_ips and hostname_lower not in ad_hostnames and ('.' in hostname_lower and hostname_lower.split('.')[0] not in ad_hostnames):
                          online_hosts_info.append(result)
-                except Exception:
-                    pass
-        
+                except Exception as e:
+                    logger.warning(f"Error processing device info future: {e}")
+
         logger.info(f"Filtered scan results to {len(online_hosts_info)} non-domain devices.")
         sorted_hosts = sorted(online_hosts_info, key=lambda x: ipaddress.ip_address(x['ip']))
         return jsonify({"ok": True, "devices": sorted_hosts})

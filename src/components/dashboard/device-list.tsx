@@ -334,9 +334,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     toast({ title: "Scan Initiated", description: `Discovering workgroup devices on ${selectedCidr}...` });
 
     try {
-        const domainHostnames = new Set(domainDevices.map(d => d.name.toLowerCase()));
-        const domainIps = new Set(domainDevices.map(d => d.ipAddress).filter(Boolean));
-
         const res = await fetch("/api/discover-devices", { 
             method: "POST",
             headers: { 'Content-Type': 'application/json' },
@@ -357,29 +354,23 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             return; 
         }
         
-        const discoveredButNotDomain = data.devices
-            .filter((d: any) => {
-                const hostnameLower = d.hostname.toLowerCase();
-                // Filter out if hostname or IP is already in the domain list
-                return !domainHostnames.has(hostnameLower) && !domainIps.has(d.ip);
-            })
-            .map((d: any) => ({
-                id: d.mac || d.ip,
-                name: d.hostname === "Unknown" ? d.ip : d.hostname,
-                ipAddress: d.ip,
-                macAddress: d.mac || "-",
-                status: 'online', // Masscan only finds online devices
-                type: determineDeviceType(d.hostname),
-                os: d.os || "Unknown OS",
-                lastSeen: 'Now',
-                domain: "WORKGROUP",
-                isDomainMember: false,
-                isLoadingDetails: false,
-                source: 'scan',
-            } as Device));
+        const discoveredDevices = data.devices.map((d: any) => ({
+            id: d.mac || d.ip,
+            name: d.hostname === "Unknown" ? d.ip : d.hostname,
+            ipAddress: d.ip,
+            macAddress: d.mac || "-",
+            status: 'online', // Masscan only finds online devices
+            type: determineDeviceType(d.hostname),
+            os: d.os || "Unknown OS",
+            lastSeen: 'Now',
+            domain: "WORKGROUP",
+            isDomainMember: false,
+            isLoadingDetails: false,
+            source: 'scan',
+        } as Device));
 
-        toast({ title: "Workgroup Scan Complete", description: `Found ${discoveredButNotDomain.length} non-domain devices.`});
-        setWorkgroupDevices(discoveredButNotDomain);
+        toast({ title: "Workgroup Scan Complete", description: `Found ${discoveredDevices.length} non-domain devices.`});
+        setWorkgroupDevices(discoveredDevices);
         setIsScanLoading(false);
 
     } catch (err: any) {
@@ -395,7 +386,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   }
 
   const renderContent = () => {
-    const onlineDomainDevices = domainDevices.filter(d => d.status === 'online').length;
     const allDevices = [...domainDevices, ...workgroupDevices];
 
     return (
