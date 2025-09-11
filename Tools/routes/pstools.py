@@ -295,15 +295,21 @@ def api_psbrowse():
         if ".." in clean_path:
             logger.warning(f"Path traversal attempt blocked for path: '{path}'")
             return json_result(1, "", "Path traversal is not allowed.")
-        if not re.match(r"^[a-zA-Z]:\\", clean_path):
-             logger.warning(f"Invalid root path specified: '{path}'")
+        if not re.match(r"^[a-zA-Z]:\\", clean_path) and not re.match(r"^[a-zA-Z]:\\.*", clean_path):
+             logger.warning(f"Invalid path specified: '{path}'")
              # Fallback to C: drive if path is suspicious
              clean_path = "C:\\"
 
 
-        # Construct the PowerShell command.
+        # Construct the PowerShell command to get details and convert to JSON.
         # Force is used to get hidden/system items. ErrorAction SilentlyContinue ignores permission errors on individual files.
-        ps_command = f"Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | Select-Object Name, FullName, Length, LastWriteTime, Mode | ConvertTo-Json -Compress"
+        # Select-Object now includes Mode to differentiate files/dirs.
+        # The custom object for LastWriteTime ensures it's in a consistent, parsable format.
+        ps_command = f"""
+        Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | 
+        Select-Object Name, FullName, Length, @{{Name='LastWriteTime';Expression={{$_.LastWriteTime.ToString('o')}}}}, @{{Name='Mode';Expression={{$_.Mode.ToString()}}}} | 
+        ConvertTo-Json -Compress
+        """
         
         # Use powershell.exe directly as the command for psexec. This is more reliable for capturing output.
         cmd_args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command]
@@ -334,10 +340,7 @@ def api_psbrowse():
                         parsed_json = [parsed_json]
                     structured_data = {"psbrowse": parsed_json}
                 else:
-                    # If we can't find valid json, treat it as an error condition for the UI
-                    # But it could also just be an empty directory, which is not an error.
-                    # The command successfully ran (rc==0), so we return an empty list.
-                    logger.warning(f"psbrowse for path '{clean_path}' returned empty. Output: {out}")
+                    logger.warning(f"psbrowse for path '{clean_path}' returned empty or non-JSON output. Output: {out}")
                     structured_data = {"psbrowse": []}
                     if not err:
                         err = f"Could not find valid JSON in output. The directory '{clean_path}' may be empty or inaccessible."

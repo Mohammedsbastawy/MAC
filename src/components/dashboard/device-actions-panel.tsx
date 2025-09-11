@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import {
@@ -672,6 +673,16 @@ const PsBrowseResult: React.FC<{
     const files = data.filter(item => !item.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
     const sortedData = [...folders, ...files];
 
+    // Attempt to parse the date string from PowerShell: /Date(1715084400000)/
+    const parsePsDate = (dateStr: string) => {
+        try {
+            const timestamp = parseInt(dateStr.substring(6));
+            return new Date(timestamp).toLocaleString();
+        } catch {
+            return dateStr; // Fallback to raw string
+        }
+    };
+
     return (
     <Card>
         <CardHeader>
@@ -702,7 +713,7 @@ const PsBrowseResult: React.FC<{
                         <TableRow 
                             key={item.FullName || index} 
                             onClick={() => navigateTo(item)}
-                            className={cn(item.Mode.startsWith('d') && 'cursor-pointer')}
+                            className={cn(item.Mode.startsWith('d') && 'cursor-pointer hover:bg-muted/50')}
                         >
                             <TableCell className="font-medium flex items-center gap-2">
                                 {item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
@@ -711,7 +722,7 @@ const PsBrowseResult: React.FC<{
                             <TableCell className="text-right font-mono text-xs">
                                 {item.Length !== null && !item.Mode.startsWith('d') ? `${(item.Length / 1024).toFixed(2)} KB` : ''}
                             </TableCell>
-                            <TableCell className="font-mono text-xs">{new Date(parseInt(item.LastWriteTime.substr(6))).toLocaleString()}</TableCell>
+                            <TableCell className="font-mono text-xs">{parsePsDate(item.LastWriteTime)}</TableCell>
                         </TableRow>
                     ))}
                 </TableBody>
