@@ -47,6 +47,7 @@ import {
   Folder,
   ChevronLeft,
   Home,
+  Database,
 } from "lucide-react";
 import {
   Sheet,
@@ -654,17 +655,24 @@ const PsBrowseResult: React.FC<{
     data: PsBrowseItem[];
     currentPath: string;
     onNavigate: (path: string) => void;
-}> = ({ data, currentPath, onNavigate }) => {
+    isDriveView: boolean;
+}> = ({ data, currentPath, onNavigate, isDriveView }) => {
     
     const navigateTo = (item: PsBrowseItem) => {
-        if (item.Mode.startsWith('d')) { // It's a directory
+        // For drives, FullName is the path to navigate to.
+        // For files/folders, FullName is also the correct path.
+        if (item.Mode.startsWith('d')) {
             onNavigate(item.FullName);
         }
     };
 
     const navigateUp = () => {
-        // Avoid going up from the root (e.g., C:\)
-        if (currentPath.length <= 3) return;
+        if (isDriveView) return; // Can't go up from drive view
+        // If current path is a root drive like C:\, go back to drive view
+        if (currentPath.match(/^[a-zA-Z]:\\?$/)) {
+             onNavigate("drives");
+             return;
+        }
         const parentPath = currentPath.substring(0, currentPath.lastIndexOf('\\')) || `${currentPath.substring(0,2)}\\`;
         onNavigate(parentPath);
     };
@@ -684,6 +692,8 @@ const PsBrowseResult: React.FC<{
     
     const formatDate = (dateString: string) => {
         try {
+            // Don't format the placeholder date for drives
+            if (dateString.startsWith('0001-01-01')) return '';
             return new Date(dateString).toLocaleString();
         } catch {
             return dateString;
@@ -698,13 +708,13 @@ const PsBrowseResult: React.FC<{
                 <Folder className="mr-2 h-5 w-5" /> File Browser
             </CardTitle>
             <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2">
-                 <Button variant="ghost" size="icon" onClick={navigateUp} disabled={currentPath.length <= 3} className="h-8 w-8">
+                 <Button variant="ghost" size="icon" onClick={navigateUp} disabled={isDriveView} className="h-8 w-8">
                     <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => onNavigate("C:\\")} className="h-8 w-8">
+                <Button variant="ghost" size="icon" onClick={() => onNavigate("drives")} className="h-8 w-8">
                     <Home className="h-4 w-4" />
                 </Button>
-                <code className="bg-muted px-2 py-1 rounded-md">{currentPath}</code>
+                <code className="bg-muted px-2 py-1 rounded-md">{isDriveView ? "Available Drives" : currentPath}</code>
             </div>
         </CardHeader>
         <CardContent>
@@ -724,8 +734,8 @@ const PsBrowseResult: React.FC<{
                             className={cn(item.Mode.startsWith('d') && 'cursor-pointer hover:bg-muted/50')}
                         >
                             <TableCell className="font-medium flex items-center gap-2">
-                                {item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
-                                {item.Name}
+                                {isDriveView ? <Database className="h-4 w-4 text-muted-foreground" /> : item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
+                                {isDriveView ? `${item.Name} (${item.FullName})` : item.Name}
                             </TableCell>
                             <TableCell className="font-mono text-xs">{formatDate(item.LastWriteTime)}</TableCell>
                             <TableCell className="text-right font-mono text-xs">
@@ -752,6 +762,7 @@ const CommandOutputDialog: React.FC<{
 }> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseNavigate, browsePath }) => {
     
     const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist || state.structuredData?.psbrowse;
+    const isDriveView = browsePath === 'drives';
 
     const isHackerTheme = !hasStructuredData;
 
@@ -786,6 +797,7 @@ const CommandOutputDialog: React.FC<{
                         data={state.structuredData.psbrowse}
                         currentPath={browsePath}
                         onNavigate={onBrowseNavigate}
+                        isDriveView={isDriveView}
                     />
                 }
 
@@ -885,7 +897,7 @@ export default function DeviceActionsPanel({
       structuredData: null,
   });
   const [serviceInfo, setServiceInfo] = React.useState<PsServiceData | null>(null);
-  const [browsePath, setBrowsePath] = React.useState("C:\\");
+  const [browsePath, setBrowsePath] = React.useState("drives");
 
 
   if (!device) return null;
@@ -903,8 +915,10 @@ export default function DeviceActionsPanel({
 
       // For psbrowse, use the state for the path
       if(isBrowse) {
-        extraParams.path = extraParams.path || browsePath;
-        setBrowsePath(extraParams.path);
+        // If the path is "drives", we send an empty path to the backend to signal it to list drives.
+        const pathToSend = extraParams.path === 'drives' ? '' : extraParams.path;
+        extraParams.path = pathToSend;
+        setBrowsePath(extraParams.path || 'drives');
       }
 
 
@@ -1027,8 +1041,7 @@ export default function DeviceActionsPanel({
               <h4 className="font-semibold text-foreground">Actions</h4>
               <div className="grid grid-cols-1 gap-2">
                 <ActionButton icon={Folder} label="Browse Files" onClick={() => {
-                    setBrowsePath("C:\\");
-                    handlePstoolAction('psbrowse', { path: "C:\\"});
+                    handlePstoolAction('psbrowse', { path: 'drives'});
                 }} />
                 <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />

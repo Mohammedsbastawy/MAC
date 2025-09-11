@@ -296,43 +296,45 @@ def api_psping():
 def api_psbrowse():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    path = data.get("path", "C:\\")
+    path = data.get("path", "") # An empty path will signal to get drives
     user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
-    logger.info(f"Executing file browse on {ip} for path: '{path}'")
+    logger.info(f"Executing file browse on {ip} for path: '{path or 'drives'}'")
 
     try:
-        # Basic sanitation: remove quotes and disallow traversal beyond a root drive
-        clean_path = path.replace("'", "").replace('"', '')
-        if ".." in clean_path:
-            logger.warning(f"Path traversal attempt blocked for path: '{path}'")
-            return json_result(1, "", "Path traversal is not allowed.")
-        if not re.match(r"^[a-zA-Z]:\\", clean_path) and not re.match(r"^[a-zA-Z]:\\.*", clean_path):
-             logger.warning(f"Invalid path specified: '{path}'")
-             # Fallback to C: drive if path is suspicious
-             clean_path = "C:\\"
-
-
-        # Construct the PowerShell command to get details and convert to JSON.
-        # Force is used to get hidden/system items. ErrorAction SilentlyContinue ignores permission errors on individual files.
-        # Select-Object now includes Mode to differentiate files/dirs.
-        # Using a custom object for LastWriteTime ensures a consistent ISO 8601 format.
-        ps_command = f"""
-        Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | 
-        Select-Object Name, FullName, Length, @{{Name='LastWriteTime';Expression={{$_.LastWriteTime.ToUniversalTime().ToString('o')}}}}, @{{Name='Mode';Expression={{$_.Mode.ToString()}}}} | 
-        ConvertTo-Json -Compress
-        """
+        if path: # Browsing a directory
+            # Basic sanitation: remove quotes and disallow traversal beyond a root drive
+            clean_path = path.replace("'", "").replace('"', '')
+            if ".." in clean_path:
+                logger.warning(f"Path traversal attempt blocked for path: '{path}'")
+                return json_result(1, "", "Path traversal is not allowed.")
+            if not re.match(r"^[a-zA-Z]:\\", clean_path) and not re.match(r"^[a-zA-Z]:\\.*", clean_path):
+                logger.warning(f"Invalid path specified: '{path}'")
+                return json_result(1, "", "Invalid path format.")
+            
+            ps_command = f"""
+            Get-ChildItem -Path '{clean_path}' -Force -ErrorAction SilentlyContinue | 
+            Select-Object Name, FullName, Length, @{{Name='LastWriteTime';Expression={{$_.LastWriteTime.ToUniversalTime().ToString('o')}}}}, @{{Name='Mode';Expression={{$_.Mode.ToString()}}}} | 
+            ConvertTo-Json -Compress
+            """
+        else: # Getting drives
+             ps_command = """
+            Get-PSDrive -PSProvider FileSystem | ForEach-Object {
+                [PSCustomObject]@{
+                    Name          = $_.Name;
+                    FullName      = $_.Root;
+                    Length        = $null;
+                    LastWriteTime = (Get-Date 0).ToUniversalTime().ToString('o');
+                    Mode          = 'd-----';
+                }
+            } | ConvertTo-Json -Compress
+            """
         
-        # Use powershell.exe directly as the command for psexec. This is more reliable for capturing output.
         cmd_args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command]
-
         rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, suppress_errors=True)
         
         structured_data = None
         if rc == 0 and out.strip():
             try:
-                # The output from ConvertTo-Json might be a single object or an array of objects
-                # It might also be prefixed with unwanted text from psexec banner
-                # We find the first occurrence of '{' or '[' to locate the start of JSON.
                 json_start_index = -1
                 first_bracket = out.find('[')
                 first_curly = out.find('{')
@@ -344,20 +346,16 @@ def api_psbrowse():
 
                 if json_start_index != -1:
                     json_str = out[json_start_index:]
-                    # PowerShell's ConvertTo-Json can produce invalid multi-line JSON for single objects
-                    # We need to ensure it's a valid array.
                     if not json_str.strip().startswith('['):
                         json_str = f"[{json_str}]"
                     
                     parsed_json = json.loads(json_str)
                     
-                    # Ensure the result is always an array
                     if not isinstance(parsed_json, list):
                         parsed_json = [parsed_json]
                     structured_data = {"psbrowse": parsed_json}
                 else:
-                    # This case handles an empty directory, which is a success condition
-                    logger.info(f"psbrowse for path '{clean_path}' returned empty output, likely an empty directory.")
+                    logger.info(f"psbrowse for path '{path}' returned empty output, likely an empty directory.")
                     structured_data = {"psbrowse": []}
 
             except json.JSONDecodeError as e:
@@ -366,9 +364,8 @@ def api_psbrowse():
                 rc = 1 # Mark as failed if JSON parsing fails
         
         elif rc != 0:
-             logger.error(f"psbrowse command failed for path '{clean_path}'. RC={rc}. Stderr: {err}")
+             logger.error(f"psbrowse command failed for path '{path}'. RC={rc}. Stderr: {err}")
         
-        # If the command ran but produced no stdout and no error, it's likely an empty dir.
         elif rc == 0 and not out.strip():
             structured_data = {"psbrowse": []}
 
@@ -381,4 +378,5 @@ def api_psbrowse():
     
 
     
+
 
