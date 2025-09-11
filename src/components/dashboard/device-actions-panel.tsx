@@ -136,16 +136,16 @@ type PsInfoData = {
     }[];
 }
 
-type PsListProcess = {
-    name: string;
-    pid: string;
-    pri: string;
-    thd: string;
-    hnd: string;
-    priv: string;
-    cpu_time: string;
-    elapsed_time: string;
-}
+type WinRMProcess = {
+    Name: string;
+    Id: number;
+    Priority: string;
+    Threads: number;
+    Handles: number;
+    Memory: string;
+    CPUTime: string;
+    ElapsedTime: string;
+};
 
 type PsLoggedOnUser = {
     time: string;
@@ -196,7 +196,7 @@ type DialogState = {
     error: string;
     structuredData?: {
         psinfo?: PsInfoData | null;
-        pslist?: PsListProcess[] | null;
+        pslist?: WinRMProcess[] | null;
         psloggedon?: PsLoggedOnUser[] | null;
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
@@ -284,10 +284,10 @@ const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
 )
 
 
-const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string) => void }> = ({ data, onKill }) => {
+const PsListResult: React.FC<{ data: WinRMProcess[], onKill: (processId: number) => void }> = ({ data, onKill }) => {
     const [searchTerm, setSearchTerm] = React.useState('');
-    type SortKey = keyof PsListProcess;
-    const [sortKey, setSortKey] = React.useState<SortKey>('name');
+    type SortKey = keyof WinRMProcess;
+    const [sortKey, setSortKey] = React.useState<SortKey>('Name');
     const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc');
 
     const handleSort = (key: SortKey) => {
@@ -300,7 +300,7 @@ const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string
     };
     
     const filteredData = React.useMemo(() => {
-        return data.filter(proc => proc.name.toLowerCase().includes(searchTerm.toLowerCase()));
+        return data.filter(proc => proc.Name.toLowerCase().includes(searchTerm.toLowerCase()));
     }, [data, searchTerm]);
 
     const sortedData = React.useMemo(() => {
@@ -309,17 +309,17 @@ const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string
             const valB = b[sortKey];
 
             // Handle numeric sorting for relevant fields
-            if (['pid', 'pri', 'thd', 'hnd', 'priv'].includes(sortKey)) {
-                 const numA = parseFloat(valA);
-                 const numB = parseFloat(valB);
+            if (['Id', 'Threads', 'Handles'].includes(sortKey)) {
+                 const numA = Number(valA);
+                 const numB = Number(valB);
                  if (numA < numB) return sortDirection === 'asc' ? -1 : 1;
                  if (numA > numB) return sortDirection === 'asc' ? 1 : -1;
                  return 0;
             }
 
             // Default string sort
-            if (valA.toLowerCase() < valB.toLowerCase()) return sortDirection === 'asc' ? -1 : 1;
-            if (valA.toLowerCase() > valB.toLowerCase()) return sortDirection === 'asc' ? 1 : -1;
+            if (String(valA).toLowerCase() < String(valB).toLowerCase()) return sortDirection === 'asc' ? -1 : 1;
+            if (String(valA).toLowerCase() > String(valB).toLowerCase()) return sortDirection === 'asc' ? 1 : -1;
             return 0;
         });
     }, [filteredData, sortKey, sortDirection]);
@@ -356,24 +356,24 @@ const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <SortableHeader sortKey="name">Name</SortableHeader>
-                                <SortableHeader sortKey="pid">PID</SortableHeader>
-                                <SortableHeader sortKey="thd">Threads</SortableHeader>
-                                <SortableHeader sortKey="hnd">Handles</SortableHeader>
-                                <SortableHeader sortKey="cpu_time">CPU Time</SortableHeader>
-                                <SortableHeader sortKey="elapsed_time">Elapsed Time</SortableHeader>
+                                <SortableHeader sortKey="Name">Name</SortableHeader>
+                                <SortableHeader sortKey="Id">PID</SortableHeader>
+                                <SortableHeader sortKey="Threads">Threads</SortableHeader>
+                                <SortableHeader sortKey="Handles">Handles</SortableHeader>
+                                <SortableHeader sortKey="Memory">Memory</SortableHeader>
+                                <SortableHeader sortKey="CPUTime">CPU Time</SortableHeader>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {sortedData.map(proc => (
-                                <TableRow key={proc.pid}>
-                                    <TableCell className="font-medium max-w-[200px] truncate" title={proc.name}>{proc.name}</TableCell>
-                                    <TableCell>{proc.pid}</TableCell>
-                                    <TableCell>{proc.thd}</TableCell>
-                                    <TableCell>{proc.hnd}</TableCell>
-                                    <TableCell className="font-mono text-xs">{proc.cpu_time}</TableCell>
-                                    <TableCell className="font-mono text-xs">{proc.elapsed_time}</TableCell>
+                                <TableRow key={proc.Id}>
+                                    <TableCell className="font-medium max-w-[200px] truncate" title={proc.Name}>{proc.Name}</TableCell>
+                                    <TableCell>{proc.Id}</TableCell>
+                                    <TableCell>{proc.Threads}</TableCell>
+                                    <TableCell>{proc.Handles}</TableCell>
+                                    <TableCell className="font-mono text-xs">{proc.Memory}</TableCell>
+                                    <TableCell className="font-mono text-xs">{proc.CPUTime}</TableCell>
                                     <TableCell className="text-right">
                                         <AlertDialog>
                                             <Tooltip>
@@ -390,12 +390,12 @@ const PsListResult: React.FC<{ data: PsListProcess[], onKill: (processId: string
                                                 <AlertDialogHeader>
                                                     <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                                                     <AlertDialogDescription>
-                                                        This will forcefully terminate the process <strong className="font-mono">{proc.name}</strong> (PID: {proc.pid}). This action cannot be undone.
+                                                        This will forcefully terminate the process <strong className="font-mono">{proc.Name}</strong> (PID: {proc.Id}). This action cannot be undone.
                                                     </AlertDialogDescription>
                                                 </AlertDialogHeader>
                                                 <AlertDialogFooter>
                                                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                    <AlertDialogAction onClick={() => onKill(proc.pid)} className="bg-destructive hover:bg-destructive/90">Kill Process</AlertDialogAction>
+                                                    <AlertDialogAction onClick={() => onKill(proc.Id)} className="bg-destructive hover:bg-destructive/90">Kill Process</AlertDialogAction>
                                                 </AlertDialogFooter>
                                             </AlertDialogContent>
                                         </AlertDialog>
@@ -678,7 +678,7 @@ const PsBrowseResult: React.FC<{
     onDownload: (path: string, filename: string) => void;
     onUpload: (path: string, file: File) => void;
     onDeleteItem: (path: string, name: string, isFolder: boolean) => void;
-    onRenameItem: (path: string, newName: string) => void;
+    onRenameItem: (path: string, oldName: string, newName: string) => void;
     onCreateFolder: (path: string, folderName: string) => void;
     isLoading: boolean;
 }> = ({ data, currentPath, onNavigate, onDownload, onUpload, onDeleteItem, onRenameItem, onCreateFolder, isLoading }) => {
@@ -752,7 +752,7 @@ const PsBrowseResult: React.FC<{
         if (!newName) return;
 
         if (actionDialog.type === 'rename' && actionDialog.item) {
-            onRenameItem(actionDialog.item.FullName, newName);
+            onRenameItem(actionDialog.item.FullName, actionDialog.item.Name, newName);
         } else if (actionDialog.type === 'create_folder') {
             onCreateFolder(currentPath, newName);
         }
@@ -904,7 +904,7 @@ const CommandOutputDialog: React.FC<{
     onClose: () => void;
     onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void;
     onServiceInfo?: (service: PsServiceData) => void;
-    onProcessKill?: (processId: string) => void;
+    onProcessKill?: (processId: number) => void;
     onBrowseAction?: (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     browsePath?: string;
 }> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseAction, browsePath }) => {
@@ -912,7 +912,8 @@ const CommandOutputDialog: React.FC<{
     const [isLoading, setIsLoading] = React.useState(false);
 
     const isBrowseView = !!state.structuredData?.psbrowse;
-    const isHackerTheme = !isBrowseView && !(state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    const isProcessView = !!state.structuredData?.pslist;
+    const isHackerTheme = !isBrowseView && !(state.structuredData?.psinfo || isProcessView || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     const handleFileAction = async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
         if (!onBrowseAction) return;
@@ -924,7 +925,7 @@ const CommandOutputDialog: React.FC<{
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            isBrowseView ? "max-w-4xl" : "max-w-4xl",
+            isBrowseView || isProcessView ? "max-w-4xl" : "max-w-2xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -936,7 +937,7 @@ const CommandOutputDialog: React.FC<{
             <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
                 {/* Structured data views */}
                 {state.structuredData?.psinfo && <PsInfoResult data={state.structuredData.psinfo} />}
-                {state.structuredData?.pslist && onProcessKill && <PsListResult data={state.structuredData.pslist} onKill={onProcessKill} />}
+                {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!} onKill={onProcessKill} />}
                 {state.structuredData?.psloggedon && <PsLoggedOnResult data={state.structuredData.psloggedon} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
@@ -956,14 +957,14 @@ const CommandOutputDialog: React.FC<{
                         onDownload={(path, filename) => handleFileAction('download', {path, filename})}
                         onUpload={(path, file) => handleFileAction('upload', {path, file})}
                         onDeleteItem={(path, name, isFolder) => handleFileAction('delete', {path, name, isFolder})}
-                        onRenameItem={(path, newName) => handleFileAction('rename', {path, newName})}
+                        onRenameItem={(path, oldName, newName) => handleFileAction('rename', {path, oldName, newName})}
                         onCreateFolder={(path, folderName) => handleFileAction('create_folder', {path, folderName})}
                     />
                 }
 
 
                 {/* Raw output for non-structured data or if there's an error */}
-                {!isBrowseView && (
+                {!isBrowseView && !isProcessView && (
                     <>
                     {(state.output && !isHackerTheme) && (
                          <details className="mt-4">
@@ -1124,7 +1125,7 @@ export default function DeviceActionsPanel({
         firewall: { status: 'checking', message: '' },
     };
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
-
+  
   const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
     if (!user || !device) return null;
 
@@ -1193,93 +1194,77 @@ export default function DeviceActionsPanel({
   }, [device, user, initialDiagnosticsState]);
 
   const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
-    
-    const modificationActions = ['upload', 'delete', 'rename', 'create_folder'];
-    const endpointMap: Record<string, string> = {
-        navigate: 'psbrowse',
-        download: 'download-file',
-        upload: 'upload-file',
-        delete: 'delete-item',
-        rename: 'rename-item',
-        create_folder: 'create-folder',
-    };
-    
-    const endpoint = endpointMap[action];
-    if (!endpoint) return;
+      const endpointMap: Record<string, string> = {
+          navigate: 'psbrowse',
+          download: 'download-file',
+          upload: 'upload-file',
+          delete: 'delete-item',
+          rename: 'rename-item',
+          create_folder: 'create-folder',
+      };
+      const endpoint = endpointMap[action];
+      if (!endpoint) return;
 
-    if (action === 'upload') {
-        const file = params.file as File;
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = async () => {
-            const base64 = reader.result?.toString().split(',')[1];
-            if (base64) {
-                const result = await runApiAction('upload-file', { destinationPath: `${params.path}\\${file.name}`, fileContent: base64 }, true);
-                if (result?.ok) {
-                    toast({ title: "Success", description: result.message || "File uploaded."});
-                    handleBrowseAction('navigate', { path: params.path });
-                } else {
-                    toast({ variant: 'destructive', title: 'Upload Failed', description: result?.error });
-                }
-            }
-        };
-        return;
-    }
-    
-    const apiParams: Record<string, any> = {};
-    if (action === 'navigate') apiParams.path = params.path;
-    if (action === 'download') apiParams.path = params.path;
-    if (action === 'delete') apiParams.path = params.path;
-    if (action === 'rename') {
-        apiParams.path = params.path;
-        apiParams.newName = params.newName;
-    }
-    if (action === 'create_folder') apiParams.path = `${params.path}\\${params.folderName}`;
+      const isModification = ['upload', 'delete', 'rename', 'create_folder'].includes(action);
 
-    const result = await runApiAction(endpoint, apiParams, !modificationActions.includes(action));
-    if (!result) return;
-    
-    if (result.ok) {
-        if (action === 'navigate') {
-            setBrowsePath(params.path);
-            setDialogState({
-                isOpen: true,
-                title: `File Browser`,
-                description: `Browsing ${params.path} on ${device?.name}`,
-                output: result.stdout || '',
-                error: result.stderr || result.error || '',
-                structuredData: result.structured_data || null,
-            });
-        } else if (action === 'download') {
-            const byteCharacters = atob(result.content);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray]);
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = params.filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(url);
-            toast({ title: "Success", description: `"${params.filename}" downloaded.`});
-        } else if (modificationActions.includes(action)) {
-            toast({ title: "Success", description: result.message || "Action completed successfully." });
-            // Refresh the current directory
-            handleBrowseAction('navigate', { path: browsePath });
-        }
-    } else {
-        toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
-        // For navigation errors, still update the dialog to show the error
-        if (action === 'navigate') {
-            setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
-        }
-    }
-  }, [runApiAction, toast, device, browsePath]);
+      let apiParams: Record<string, any> = {};
+
+      if (action === 'upload') {
+          const file = params.file as File;
+          const base64 = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.readAsDataURL(file);
+              reader.onload = () => resolve(reader.result?.toString().split(',')[1] || '');
+              reader.onerror = error => reject(error);
+          });
+          apiParams = { destinationPath: `${params.path}\\${file.name}`, fileContent: base64 };
+      } else {
+          apiParams = { ...params };
+      }
+      
+      const result = await runApiAction(endpoint, apiParams, !isModification);
+      if (!result) return;
+
+      if (result.ok) {
+           if (action === 'navigate') {
+              setBrowsePath(params.path);
+              setDialogState({
+                  isOpen: true,
+                  title: `File Browser`,
+                  description: `Browsing ${params.path} on ${device?.name}`,
+                  output: result.stdout || '',
+                  error: result.stderr || result.error || '',
+                  structuredData: result.structured_data || null,
+              });
+          } else if (action === 'download') {
+              const byteCharacters = atob(result.content);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray]);
+              const url = window.URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = params.filename;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              window.URL.revokeObjectURL(url);
+              toast({ title: "Success", description: `"${params.filename}" downloaded.`});
+          } else if (isModification) {
+              toast({ title: "Success", description: result.message || "Action completed successfully." });
+              // Refresh the current directory
+              handleBrowseAction('navigate', { path: params.path });
+          }
+      } else {
+          toast({ variant: 'destructive', title: `${action.charAt(0).toUpperCase() + action.slice(1)} Failed`, description: result.error });
+           if (action === 'navigate') {
+              setDialogState(prev => ({ ...prev, isOpen: true, error: result.error || 'An unknown error occurred.' }));
+          }
+      }
+  }, [runApiAction, toast, device]);
 
   const handleOpenDiagnostics = () => {
     setIsDiagnosticsOpen(true);
@@ -1334,10 +1319,10 @@ export default function DeviceActionsPanel({
         }
     }
 
-    const handleProcessKill = async (proc: string) => {
-        const result = await runApiAction('pskill', { proc });
+    const handleProcessKill = async (procId: number) => {
+        const result = await runApiAction('pskill', { proc: procId.toString() });
         if(result?.ok) {
-            toast({ title: 'Success', description: `Kill command sent to process ${proc}.`});
+            toast({ title: 'Success', description: `Kill command sent to process ${procId}.`});
             const refreshResult = await runApiAction('pslist', {}, false);
              if (refreshResult?.ok) {
                 setDialogState(prev => ({
@@ -1350,7 +1335,6 @@ export default function DeviceActionsPanel({
         }
     }
 
-    // This is the correct place for this check, after all hooks have been called.
     if (!device) {
         return null;
     }
@@ -1546,3 +1530,5 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    

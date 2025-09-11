@@ -106,26 +106,74 @@ def api_psservice():
 @pstools_bp.route('/pslist', methods=['POST'])
 def api_pslist():
     data = request.get_json() or {}
-    ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
-    logger.info(f"Executing pslist on {ip}.")
-    rc, out, err = run_ps_command("pslist", ip, user, domain, pwd, ["-x"], timeout=120)
+    ip = data.get("ip", "")
+    _, _, pwd, winrm_user = get_auth_from_request(data)
+
+    logger.info(f"Executing Get-Process (WinRM) on {ip}.")
+    
+    ps_command = """
+    $processes = Get-Process
+    $total_cpu_seconds = (Get-Counter '\Processor(_Total)\% Processor Time').CounterSamples[0].CookedValue
+    $output = @()
+    foreach ($proc in $processes) {
+        $cpu_time = "N/A"
+        if ($proc.CPU -and $total_cpu_seconds -gt 0) {
+            $cpu_time = "{0:N2}" -f (($proc.CPU / $total_cpu_seconds) * 100)
+        }
+        
+        $elapsed_time = "N/A"
+        if ($proc.StartTime) {
+             $ts = (Get-Date) - $proc.StartTime
+             $elapsed_time = "{0:00}:{1:00}:{2:00}" -f $ts.Hours, $ts.Minutes, $ts.Seconds
+        }
+
+        $output += [PSCustomObject]@{
+            Name          = $proc.ProcessName
+            Id            = $proc.Id
+            Priority      = $proc.PriorityClass
+            Threads       = $proc.Threads.Count
+            Handles       = $proc.HandleCount
+            Memory        = "{0:N0} K" -f ($proc.WorkingSet64 / 1kb)
+            CPUTime       = if ($proc.CPU) { "{0:N2}" -f $proc.CPU } else { "0.00" }
+            ElapsedTime   = $elapsed_time
+        }
+    }
+    $output | ConvertTo-Json -Compress
+    """
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
 
     structured_data = None
     if rc == 0 and out:
-        structured_data = parse_pslist_output(out)
-        
+        try:
+            parsed_json = json.loads(out)
+            # Ensure it's always a list
+            if isinstance(parsed_json, dict):
+                 parsed_json = [parsed_json]
+            structured_data = {"pslist": parsed_json}
+        except json.JSONDecodeError:
+            err = f"Failed to parse JSON from WinRM pslist. Raw output: {out}"
+            rc = 1
+
     return json_result(rc, out, err, structured_data)
+
 
 @pstools_bp.route('/pskill', methods=['POST'])
 def api_pskill():
     data = request.get_json() or {}
-    ip, proc = data.get("ip",""), data.get("proc","")
-    user, domain, pwd, _ = get_auth_from_request(data)
-    logger.info(f"Executing pskill on {ip} for process: '{proc}'.")
-    if not proc:
-        return json_result(2, "", "Process name or PID is required")
-    rc, out, err = run_ps_command("pskill", ip, user, domain, pwd, [proc], timeout=60)
+    ip, proc_id = data.get("ip",""), data.get("proc","")
+    _, _, pwd, winrm_user = get_auth_from_request(data)
+    
+    logger.info(f"Executing Stop-Process (WinRM) on {ip} for PID: '{proc_id}'.")
+    if not proc_id:
+        return json_result(2, "", "Process PID is required")
+        
+    try:
+        pid = int(proc_id)
+    except ValueError:
+        return json_result(2, "", "Invalid Process ID. Must be a number.")
+
+    ps_command = f"Stop-Process -Id {pid} -Force -ErrorAction Stop"
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=60)
     return json_result(rc, out, err)
 
 
@@ -388,6 +436,7 @@ def api_enable_winrm():
 
     logger.info(f"Attempting to robustly enable WinRM on {ip} using PsExec.")
 
+    # Note: Double quotes inside the command need to be escaped for the shell.
     chained_command = (
         'winrm quickconfig -q && '
         'sc config winrm start= auto && '
@@ -399,6 +448,7 @@ def api_enable_winrm():
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     
+    # Check for success messages in stdout, even if RC is non-zero (e.g. service already started)
     if rc == 0 or ("WinRM has been updated" in out and "[SC] ChangeServiceConfig SUCCESS" in out):
         logger.info(f"Successfully sent WinRM configuration commands to {ip}.")
         return jsonify({
@@ -413,3 +463,5 @@ def api_enable_winrm():
             "error": "Failed to execute remote command via PsExec.",
             "details": err or out
         }), 500
+
+    
