@@ -974,19 +974,21 @@ export default function DeviceActionsPanel({
             body: JSON.stringify({ ip: device.ipAddress })
         });
         const data = await res.json();
+        
         // This is the robust check. It handles both successful responses with error messages
         // and failed responses.
         if (data && (data.ok || data.error)) {
-            setWinrmStatus({
+             setWinrmStatus({
                 overallStatus: data.overallStatus,
                 checks: data.checks,
                 errorDetails: data.error || data.details,
             });
         } else {
-             setWinrmStatus({ overallStatus: 'error', errorDetails: data.details || data.error || "Failed to get a valid response from the server." });
+             // Fallback for completely failed requests
+             setWinrmStatus({ overallStatus: 'error', errorDetails: data.details || data.error || "An unknown error occurred while checking WinRM status." });
         }
-    } catch (e) {
-        setWinrmStatus({ overallStatus: 'error', errorDetails: "Failed to connect to the backend server." });
+    } catch (e: any) {
+        setWinrmStatus({ overallStatus: 'error', errorDetails: e.message || "Failed to connect to the backend server." });
     }
   }, [device, user]);
 
