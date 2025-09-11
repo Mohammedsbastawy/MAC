@@ -1192,106 +1192,101 @@ export default function DeviceActionsPanel({
   }, [device, user, initialDiagnosticsState]);
 
   const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
-    let endpoint = '';
-    let apiParams: Record<string, any> = {};
-    let toastMessage = '';
+    
+    const modificationActions = ['upload', 'delete', 'rename', 'create_folder'];
+
+    const performAction = async (endpoint: string, apiParams: Record<string, any>, toastMessage: string) => {
+        if (toastMessage) {
+            toast({ title: "In Progress", description: toastMessage });
+        }
+
+        const result = await runApiAction(endpoint, apiParams, false);
+        if (!result) return false;
+
+        if (result.ok) {
+             if (modificationActions.includes(action)) {
+                toast({ title: "Success", description: result.message || "Action completed successfully." });
+            }
+             return true;
+        } else {
+            setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
+            toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
+            return false;
+        }
+    };
+
 
     switch (action) {
         case 'navigate':
-            endpoint = 'psbrowse';
-            apiParams = { path: params.path };
             setBrowsePath(params.path);
+            const navResult = await runApiAction('psbrowse', { path: params.path }, false);
+             if (navResult) {
+                setDialogState({
+                    isOpen: true,
+                    title: `File Browser`,
+                    description: `Browsing ${params.path} on ${device?.name}`,
+                    output: navResult.stdout || '',
+                    error: navResult.stderr || navResult.error || '',
+                    structuredData: navResult.structured_data || null,
+                });
+            }
             break;
         case 'download':
-            endpoint = 'download-file';
-            apiParams = { path: params.path };
-            toastMessage = `Downloading "${params.filename}"...`;
+            const dlResult = await runApiAction('download-file', { path: params.path }, true);
+            if (dlResult?.ok && dlResult.content) {
+                const byteCharacters = atob(dlResult.content);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray]);
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = params.filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                toast({ title: "Success", description: `"${params.filename}" downloaded.`});
+            } else {
+                toast({ variant: 'destructive', title: 'Download Failed', description: dlResult?.error });
+            }
             break;
          case 'upload':
-            endpoint = 'upload-file';
             const reader = new FileReader();
             reader.readAsDataURL(params.file);
             reader.onload = async () => {
                 const base64 = reader.result?.toString().split(',')[1];
                 if (base64) {
-                    const uploadParams = { destinationPath: `${params.path}\\${params.file.name}`, fileContent: base64 };
-                    await handleBrowseAction('navigate', {path: ''}); // dummy call to show loading
-                    const result = await runApiAction('upload-file', uploadParams, false);
-                    if (result?.ok) {
-                        toast({ title: "Upload Successful", description: `File "${params.file.name}" uploaded.` });
-                        handleBrowseAction('navigate', { path: params.path }); // Refresh
-                    } else {
-                        toast({ variant: 'destructive', title: 'Upload Failed', description: result?.error || 'An unknown error occurred.' });
+                    const success = await performAction('upload-file', { destinationPath: `${params.path}\\${params.file.name}`, fileContent: base64 }, `Uploading "${params.file.name}"...`);
+                    if (success) {
+                        handleBrowseAction('navigate', { path: params.path });
                     }
                 }
             };
-            return;
+            break;
         case 'delete':
-            endpoint = 'delete-item';
-            apiParams = { path: params.path };
-            toastMessage = `Deleting "${params.name}"...`;
+            const deleteSuccess = await performAction('delete-item', { path: params.path }, `Deleting "${params.name}"...`);
+             if (deleteSuccess) {
+                handleBrowseAction('navigate', { path: browsePath });
+            }
             break;
         case 'rename':
-            endpoint = 'rename-item';
-            apiParams = { path: params.path, newName: params.newName };
-            toastMessage = `Renaming to "${params.newName}"...`;
+             const renameSuccess = await performAction('rename-item', { path: params.path, newName: params.newName }, `Renaming to "${params.newName}"...`);
+             if (renameSuccess) {
+                handleBrowseAction('navigate', { path: browsePath });
+            }
             break;
         case 'create_folder':
-            endpoint = 'create-folder';
-            apiParams = { path: `${params.path}\\${params.folderName}` };
-            toastMessage = `Creating folder "${params.folderName}"...`;
+            const createSuccess = await performAction('create-folder', { path: `${params.path}\\${params.folderName}` }, `Creating folder "${params.folderName}"...`);
+             if (createSuccess) {
+                handleBrowseAction('navigate', { path: params.path });
+            }
             break;
     }
-
-    if (toastMessage) {
-        toast({ title: "In Progress", description: toastMessage });
-    }
-
-    const result = await runApiAction(endpoint, apiParams, false);
-    if (!result) return;
-    
-    if (action === 'download') {
-        if (result.ok && result.content) {
-            const byteCharacters = atob(result.content);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray]);
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = params.filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(url);
-            toast({ title: "Success", description: `"${params.filename}" downloaded.`});
-        } else {
-            toast({ variant: 'destructive', title: 'Download Failed', description: result.error });
-        }
-        return;
-    }
-
-    if (result.ok) {
-        if (action !== 'navigate') {
-            toast({ title: "Success", description: result.message || "Action completed successfully." });
-        }
-        setDialogState({
-            isOpen: true,
-            title: `File Browser`,
-            description: `Browsing ${browsePath} on ${device?.name}`,
-            output: result.stdout || '',
-            error: result.stderr || result.error || '',
-            structuredData: result.structured_data || null,
-        });
-
-    } else {
-        setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
-        toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
-    }
-  }, [runApiAction, browsePath, toast, device]);
+  }, [runApiAction, toast, device, browsePath]);
 
   const handleOpenDiagnostics = () => {
     setIsDiagnosticsOpen(true);
@@ -1307,6 +1302,7 @@ export default function DeviceActionsPanel({
     
     if (result?.ok) {
         toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for changes to apply
         await runWinRMDiagnostics();
     } else {
         toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
