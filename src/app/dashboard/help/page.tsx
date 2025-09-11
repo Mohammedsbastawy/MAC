@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog } from "lucide-react"
+import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog, Zap } from "lucide-react"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -73,7 +73,45 @@ export default function HelpPage() {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <ShieldCheck /> Prerequisite 2: Enabling Remote Registry
+                        <Zap /> Prerequisite 2: Enable WinRM via Group Policy
+                    </CardTitle>
+                    <CardDescription>
+                        For fast and reliable remote file browsing, WinRM must be enabled on all target machines. The best way to do this in a domain environment is with a GPO.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                     <div className="flex flex-col gap-2">
+                        <Step number={1} title="Create or Edit a GPO">
+                           In the <span className="font-mono bg-muted px-1 py-0.5 rounded-sm">Group Policy Management</span> console, create a new GPO (e.g., "Enable WinRM") and link it to the OU containing your computers.
+                        </Step>
+                        <Step number={2} title="Enable WinRM Service">
+                            <p>Navigate to:</p>
+                            <CodeBlock>Computer Configuration → Policies → Administrative Templates → Windows Components → Windows Remote Management (WinRM) → WinRM Service</CodeBlock>
+                             <p className="mt-2">Find and enable the policy **Allow remote server management through WinRM**. Set the IPv4 and IPv6 filter to `*` to allow connections from any source on your network.</p>
+                        </Step>
+                        <Step number={3} title="Set Service to Auto-Start">
+                           <p>To ensure the service is always running, navigate to:</p>
+                           <CodeBlock>Computer Configuration → Policies → Windows Settings → Security Settings → System Services</CodeBlock>
+                           <p className="mt-2">Find **Windows Remote Management (WS-Management)**, define the policy, and set its startup mode to **Automatic**.</p>
+                        </Step>
+                        <Step number={4} title="Configure Firewall Rule">
+                            <p>In the same GPO, navigate to:</p>
+                            <CodeBlock>Computer Configuration → Policies → Windows Settings → Security Settings → Windows Defender Firewall with Advanced Security → Inbound Rules</CodeBlock>
+                             <p className="mt-2">Right-click and select "New Rule...". Choose **Predefined** and select **Windows Remote Management** from the list. Ensure the rule for the "Domain" profile is checked and that the action is "Allow the connection".</p>
+                             <img src="https://i.imgur.com/8Qq9Y1W.png" alt="Group Policy Editor showing the predefined firewall rule for WinRM" className="mt-4 rounded-lg border shadow-md" />
+                        </Step>
+                         <Step number={5} title="Apply the Policy">
+                            <p>Link the GPO to the appropriate OU. The policy will apply at the next refresh interval, or you can force it on a client by running:</p>
+                            <CodeBlock>gpupdate /force</CodeBlock>
+                        </Step>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-2xl">
+                        <ShieldCheck /> Prerequisite 3: Enabling Remote Registry
                     </CardTitle>
                     <CardDescription>
                         This service is essential for PsInfo and other tools to gather system information.
@@ -108,7 +146,7 @@ export default function HelpPage() {
              <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <UserCog /> Prerequisite 3: User Rights Assignment
+                        <UserCog /> Prerequisite 4: User Rights Assignment
                     </CardTitle>
                     <CardDescription>
                         Ensure the administrator account has the correct permissions to connect remotely. This is a critical security step.
@@ -143,7 +181,7 @@ export default function HelpPage() {
             <Card>
                 <CardHeader>
                      <CardTitle className="flex items-center gap-2 text-2xl">
-                        <Siren /> Prerequisite 4: Firewall Configuration
+                        <Siren /> Prerequisite 5: Firewall Configuration
                     </CardTitle>
                     <CardDescription>
                         Firewalls can block the communication needed for PsTools. You must ensure the required ports are open between this control panel and the target devices.
@@ -152,9 +190,17 @@ export default function HelpPage() {
                 <CardContent>
                      <Alert>
                         <ShieldAlert className="h-4 w-4" />
-                        <AlertTitle>Required Ports</AlertTitle>
+                        <AlertTitle>Required Ports for PsTools</AlertTitle>
                         <AlertDescription>
-                            You must allow inbound traffic on the target machines for **RPC (TCP port 135)** and **SMB (TCP port 445)**.
+                            For tools like PsInfo, PsList, etc., you must allow inbound traffic on the target machines for **RPC (TCP port 135)** and **SMB (TCP port 445)**.
+                        </AlertDescription>
+                    </Alert>
+                    
+                    <Alert className="mt-4">
+                        <ShieldAlert className="h-4 w-4" />
+                        <AlertTitle>Required Port for WinRM</AlertTitle>
+                        <AlertDescription>
+                            For the fast File Browser, you must allow inbound traffic on **HTTP (TCP port 5985)**. The GPO rule from Prerequisite 2 should handle this.
                         </AlertDescription>
                     </Alert>
 
@@ -165,8 +211,8 @@ export default function HelpPage() {
                                 <p>You can enable the necessary rules via Group Policy for consistency:</p>
                                 <p>1. Navigate to: <CodeBlock>Computer Configuration &rarr; Policies &rarr; Windows Settings &rarr; Security Settings &rarr; Windows Firewall with Advanced Security</CodeBlock></p>
                                 <p>2. Create a new **Inbound Rule**.</p>
-                                <p>3. Select **Predefined** and choose **File and Printer Sharing** from the list. Click Next.</p>
-                                <p>4. Ensure the rules for `(RPC)` and `(SMB-In)` are checked. Click Next.</p>
+                                <p>3. For PsTools, select **Predefined** and choose **File and Printer Sharing** from the list. Ensure rules for `(RPC)` and `(SMB-In)` are checked.</p>
+                                 <p>4. For WinRM, select **Predefined** and choose **Windows Remote Management**. This should be handled by the GPO in Prerequisite 2, but it's good to verify.</p>
                                 <p>5. Select **Allow the connection** and finish the wizard.</p>
                             </AccordionContent>
                         </AccordionItem>
@@ -183,7 +229,7 @@ export default function HelpPage() {
                                    <li>**Protocol:** TCP</li>
                                    <li>**Source:** The IP address of the Dominion Control Panel machine.</li>
                                    <li>**Destination:** The network segment of your target machines.</li>
-                                   <li>**Destination Port Range:** Create an alias for ports **135, 445** or enter them manually.</li>
+                                   <li>**Destination Port Range:** Create an alias for ports **135, 445, 5985** or enter them manually.</li>
                                </ul>
                                <p>5. Save and apply changes.</p>
                             </AccordionContent>
@@ -199,7 +245,7 @@ export default function HelpPage() {
                                     <li>**Outgoing Interface:** Port connected to the target clients' network.</li>
                                     <li>**Source:** An address object for the Dominion machine's IP.</li>
                                     <li>**Destination:** An address object for the target network.</li>
-                                    <li>**Service:** Create a custom service for TCP ports **135** and **445**.</li>
+                                    <li>**Service:** Create a custom service for TCP ports **135, 445, 5985**.</li>
                                     <li>**Action:** Accept.</li>
                                </ul>
                                <p>4. Ensure the policy is placed correctly in the sequence to be evaluated.</p>
@@ -216,7 +262,7 @@ export default function HelpPage() {
                                     <li>**Source networks and devices:** The IP of the Dominion machine.</li>
                                     <li>**Destination zones:** LAN (or the zone of the target clients).</li>
                                     <li>**Destination networks:** The network of the target clients.</li>
-                                    <li>**Services:** Create new services for TCP port **135** and TCP port **445**.</li>
+                                    <li>**Services:** Create new services for TCP ports **135, 445, 5985**.</li>
                                 </ul>
                                 <p>4. Save the rule and ensure it's enabled.</p>
                             </AccordionContent>
