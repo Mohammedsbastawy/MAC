@@ -1131,7 +1131,6 @@ export default function DeviceActionsPanel({
   const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
   
-
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device || !user) return;
     
@@ -1167,40 +1166,6 @@ export default function DeviceActionsPanel({
     }
   }, [device, user, initialDiagnosticsState]);
 
-  const handleOpenDiagnostics = () => {
-    setIsDiagnosticsOpen(true);
-    runWinRMDiagnostics();
-  }
-
-  const handleEnableWinRM = async () => {
-    if (!device) return;
-    setIsEnablingWinRM(true);
-    toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
-    try {
-        const res = await fetch('/api/pstools/enable-winrm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip: device.ipAddress }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-            toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
-            runWinRMDiagnostics();
-        } else {
-             toast({ variant: "destructive", title: "Failed to Enable WinRM", description: data.details || data.error });
-        }
-    } catch (e: any) {
-         toast({ variant: "destructive", title: "Client Error", description: e.message || "Could not send request to the server." });
-    } finally {
-        setIsEnablingWinRM(false);
-    }
-  };
-
-
-  if (!device) return null;
-
-  const Icon = ICONS[device.type] || Laptop;
-
   const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
     if (!user || !device) return null;
 
@@ -1233,21 +1198,6 @@ export default function DeviceActionsPanel({
     }
   }, [device, user, password, toast]);
 
-
-  const handleGenericAction = async (tool: string, extraParams: Record<string, any> = {}) => {
-      const result = await runApiAction(tool, extraParams);
-      if (result) {
-        setDialogState({
-            isOpen: true,
-            title: `Result from: ${tool}`,
-            description: `Command executed on ${device.name} (${device.ipAddress}).`,
-            output: result.stdout || '',
-            error: result.stderr || result.error || '',
-            structuredData: result.structured_data || null,
-        });
-      }
-  };
-  
     const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
         let endpoint = '';
         let apiParams: Record<string, any> = {};
@@ -1334,12 +1284,58 @@ export default function DeviceActionsPanel({
             if (action !== 'navigate') {
                 toast({ title: "Success", description: result.message || "Action completed successfully." });
             }
-            handleBrowseAction('navigate', { path: browsePath }); // Refresh current view
+            // For browse, we need to update the dialog state with the new file list
+            setDialogState({
+                isOpen: true,
+                title: `File Browser`,
+                description: `Browsing ${browsePath} on ${device?.name}`,
+                output: result.stdout || '',
+                error: result.stderr || result.error || '',
+                structuredData: result.structured_data || null,
+            });
+
         } else {
             setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
             toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
         }
-    }, [runApiAction, browsePath, toast]);
+    }, [runApiAction, browsePath, toast, device]);
+
+
+  const handleOpenDiagnostics = () => {
+    setIsDiagnosticsOpen(true);
+    runWinRMDiagnostics();
+  }
+
+  const handleEnableWinRM = async () => {
+    if (!device) return;
+    setIsEnablingWinRM(true);
+    toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
+    
+    const result = await runApiAction('enable-winrm', {}, false);
+    
+    if (result?.ok) {
+        toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
+        runWinRMDiagnostics();
+    } else {
+        toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
+    }
+    setIsEnablingWinRM(false);
+  };
+
+  const handleGenericAction = async (tool: string, extraParams: Record<string, any> = {}) => {
+      if (!device) return;
+      const result = await runApiAction(tool, extraParams);
+      if (result) {
+        setDialogState({
+            isOpen: true,
+            title: `Result from: ${tool}`,
+            description: `Command executed on ${device.name} (${device.ipAddress}).`,
+            output: result.stdout || '',
+            error: result.stderr || result.error || '',
+            structuredData: result.structured_data || null,
+        });
+      }
+  };
 
     const handleServiceAction = async (svc: string, action: 'start' | 'stop' | 'restart') => {
         const result = await runApiAction('psservice', { svc, action });
@@ -1373,7 +1369,9 @@ export default function DeviceActionsPanel({
         }
     }
 
+    if (!device) return null;
 
+    const Icon = ICONS[device.type] || Laptop;
 
   return (
     <>
@@ -1564,5 +1562,3 @@ export default function DeviceActionsPanel({
     </>
   );
 }
-
-    
