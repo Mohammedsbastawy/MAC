@@ -383,7 +383,9 @@ def api_enable_winrm():
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
 
-    if rc == 0:
+    # PsExec might return a non-zero code if one of the chained commands fails (e.g., service already started).
+    # We consider it a success if the output indicates that the core tasks were completed.
+    if rc == 0 or "WinRM has been updated" in out or "firewall exception enabled" in out:
         logger.info(f"Successfully sent WinRM configuration commands to {ip}.")
         return jsonify({
             "ok": True,
@@ -414,6 +416,7 @@ def api_enable_winrm():
 
 
     
+
 
 
 

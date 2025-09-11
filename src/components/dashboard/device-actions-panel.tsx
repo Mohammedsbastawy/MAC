@@ -945,9 +945,9 @@ const WinRMDiagnosticsDialog: React.FC<{
 
     return (
         <div className="space-y-3">
-            <CheckRow label="WMI / RPC Service" check={state.service} onOpenLog={onOpenLog} />
-            <CheckRow label="WinRM Listener" check={state.listener} onOpenLog={onOpenLog} onFixClick={onFix} isFixing={isFixing} showFixButton={true} />
-            <CheckRow label="Firewall Rule (HTTP-In)" check={state.firewall} onOpenLog={onOpenLog} />
+            <CheckRow label="WMI / RPC Service" check={state.service} />
+            <CheckRow label="WinRM Listener" check={state.listener} onFixClick={onFix} isFixing={isFixing} showFixButton={true} />
+            <CheckRow label="Firewall Rule (HTTP-In)" check={state.firewall} />
         </div>
     );
 };
@@ -987,8 +987,7 @@ export default function DeviceActionsPanel({
     if (!device || !user) return;
     
     setDiagnosticsState(initialDiagnosticsState);
-    setIsDiagnosticsOpen(true);
-
+    
     try {
         const res = await fetch('/api/network/check-winrm', {
             method: 'POST',
@@ -1019,6 +1018,10 @@ export default function DeviceActionsPanel({
     }
   }, [device, user, initialDiagnosticsState]);
 
+  const handleOpenDiagnostics = () => {
+    setIsDiagnosticsOpen(true);
+    runWinRMDiagnostics();
+  }
 
   const handleEnableWinRM = async () => {
     if (!device) return;
@@ -1032,7 +1035,7 @@ export default function DeviceActionsPanel({
         });
         const data = await res.json();
         if (data.ok) {
-            toast({ title: "Command Sent Successfully", description: "WinRM configuration commands sent. You can re-run diagnostics in a moment to check the status." });
+            toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
             runWinRMDiagnostics(); // Re-run diagnostics after attempting a fix
         } else {
              toast({ variant: "destructive", title: "Failed to Enable WinRM", description: data.details || data.error });
@@ -1194,7 +1197,7 @@ export default function DeviceActionsPanel({
                  <h4 className="font-semibold text-foreground">Remote Management</h4>
                  <Dialog open={isDiagnosticsOpen} onOpenChange={setIsDiagnosticsOpen}>
                     <DialogTrigger asChild>
-                        <Button variant="outline" className="justify-start w-full" onClick={runWinRMDiagnostics}>
+                        <Button variant="outline" className="justify-start w-full" onClick={handleOpenDiagnostics}>
                              <ShieldCheck className="mr-2 h-4 w-4" />
                             <span>WinRM Diagnostics</span>
                              <ChevronRight className="ml-auto h-4 w-4" />
@@ -1204,7 +1207,7 @@ export default function DeviceActionsPanel({
                         <DialogHeader>
                             <DialogTitle>WinRM Diagnostics for {device.name}</DialogTitle>
                             <DialogDescription>
-                                Status of WinRM components on the remote host.
+                                Status of WinRM components on the remote host. Click on a failed item to see details.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="py-4">
