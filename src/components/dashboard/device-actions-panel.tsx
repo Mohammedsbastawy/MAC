@@ -51,6 +51,12 @@ import {
   Lightbulb,
   Loader2,
   ShieldCheck,
+  MoreVertical,
+  Download,
+  Trash2,
+  Edit,
+  FolderPlus,
+  Upload,
 } from "lucide-react";
 import {
   Sheet,
@@ -100,6 +106,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
 
 
 type DeviceActionsPanelProps = {
@@ -668,27 +675,59 @@ const PsBrowseResult: React.FC<{
     data: PsBrowseItem[];
     currentPath: string;
     onNavigate: (path: string) => void;
-    isDriveView: boolean;
-}> = ({ data, currentPath, onNavigate, isDriveView }) => {
+    onDownload: (path: string, filename: string) => void;
+    onUpload: (path: string, file: File) => void;
+    onDeleteItem: (path: string, name: string, isFolder: boolean) => void;
+    onRenameItem: (path: string, newName: string) => void;
+    onCreateFolder: (path: string, folderName: string) => void;
+    isLoading: boolean;
+}> = ({ data, currentPath, onNavigate, onDownload, onUpload, onDeleteItem, onRenameItem, onCreateFolder, isLoading }) => {
     
+    const [actionDialog, setActionDialog] = React.useState<{type: 'rename' | 'create_folder', item?: PsBrowseItem, isOpen: boolean}>({type: 'rename', isOpen: false});
+    const [uploadingFile, setUploadingFile] = React.useState<File | null>(null);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+    const isDriveView = currentPath === "drives";
+
     const navigateTo = (item: PsBrowseItem) => {
-        // For drives, FullName is the path to navigate to.
-        // For files/folders, FullName is also the correct path.
         if (item.Mode.startsWith('d')) {
             onNavigate(item.FullName);
         }
     };
 
-    const navigateUp = () => {
-        if (isDriveView) return; // Can't go up from drive view
-        // If current path is a root drive like C:\, go back to drive view
-        if (currentPath.match(/^[a-zA-Z]:\\?$/)) {
-             onNavigate("drives");
-             return;
-        }
-        const parentPath = currentPath.substring(0, currentPath.lastIndexOf('\\')) || `${currentPath.substring(0,2)}\\`;
-        onNavigate(parentPath);
+    const handleUploadClick = () => {
+        fileInputRef.current?.click();
     };
+
+    const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            setUploadingFile(file);
+        }
+    };
+    
+    React.useEffect(() => {
+        if (uploadingFile) {
+            onUpload(currentPath, uploadingFile);
+            setUploadingFile(null); // Reset after initiating upload
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [uploadingFile]);
+
+
+    const pathSegments = React.useMemo(() => {
+        if (isDriveView) return [{ name: "Drives", path: "drives" }];
+        const parts = currentPath.split('\\').filter(Boolean);
+        const segments = parts.map((part, index) => {
+            const path = parts.slice(0, index + 1).join('\\');
+            // For C:, path should be C:\
+            return {
+                name: part,
+                path: path.endsWith(':') ? path + '\\' : path,
+            };
+        });
+        return [{ name: "Drives", path: "drives" }, ...segments];
+    }, [currentPath, isDriveView]);
 
     const folders = data.filter(item => item.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
     const files = data.filter(item => !item.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
@@ -705,7 +744,6 @@ const PsBrowseResult: React.FC<{
     
     const formatDate = (dateString: string) => {
         try {
-            // Don't format the placeholder date for drives
             if (dateString.startsWith('0001-01-01')) return '';
             return new Date(dateString).toLocaleString();
         } catch {
@@ -713,53 +751,154 @@ const PsBrowseResult: React.FC<{
         }
     }
 
-
     return (
-    <Card>
-        <CardHeader>
-            <CardTitle className="flex items-center text-lg">
-                <Folder className="mr-2 h-5 w-5" /> File Browser
-            </CardTitle>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2">
-                 <Button variant="ghost" size="icon" onClick={navigateUp} disabled={isDriveView} className="h-8 w-8">
-                    <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" onClick={() => onNavigate("drives")} className="h-8 w-8">
-                    <Home className="h-4 w-4" />
-                </Button>
-                <code className="bg-muted px-2 py-1 rounded-md">{isDriveView ? "Available Drives" : currentPath}</code>
-            </div>
-        </CardHeader>
-        <CardContent>
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Last Modified</TableHead>
-                        <TableHead className="text-right">Size</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {sortedData.map((item, index) => (
-                        <TableRow 
-                            key={item.FullName || index} 
-                            onClick={() => navigateTo(item)}
-                            className={cn(item.Mode.startsWith('d') && 'cursor-pointer hover:bg-muted/50')}
-                        >
-                            <TableCell className="font-medium flex items-center gap-2">
-                                {isDriveView ? <Database className="h-4 w-4 text-muted-foreground" /> : item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
-                                {isDriveView ? `${item.Name} (${item.FullName})` : item.Name}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">{formatDate(item.LastWriteTime)}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">
-                                {item.Length !== null && !item.Mode.startsWith('d') ? formatBytes(item.Length) : ''}
-                            </TableCell>
-                        </TableRow>
+    <>
+        <Card>
+            <CardHeader>
+                <CardTitle className="flex items-center text-lg justify-between">
+                     <div className="flex items-center gap-2">
+                        <Folder className="mr-2 h-5 w-5" /> File Browser
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <input type="file" ref={fileInputRef} onChange={handleFileSelected} className="hidden" />
+                        <Button variant="outline" size="sm" onClick={handleUploadClick} disabled={isDriveView}>
+                            <Upload className="mr-2 h-4 w-4" /> Upload File
+                        </Button>
+                         <Button variant="outline" size="sm" onClick={() => setActionDialog({ type: 'create_folder', isOpen: true })} disabled={isDriveView}>
+                            <FolderPlus className="mr-2 h-4 w-4" /> Create Folder
+                        </Button>
+                     </div>
+                </CardTitle>
+                <div className="flex items-center gap-1 text-sm text-muted-foreground pt-2 flex-wrap">
+                    {pathSegments.map((segment, index) => (
+                        <React.Fragment key={segment.path}>
+                             <Button 
+                                variant="link" 
+                                className="p-1 h-auto text-muted-foreground"
+                                onClick={() => onNavigate(segment.path)}
+                            >
+                                {segment.name === "Drives" ? <Home className="h-4 w-4" /> : segment.name}
+                            </Button>
+                            {index < pathSegments.length - 1 && <ChevronRight className="h-4 w-4" />}
+                        </React.Fragment>
                     ))}
-                </TableBody>
-            </Table>
-        </CardContent>
-    </Card>
+                </div>
+            </CardHeader>
+            <CardContent className="h-[50vh] overflow-y-auto">
+                {isLoading ? (
+                    <div className="flex items-center justify-center h-full">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                ) : (
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Last Modified</TableHead>
+                            <TableHead>Size</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {!isDriveView && (
+                            <TableRow onClick={() => onNavigate(pathSegments.length > 2 ? pathSegments[pathSegments.length - 2].path : 'drives')} className="cursor-pointer">
+                                <TableCell className="flex items-center gap-2 font-medium">
+                                    <Folder className="h-4 w-4 text-amber-500" />
+                                    ..
+                                </TableCell>
+                                <TableCell></TableCell>
+                                <TableCell></TableCell>
+                                <TableCell></TableCell>
+                            </TableRow>
+                        )}
+                        {sortedData.map((item) => (
+                            <TableRow 
+                                key={item.FullName} 
+                                onDoubleClick={() => navigateTo(item)}
+                                className={cn(item.Mode.startsWith('d') && 'cursor-pointer')}
+                            >
+                                <TableCell className="font-medium flex items-center gap-2 max-w-xs truncate">
+                                    {isDriveView ? <Database className="h-4 w-4 text-muted-foreground" /> : item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
+                                    <span title={item.Name}>{item.Name}</span>
+                                </TableCell>
+                                <TableCell className="font-mono text-xs">{formatDate(item.LastWriteTime)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs">
+                                    {item.Length !== null && !item.Mode.startsWith('d') ? formatBytes(item.Length) : ''}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                <MoreVertical className="h-4 w-4" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                            {!item.Mode.startsWith('d') && (
+                                                <DropdownMenuItem onClick={() => onDownload(item.FullName, item.Name)}>
+                                                    <Download className="mr-2 h-4 w-4" /> Download
+                                                </DropdownMenuItem>
+                                            )}
+                                            <DropdownMenuItem onClick={() => setActionDialog({ type: 'rename', item, isOpen: true })}>
+                                                <Edit className="mr-2 h-4 w-4" /> Rename
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem className="text-destructive" onClick={() => onDeleteItem(item.FullName, item.Name, item.Mode.startsWith('d'))}>
+                                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+                )}
+            </CardContent>
+        </Card>
+
+        {/* Action Dialog for Rename / Create Folder */}
+        <AlertDialog open={actionDialog.isOpen} onOpenChange={(open) => !open && setActionDialog(prev => ({...prev, isOpen: false}))}>
+             <form onSubmit={(e) => {
+                e.preventDefault();
+                const formData = new FormData(e.currentTarget);
+                const newName = formData.get('newName') as string;
+                if (!newName) return;
+
+                if (actionDialog.type === 'rename' && actionDialog.item) {
+                    onRenameItem(actionDialog.item.FullName, newName);
+                } else if (actionDialog.type === 'create_folder') {
+                    onCreateFolder(currentPath, newName);
+                }
+                setActionDialog({type: 'rename', isOpen: false});
+             }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            {actionDialog.type === 'rename' ? `Rename "${actionDialog.item?.Name}"` : 'Create New Folder'}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                           {actionDialog.type === 'rename' ? 'Enter the new name for the item.' : `Enter the name for the new folder inside "${currentPath}".`}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="py-4">
+                        <Label htmlFor="newName">Name</Label>
+                        <Input 
+                            id="newName" 
+                            name="newName"
+                            defaultValue={actionDialog.type === 'rename' ? actionDialog.item?.Name : ''}
+                            required
+                        />
+                    </div>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction type="submit">
+                             {actionDialog.type === 'rename' ? 'Rename' : 'Create'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+             </form>
+        </AlertDialog>
+    </>
     )
 };
 
@@ -770,19 +909,27 @@ const CommandOutputDialog: React.FC<{
     onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void;
     onServiceInfo?: (service: PsServiceData) => void;
     onProcessKill?: (processId: string) => void;
-    onBrowseNavigate?: (path: string) => void;
+    onBrowseAction?: (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     browsePath?: string;
-}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseNavigate, browsePath }) => {
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseAction, browsePath }) => {
     
-    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist || state.structuredData?.psbrowse;
-    const isDriveView = browsePath === 'drives';
+    const [isLoading, setIsLoading] = React.useState(false);
 
-    const isHackerTheme = !hasStructuredData;
+    const isBrowseView = !!state.structuredData?.psbrowse;
+    const isHackerTheme = !isBrowseView && !(state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    
+    const handleFileAction = async (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+        setIsLoading(true);
+        if (onBrowseAction) {
+            await onBrowseAction(action, params);
+        }
+        setIsLoading(false);
+    };
 
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            "max-w-4xl",
+            isBrowseView ? "max-w-4xl" : "max-w-4xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -791,7 +938,7 @@ const CommandOutputDialog: React.FC<{
                     {state.description}
                 </AlertDialogDescription>
             </AlertDialogHeader>
-            <div className="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
+            <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
                 {/* Structured data views */}
                 {state.structuredData?.psinfo && <PsInfoResult data={state.structuredData.psinfo} />}
                 {state.structuredData?.pslist && onProcessKill && <PsListResult data={state.structuredData.pslist} onKill={onProcessKill} />}
@@ -805,19 +952,31 @@ const CommandOutputDialog: React.FC<{
                     />
                 }
                 {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
-                {state.structuredData?.psbrowse && onBrowseNavigate && browsePath &&
+                {isBrowseView && onBrowseAction && browsePath &&
                     <PsBrowseResult 
-                        data={state.structuredData.psbrowse}
+                        data={state.structuredData!.psbrowse!}
                         currentPath={browsePath}
-                        onNavigate={onBrowseNavigate}
-                        isDriveView={isDriveView}
+                        isLoading={isLoading}
+                        onNavigate={(path) => onBrowseAction('navigate', {path})}
+                        onDownload={(path, filename) => handleFileAction('download', {path, filename})}
+                        onUpload={(path, file) => handleFileAction('upload', {path, file})}
+                        onDeleteItem={(path, name, isFolder) => handleFileAction('delete', {path, name, isFolder})}
+                        onRenameItem={(path, newName) => handleFileAction('rename', {path, newName})}
+                        onCreateFolder={(path, folderName) => handleFileAction('create_folder', {path, folderName})}
                     />
                 }
 
-                {/* Raw output for non-structured data (hacker theme) or if there's an error */}
-                {(!hasStructuredData || state.error) && (
+
+                {/* Raw output for non-structured data or if there's an error */}
+                {!isBrowseView && (
                     <>
-                    {state.output && (
+                    {(state.output && !isHackerTheme) && (
+                         <details className="mt-4">
+                            <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
+                            <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />
+                        </details>
+                    )}
+                    {state.output && isHackerTheme && (
                         <div>
                             <Label className={cn(isHackerTheme && "text-green-400")}>C:\&gt; Output</Label>
                             <Textarea 
@@ -827,7 +986,7 @@ const CommandOutputDialog: React.FC<{
                             />
                         </div>
                     )}
-                    {state.error && (
+                     {state.error && (
                          <div>
                             <Label className={cn(isHackerTheme ? "text-red-400" : "text-destructive")}>C:\&gt; Error</Label>
                             <Textarea 
@@ -841,16 +1000,6 @@ const CommandOutputDialog: React.FC<{
                         </div>
                     )}
                     </>
-                )}
-
-
-                {/* Raw output for structured data (collapsible) */}
-                {hasStructuredData && (state.output || state.error) && (
-                    <details className="mt-4">
-                        <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
-                        {state.output && <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />}
-                         {state.error && <Textarea readOnly value={state.error} className="mt-1 h-24 font-mono text-xs bg-destructive/10 text-destructive" />}
-                    </details>
                 )}
             </div>
             <AlertDialogFooter>
@@ -1036,7 +1185,7 @@ export default function DeviceActionsPanel({
         const data = await res.json();
         if (data.ok) {
             toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
-            runWinRMDiagnostics(); // Re-run diagnostics after attempting a fix
+            runWinRMDiagnostics();
         } else {
              toast({ variant: "destructive", title: "Failed to Enable WinRM", description: data.details || data.error });
         }
@@ -1052,98 +1201,178 @@ export default function DeviceActionsPanel({
 
   const Icon = ICONS[device.type] || Laptop;
 
-  const handlePstoolAction = async (tool: string, extraParams: Record<string, any> = {}, showToast = true) => {
-      if (!user || !device) return;
+  const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
+    if (!user || !device) return null;
 
-      const isBrowse = tool === 'psbrowse';
+    if (showToast) {
+        toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
+    }
 
-      if(showToast && !isBrowse) {
-        toast({ title: "Sending Command...", description: `Running ${tool} on ${device.name}` });
-      }
+    try {
+        const response = await fetch(`/api/pstools/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ip: device.ipAddress,
+                username: user.user,
+                domain: user.domain,
+                pwd: password,
+                ...params,
+            }),
+        });
 
-      // For psbrowse, use the state for the path
-      if(isBrowse) {
-        // If the path is "drives", we send an empty path to the backend to signal it to list drives.
-        const pathToSend = extraParams.path === 'drives' ? '' : extraParams.path;
-        extraParams.path = pathToSend;
-        setBrowsePath(extraParams.path || 'drives');
-      }
+        const result = await response.json();
 
+        if (!response.ok && !result.error) {
+            result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
+        }
+        return result;
 
-      try {
-          const response = await fetch(`/api/pstools/${tool.replace('api/','')}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  ip: device.ipAddress,
-                  // Include credentials explicitly
-                  username: user.user,
-                  domain: user.domain,
-                  pwd: password,
-                  ...extraParams,
-              }),
-          });
-          
-          let result;
-          const responseClone = response.clone(); // Clone the response to read it multiple times
-
-          try {
-            result = await response.json();
-          } catch(e) {
-            const text = await responseClone.text();
-             setDialogState({
-                isOpen: true,
-                title: "Invalid Response",
-                description: `The server returned a non-JSON response. This usually indicates an internal server error. (HTTP ${response.status})`,
-                output: text,
-                error: `Failed to parse JSON. Error: ${(e as Error).message}`,
-                structuredData: null
-             });
-             return;
-          }
+    } catch (err: any) {
+        return { ok: false, error: `Client-side error: ${err.message}` };
+    }
+  }, [device, user, password, toast]);
 
 
-          if (!response.ok && !result.stderr && !result.error) {
-              result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details. Check the backend logs.`;
-          }
-          
-          const finalError = result.stderr || result.error || "";
-
-          // If the action was a service control, we might want to refresh the list
-          if (tool === 'psservice' && extraParams.action !== 'query') {
-              toast({ title: `Service ${extraParams.svc}`, description: `${extraParams.action} command sent successfully.`})
-              // Refetch the service list to show updated state
-              handlePstoolAction('psservice', { action: 'query' }, false);
-              return; // We don't want to show the dialog for action commands
-          }
-
-          // If we just killed a process, refresh the list
-          if (tool === 'pskill') {
-              toast({ title: "Process Terminated", description: `Process ${extraParams.proc} was terminated.`});
-              handlePstoolAction('pslist', {}, false); // Refresh the list
-              return;
-          }
-          
-          setDialogState({
+  const handleGenericAction = async (tool: string, extraParams: Record<string, any> = {}) => {
+      const result = await runApiAction(tool, extraParams);
+      if (result) {
+        setDialogState({
             isOpen: true,
             title: `Result from: ${tool}`,
             description: `Command executed on ${device.name} (${device.ipAddress}).`,
-            output: result.stdout,
-            error: finalError,
+            output: result.stdout || '',
+            error: result.stderr || result.error || '',
             structuredData: result.structured_data || null,
-          });
-
-      } catch (err: any) {
-        setDialogState({
-            isOpen: true,
-            title: "Connection Error",
-            description: `Failed to connect to backend for tool: ${tool}.`,
-            output: "",
-            error: err.message || "An unknown network error occurred.",
-            structuredData: null
-          });
+        });
       }
   };
+  
+    const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+        let endpoint = '';
+        let apiParams: Record<string, any> = {};
+        let toastMessage = '';
+
+        switch (action) {
+            case 'navigate':
+                endpoint = 'psbrowse';
+                apiParams = { path: params.path };
+                setBrowsePath(params.path);
+                break;
+            case 'download':
+                endpoint = 'download-file';
+                apiParams = { path: params.path };
+                toastMessage = `Downloading "${params.filename}"...`;
+                break;
+             case 'upload':
+                endpoint = 'upload-file';
+                const reader = new FileReader();
+                reader.readAsDataURL(params.file);
+                reader.onload = async () => {
+                    const base64 = reader.result?.toString().split(',')[1];
+                    if (base64) {
+                        const uploadParams = { destinationPath: `${params.path}\\${params.file.name}`, fileContent: base64 };
+                        const result = await runApiAction('upload-file', uploadParams, false);
+                        if (result?.ok) {
+                            toast({ title: "Upload Successful", description: `File "${params.file.name}" uploaded.` });
+                            handleBrowseAction('navigate', { path: params.path }); // Refresh
+                        } else {
+                            toast({ variant: 'destructive', title: 'Upload Failed', description: result?.error || 'An unknown error occurred.' });
+                        }
+                    }
+                };
+                return; // Special handling for upload
+            case 'delete':
+                endpoint = 'delete-item';
+                apiParams = { path: params.path };
+                toastMessage = `Deleting "${params.name}"...`;
+                break;
+            case 'rename':
+                endpoint = 'rename-item';
+                apiParams = { path: params.path, newName: params.newName };
+                toastMessage = `Renaming to "${params.newName}"...`;
+                break;
+            case 'create_folder':
+                endpoint = 'create-folder';
+                apiParams = { path: `${params.path}\\${params.folderName}` };
+                toastMessage = `Creating folder "${params.folderName}"...`;
+                break;
+        }
+
+        if (toastMessage) {
+            toast({ title: "In Progress", description: toastMessage });
+        }
+
+        const result = await runApiAction(endpoint, apiParams, false);
+        if (!result) return;
+        
+        if (action === 'download') {
+            if (result.ok && result.content) {
+                const byteCharacters = atob(result.content);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray]);
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = params.filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                toast({ title: "Success", description: `"${params.filename}" downloaded.`});
+            } else {
+                toast({ variant: 'destructive', title: 'Download Failed', description: result.error });
+            }
+            return;
+        }
+
+        if (result.ok) {
+            if (action !== 'navigate') {
+                toast({ title: "Success", description: result.message || "Action completed successfully." });
+            }
+            handleBrowseAction('navigate', { path: browsePath }); // Refresh current view
+        } else {
+            setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
+            toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
+        }
+    }, [runApiAction, browsePath, toast]);
+
+    const handleServiceAction = async (svc: string, action: 'start' | 'stop' | 'restart') => {
+        const result = await runApiAction('psservice', { svc, action });
+        if(result?.ok) {
+            toast({ title: 'Success', description: result.stdout || `${action} command sent to ${svc}.`})
+            const refreshResult = await runApiAction('psservice', { action: 'query' }, false);
+            if (refreshResult?.ok) {
+                setDialogState(prev => ({
+                    ...prev,
+                    structuredData: { ...prev.structuredData, psservice: refreshResult.structured_data.psservice }
+                }));
+            }
+        } else {
+            toast({ variant: 'destructive', title: 'Action Failed', description: result?.error || result?.stderr });
+        }
+    }
+
+    const handleProcessKill = async (proc: string) => {
+        const result = await runApiAction('pskill', { proc });
+        if(result?.ok) {
+            toast({ title: 'Success', description: `Kill command sent to process ${proc}.`});
+            const refreshResult = await runApiAction('pslist', {}, false);
+             if (refreshResult?.ok) {
+                setDialogState(prev => ({
+                    ...prev,
+                    structuredData: { ...prev.structuredData, pslist: refreshResult.structured_data.pslist }
+                }));
+            }
+        } else {
+             toast({ variant: 'destructive', title: 'Action Failed', description: result?.error || result?.stderr });
+        }
+    }
+
 
 
   return (
@@ -1221,7 +1450,7 @@ export default function DeviceActionsPanel({
                     </DialogContent>
                 </Dialog>
 
-                <Button variant={"outline"} className="justify-start w-full" onClick={() => handlePstoolAction('psbrowse', { path: 'drives'})} disabled={device.status !== 'online'}>
+                <Button variant={"outline"} className="justify-start w-full" onClick={() => handleBrowseAction('navigate', { path: 'drives'})} disabled={device.status !== 'online'}>
                     <Folder className="mr-2 h-4 w-4" />
                     <span>Browse Files (WinRM)</span>
                     <ChevronRight className="ml-auto h-4 w-4" />
@@ -1233,13 +1462,13 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">PSTools Actions</h4>
               <div className="grid grid-cols-1 gap-2">
-                <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
-                <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />
-                <ActionButton icon={Users} label="Logged On Users" onClick={() => handlePstoolAction('psloggedon')} />
-                <ActionButton icon={Settings2} label="Manage Services" onClick={() => handlePstoolAction('psservice', { action: 'query' })} />
-                <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handlePstoolAction('psloglist', { kind: 'system' })} />
-                <ActionButton icon={FileLock} label="Opened Files" onClick={() => handlePstoolAction('psfile')} />
-                <ActionButton icon={Fingerprint} label="Get SID" onClick={() => handlePstoolAction('psgetsid')} />
+                <ActionButton icon={Info} label="System Info" onClick={() => handleGenericAction('psinfo')} />
+                <ActionButton icon={Activity} label="Process List" onClick={() => handleGenericAction('pslist')} />
+                <ActionButton icon={Users} label="Logged On Users" onClick={() => handleGenericAction('psloggedon')} />
+                <ActionButton icon={Settings2} label="Manage Services" onClick={() => handleGenericAction('psservice', { action: 'query' })} />
+                <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handleGenericAction('psloglist', { kind: 'system' })} />
+                <ActionButton icon={FileLock} label="Opened Files" onClick={() => handleGenericAction('psfile')} />
+                <ActionButton icon={Fingerprint} label="Get SID" onClick={() => handleGenericAction('psgetsid')} />
               </div>
             </div>
 
@@ -1248,9 +1477,9 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Power Management</h4>
                 <div className="grid grid-cols-1 gap-2">
-                    <ActionButton icon={RefreshCw} label="Restart" onClick={() => handlePstoolAction('psshutdown', { action: 'restart' })} />
-                    <ActionButton icon={PowerOff} label="Shutdown" onClick={() => handlePstoolAction('psshutdown', { action: 'shutdown' })} variant="destructive" />
-                    <ActionButton icon={UserX} label="Logoff User" onClick={() => handlePstoolAction('psshutdown', { action: 'logoff' })} variant="destructive" />
+                    <ActionButton icon={RefreshCw} label="Restart" onClick={() => handleGenericAction('psshutdown', { action: 'restart' })} />
+                    <ActionButton icon={PowerOff} label="Shutdown" onClick={() => handleGenericAction('psshutdown', { action: 'shutdown' })} variant="destructive" />
+                    <ActionButton icon={UserX} label="Logoff User" onClick={() => handleGenericAction('psshutdown', { action: 'logoff' })} variant="destructive" />
                 </div>
             </div>
 
@@ -1259,7 +1488,7 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Advanced Actions</h4>
                 <div className="grid grid-cols-1 gap-2">
-                    <ActionButton icon={Zap} label="Force GPUpdate" onClick={() => handlePstoolAction('psexec', { cmd: 'gpupdate /force' })} />
+                    <ActionButton icon={Zap} label="Force GPUpdate" onClick={() => handleGenericAction('psexec', { cmd: 'gpupdate /force' })} />
                     <AlertDialog>
                         <AlertDialogTrigger asChild>
                             <Button variant="outline" className="justify-start">
@@ -1274,7 +1503,7 @@ export default function DeviceActionsPanel({
                                 const formData = new FormData(e.currentTarget);
                                 const cmd = formData.get('command') as string;
                                 (e.currentTarget.closest('[data-radix-popper-content-wrapper]')?.previousSibling as HTMLElement)?.click(); // close dialog first
-                                handlePstoolAction('psexec', { cmd });
+                                handleGenericAction('psexec', { cmd });
                             }}>
                                 <AlertDialogHeader>
                                     <AlertDialogTitle>Execute Remote Command</AlertDialogTitle>
@@ -1302,10 +1531,10 @@ export default function DeviceActionsPanel({
     <CommandOutputDialog 
         state={dialogState}
         onClose={() => setDialogState(prev => ({...prev, isOpen: false}))}
-        onServiceAction={(serviceName, action) => handlePstoolAction('psservice', { action, svc: serviceName }, true)}
+        onServiceAction={handleServiceAction}
         onServiceInfo={(service) => setServiceInfo(service)}
-        onProcessKill={(processId) => handlePstoolAction('pskill', { proc: processId })}
-        onBrowseNavigate={(path) => handlePstoolAction('psbrowse', { path }, false)}
+        onProcessKill={handleProcessKill}
+        onBrowseAction={handleBrowseAction}
         browsePath={browsePath}
     />
     {/* Dialog for showing specific service info */}
