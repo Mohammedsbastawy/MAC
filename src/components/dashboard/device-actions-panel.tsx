@@ -745,6 +745,20 @@ const PsBrowseResult: React.FC<{
         }
     }
 
+    const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        const formData = new FormData(e.currentTarget);
+        const newName = formData.get('newName') as string;
+        if (!newName) return;
+
+        if (actionDialog.type === 'rename' && actionDialog.item) {
+            onRenameItem(actionDialog.item.FullName, newName);
+        } else if (actionDialog.type === 'create_folder') {
+            onCreateFolder(currentPath, newName);
+        }
+        setActionDialog({type: 'rename', isOpen: false});
+    };
+
     return (
     <>
         <Card>
@@ -852,19 +866,7 @@ const PsBrowseResult: React.FC<{
 
         {/* Action Dialog for Rename / Create Folder */}
         <AlertDialog open={actionDialog.isOpen} onOpenChange={(open) => !open && setActionDialog(prev => ({...prev, isOpen: false}))}>
-             <form onSubmit={(e) => {
-                e.preventDefault();
-                const formData = new FormData(e.currentTarget);
-                const newName = formData.get('newName') as string;
-                if (!newName) return;
-
-                if (actionDialog.type === 'rename' && actionDialog.item) {
-                    onRenameItem(actionDialog.item.FullName, newName);
-                } else if (actionDialog.type === 'create_folder') {
-                    onCreateFolder(currentPath, newName);
-                }
-                setActionDialog({type: 'rename', isOpen: false});
-             }}>
+             <form onSubmit={handleFormSubmit}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>
@@ -913,10 +915,9 @@ const CommandOutputDialog: React.FC<{
     const isHackerTheme = !isBrowseView && !(state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     const handleFileAction = async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+        if (!onBrowseAction) return;
         setIsLoading(true);
-        if (onBrowseAction) {
-            await onBrowseAction(action, params);
-        }
+        await onBrowseAction(action, params);
         setIsLoading(false);
     };
 
@@ -1194,97 +1195,89 @@ export default function DeviceActionsPanel({
   const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
     
     const modificationActions = ['upload', 'delete', 'rename', 'create_folder'];
-
-    const performAction = async (endpoint: string, apiParams: Record<string, any>, toastMessage: string) => {
-        if (toastMessage) {
-            toast({ title: "In Progress", description: toastMessage });
-        }
-
-        const result = await runApiAction(endpoint, apiParams, false);
-        if (!result) return false;
-
-        if (result.ok) {
-             if (modificationActions.includes(action)) {
-                toast({ title: "Success", description: result.message || "Action completed successfully." });
-            }
-             return true;
-        } else {
-            setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
-            toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
-            return false;
-        }
+    const endpointMap: Record<string, string> = {
+        navigate: 'psbrowse',
+        download: 'download-file',
+        upload: 'upload-file',
+        delete: 'delete-item',
+        rename: 'rename-item',
+        create_folder: 'create-folder',
     };
+    
+    const endpoint = endpointMap[action];
+    if (!endpoint) return;
 
+    if (action === 'upload') {
+        const file = params.file as File;
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = async () => {
+            const base64 = reader.result?.toString().split(',')[1];
+            if (base64) {
+                const result = await runApiAction('upload-file', { destinationPath: `${params.path}\\${file.name}`, fileContent: base64 }, true);
+                if (result?.ok) {
+                    toast({ title: "Success", description: result.message || "File uploaded."});
+                    handleBrowseAction('navigate', { path: params.path });
+                } else {
+                    toast({ variant: 'destructive', title: 'Upload Failed', description: result?.error });
+                }
+            }
+        };
+        return;
+    }
+    
+    const apiParams: Record<string, any> = {};
+    if (action === 'navigate') apiParams.path = params.path;
+    if (action === 'download') apiParams.path = params.path;
+    if (action === 'delete') apiParams.path = params.path;
+    if (action === 'rename') {
+        apiParams.path = params.path;
+        apiParams.newName = params.newName;
+    }
+    if (action === 'create_folder') apiParams.path = `${params.path}\\${params.folderName}`;
 
-    switch (action) {
-        case 'navigate':
+    const result = await runApiAction(endpoint, apiParams, !modificationActions.includes(action));
+    if (!result) return;
+    
+    if (result.ok) {
+        if (action === 'navigate') {
             setBrowsePath(params.path);
-            const navResult = await runApiAction('psbrowse', { path: params.path }, false);
-             if (navResult) {
-                setDialogState({
-                    isOpen: true,
-                    title: `File Browser`,
-                    description: `Browsing ${params.path} on ${device?.name}`,
-                    output: navResult.stdout || '',
-                    error: navResult.stderr || navResult.error || '',
-                    structuredData: navResult.structured_data || null,
-                });
+            setDialogState({
+                isOpen: true,
+                title: `File Browser`,
+                description: `Browsing ${params.path} on ${device?.name}`,
+                output: result.stdout || '',
+                error: result.stderr || result.error || '',
+                structuredData: result.structured_data || null,
+            });
+        } else if (action === 'download') {
+            const byteCharacters = atob(result.content);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
-            break;
-        case 'download':
-            const dlResult = await runApiAction('download-file', { path: params.path }, true);
-            if (dlResult?.ok && dlResult.content) {
-                const byteCharacters = atob(dlResult.content);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                    byteNumbers[i] = byteCharacters.charCodeAt(i);
-                }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray]);
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = params.filename;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                toast({ title: "Success", description: `"${params.filename}" downloaded.`});
-            } else {
-                toast({ variant: 'destructive', title: 'Download Failed', description: dlResult?.error });
-            }
-            break;
-         case 'upload':
-            const reader = new FileReader();
-            reader.readAsDataURL(params.file);
-            reader.onload = async () => {
-                const base64 = reader.result?.toString().split(',')[1];
-                if (base64) {
-                    const success = await performAction('upload-file', { destinationPath: `${params.path}\\${params.file.name}`, fileContent: base64 }, `Uploading "${params.file.name}"...`);
-                    if (success) {
-                        handleBrowseAction('navigate', { path: params.path });
-                    }
-                }
-            };
-            break;
-        case 'delete':
-            const deleteSuccess = await performAction('delete-item', { path: params.path }, `Deleting "${params.name}"...`);
-             if (deleteSuccess) {
-                handleBrowseAction('navigate', { path: browsePath });
-            }
-            break;
-        case 'rename':
-             const renameSuccess = await performAction('rename-item', { path: params.path, newName: params.newName }, `Renaming to "${params.newName}"...`);
-             if (renameSuccess) {
-                handleBrowseAction('navigate', { path: browsePath });
-            }
-            break;
-        case 'create_folder':
-            const createSuccess = await performAction('create-folder', { path: `${params.path}\\${params.folderName}` }, `Creating folder "${params.folderName}"...`);
-             if (createSuccess) {
-                handleBrowseAction('navigate', { path: params.path });
-            }
-            break;
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray]);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = params.filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            toast({ title: "Success", description: `"${params.filename}" downloaded.`});
+        } else if (modificationActions.includes(action)) {
+            toast({ title: "Success", description: result.message || "Action completed successfully." });
+            // Refresh the current directory
+            handleBrowseAction('navigate', { path: browsePath });
+        }
+    } else {
+        toast({ variant: 'destructive', title: 'Action Failed', description: result.error });
+        // For navigation errors, still update the dialog to show the error
+        if (action === 'navigate') {
+            setDialogState(prev => ({ ...prev, error: result.error || 'An unknown error occurred.' }));
+        }
     }
   }, [runApiAction, toast, device, browsePath]);
 
@@ -1358,7 +1351,9 @@ export default function DeviceActionsPanel({
     }
 
     // This is the correct place for this check, after all hooks have been called.
-    if (!device) return null;
+    if (!device) {
+        return null;
+    }
 
     const Icon = ICONS[device.type] || Laptop;
 
