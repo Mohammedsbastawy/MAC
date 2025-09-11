@@ -84,25 +84,21 @@ def run_winrm_command(host, user, password, script, timeout=60):
         logger.error("The 'pywinrm' library is not installed. Please run 'pip install pywinrm'.")
         return 1, "", "The pywinrm library is not installed on the server."
         
-    protocol = None
     try:
-        protocol = winrm.Protocol(
-            endpoint=f"http://{host}:5985/wsman",
+        session = winrm.Session(
+            f"http://{host}:5985/wsman",
+            auth=(user, password),
             transport='ntlm',
-            username=user,
-            password=password,
             server_cert_validation='ignore',
             operation_timeout_sec=timeout,
-            read_timeout_sec=timeout + 10 # Must be greater than operation_timeout_sec
+            read_timeout_sec=timeout + 10
         )
         
-        # The correct method name is run_ps
-        result = protocol.run_ps(script)
+        result = session.run_ps(script)
         
         stdout = result.std_out.decode('utf-8', errors='ignore') if result.std_out else ""
         stderr = result.std_err.decode('utf-8', errors='ignore') if result.std_err else ""
 
-        # Even with status_code 0, there might be errors in stderr from PowerShell itself
         if result.status_code != 0:
             err_msg = stderr or f"WinRM command failed with non-zero status code: {result.status_code}"
             logger.error(f"WinRM command failed on {host} with RC={result.status_code}. Stderr: {err_msg}")
@@ -388,4 +384,3 @@ def parse_psloglist_output(output):
     
 
     
-
