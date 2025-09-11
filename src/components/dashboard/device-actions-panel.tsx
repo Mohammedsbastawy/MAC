@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -41,7 +42,8 @@ import {
   InfoIcon,
   Skull,
   Search,
-  Zap
+  Zap,
+  Folder
 } from "lucide-react";
 import {
   Sheet,
@@ -173,6 +175,7 @@ type DialogState = {
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
+        psbrowse?: any | null; // Add psbrowse to structured data
     } | null;
 }
 
@@ -634,6 +637,41 @@ const PsLogListResult: React.FC<{ data: PsLogListData[] }> = ({ data }) => {
     );
 }
 
+const PsBrowseResult: React.FC<{ data: any[] }> = ({ data }) => (
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center text-lg">
+                <Folder className="mr-2 h-5 w-5" /> File Browser
+            </CardTitle>
+        </CardHeader>
+        <CardContent>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Size</TableHead>
+                        <TableHead>Last Modified</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {data.map((item, index) => (
+                        <TableRow key={index}>
+                            <TableCell className="font-medium flex items-center gap-2">
+                                {item.Mode.startsWith('d') ? <Folder className="h-4 w-4 text-amber-500" /> : <File className="h-4 w-4 text-muted-foreground" />}
+                                {item.Name}
+                            </TableCell>
+                            <TableCell>{item.Mode.startsWith('d') ? 'Directory' : 'File'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{item.Length ? `${(item.Length / 1024).toFixed(2)} KB` : ''}</TableCell>
+                            <TableCell className="font-mono text-xs">{new Date(parseInt(item.LastWriteTime.substr(6))).toLocaleString()}</TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </CardContent>
+    </Card>
+);
+
 const CommandOutputDialog: React.FC<{
     state: DialogState;
     onClose: () => void;
@@ -642,7 +680,7 @@ const CommandOutputDialog: React.FC<{
     onProcessKill?: (processId: string) => void,
 }> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill }) => {
     
-    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist;
+    const hasStructuredData = state.structuredData?.psinfo || state.structuredData?.pslist || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist || state.structuredData?.psbrowse;
 
     const isHackerTheme = !hasStructuredData;
 
@@ -672,6 +710,7 @@ const CommandOutputDialog: React.FC<{
                     />
                 }
                 {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
+                {state.structuredData?.psbrowse && <PsBrowseResult data={state.structuredData.psbrowse} />}
 
                 {/* Raw output for non-structured data (hacker theme) */}
                 {(!hasStructuredData) && (
@@ -877,6 +916,7 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Actions</h4>
               <div className="grid grid-cols-1 gap-2">
+                <ActionButton icon={Folder} label="Browse Files" onClick={() => handlePstoolAction('psbrowse')} />
                 <ActionButton icon={Info} label="System Info" onClick={() => handlePstoolAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List" onClick={() => handlePstoolAction('pslist')} />
                 <ActionButton icon={Users} label="Logged On Users" onClick={() => handlePstoolAction('psloggedon')} />
@@ -955,5 +995,7 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    
 
     

@@ -2,6 +2,7 @@
 import os
 import re
 import subprocess
+import json
 from flask import Blueprint, request, jsonify, current_app, session
 from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psloggedon_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output
 from Tools.utils.logger import logger
@@ -265,5 +266,46 @@ def api_psping():
         logger.error(f"psping on {ip} failed with exception: {e}", exc_info=True)
         return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
     return json_result(rc, out, err)
+
+@pstools_bp.route('/psbrowse', methods=['POST'])
+def api_psbrowse():
+    data = request.get_json() or {}
+    ip, path = data.get("ip", ""), data.get("path", "C:\\")
+    user, domain, pwd = session.get("user"), session.get("domain"), session.get("password")
+    logger.info(f"Executing file browse on {ip} for path: '{path}'")
+
+    try:
+        # Sanitize path to prevent command injection
+        # Basic sanitation: remove quotes and disallow traversal beyond the root
+        clean_path = path.replace("'", "").replace('"', '')
+        if ".." in clean_path:
+            return json_result(1, "", "Path traversal is not allowed.")
+
+        # Construct the PowerShell command
+        ps_command = f"Get-ChildItem -Path '{clean_path}' | Select-Object Name, FullName, Length, LastWriteTime, Mode | ConvertTo-Json -Compress"
+        full_cmd = f"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"{ps_command}\""
+        
+        cmd_args = ["cmd", "/c", full_cmd]
+        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
+        
+        structured_data = None
+        if rc == 0 and out.strip():
+            try:
+                # The output from ConvertTo-Json might be a single object or an array of objects
+                parsed_json = json.loads(out)
+                # Ensure it's always a list for consistent frontend handling
+                if not isinstance(parsed_json, list):
+                    parsed_json = [parsed_json]
+                structured_data = {"psbrowse": parsed_json}
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from psbrowse output: {e}. Output was: {out}")
+                err = f"Failed to parse command output as JSON. {err}"
+                rc = 1 # Mark as failed if JSON parsing fails
+        
+    except Exception as e:
+        logger.error(f"psbrowse on {ip} failed with exception: {e}", exc_info=True)
+        return json_result(1, "", f"An unexpected exception occurred: {str(e)}")
+
+    return json_result(rc, out, err, structured_data)
 
     
