@@ -961,13 +961,15 @@ const CommandOutputDialog: React.FC<{
     const isBrowseView = !!state.structuredData?.psbrowse;
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
-    const isLoggedOnView = !!state.structuredData?.psloggedon;
-    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    const isLoggedOnView = !!state.structuredData?.psloggedon && state.structuredData.psloggedon.length > 0;
+    const noLoggedOnUsers = !!state.structuredData?.psloggedon && state.structuredData.psloggedon.length === 0;
+    
+    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !noLoggedOnUsers && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            (isBrowseView || isProcessView || isInfoView || isLoggedOnView) ? "max-w-4xl" : "max-w-2xl",
+            (isBrowseView || isProcessView || isInfoView || isLoggedOnView || noLoggedOnUsers) ? "max-w-4xl" : "max-w-2xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -980,7 +982,7 @@ const CommandOutputDialog: React.FC<{
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
-                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
+                {(isLoggedOnView || noLoggedOnUsers) && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -1011,7 +1013,7 @@ const CommandOutputDialog: React.FC<{
 
 
                 {/* Raw output for non-structured data or if there's an error */}
-                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView) && (
+                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView || noLoggedOnUsers) && (
                     <>
                     {(state.output && !isHackerTheme) && (
                          <details className="mt-4">

@@ -284,18 +284,25 @@ def api_psloggedon():
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=60)
 
     structured_data = None
-    if rc == 0 and out:
+    if rc == 0 and out.strip():
         try:
             parsed_json = json.loads(out)
             # Ensure it's always a list, even if one user is returned
             if isinstance(parsed_json, dict):
                  parsed_json = [parsed_json]
             structured_data = {"psloggedon": parsed_json}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             logger.warning(f"Could not parse JSON from psloggedon (WinRM) on {ip}: {out}")
             # If JSON parsing fails, this can happen if no users are logged on.
             # Return an empty list in this case.
-            structured_data = {"psloggedon": []}
+            if "No user exists for" in out:
+                structured_data = {"psloggedon": []}
+            else:
+                err = f"Failed to parse WinRM output. Raw: {out}"
+                rc = 1 # Indicate failure
+    elif rc == 0:
+        # Command succeeded but produced no output (e.g., no users logged on)
+        structured_data = {"psloggedon": []}
     
     return json_result(rc, out, err, structured_data)
 
@@ -591,3 +598,4 @@ def api_enable_prereqs():
     
 
     
+
