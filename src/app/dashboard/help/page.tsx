@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog, Zap } from "lucide-react"
+import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog, Zap, Wrench } from "lucide-react"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -270,6 +270,52 @@ export default function HelpPage() {
                     </Accordion>
                 </CardContent>
             </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-2xl">
+                        <Wrench /> Prerequisite 6: Ensure Core Services (WMI & RPC) are Running
+                    </CardTitle>
+                    <CardDescription>
+                        These core Windows services are essential for communication. If they are stopped, most remote tools will fail. You can ensure they are running via GPO.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                    <h4 className="font-semibold text-xl">Method 1: Group Policy Preferences (Recommended)</h4>
+                    <p className="text-muted-foreground -mt-4">This is the best method to both set the service to automatic and ensure it is started.</p>
+                    <div className="flex flex-col gap-2">
+                        <Step number={1} title="Navigate to GPO Preferences">
+                            In your GPO, go to:
+                            <CodeBlock>Computer Configuration &rarr; Preferences &rarr; Control Panel Settings &rarr; Services</CodeBlock>
+                        </Step>
+                        <Step number={2} title="Create New Service Policy">
+                            Right-click in the empty space and choose <span className="font-mono bg-muted px-1 py-0.5 rounded-sm">New &rarr; Service</span>.
+                        </Step>
+                        <Step number={3} title="Configure the Service">
+                           <p>In the "Service name" field, enter the exact name of the service:</p>
+                           <ul className="list-disc pl-6 space-y-1 mt-2">
+                                <li>For WMI: <span className="font-mono bg-muted px-1 py-0.5 rounded-sm">winmgmt</span></li>
+                                <li>For RPC: <span className="font-mono bg-muted px-1 py-0.5 rounded-sm">RpcSs</span></li>
+                           </ul>
+                           <p className="mt-2">Set the **Startup** type to **Automatic**. Then, set the **Service action** to **Start service**.</p>
+                           <img src="https://i.imgur.com/uVj2i6W.png" alt="Group Policy Preferences for Services" className="mt-4 rounded-lg border shadow-md" />
+                           <p className="mt-2">Repeat this for both services.</p>
+                        </Step>
+                    </div>
+                     <h4 className="font-semibold text-xl mt-8">Method 2: System Services Policy</h4>
+                     <p className="text-muted-foreground -mt-4">This method is simpler but only configures the startup type, it does not actively start the service if it's stopped.</p>
+                      <div className="flex flex-col gap-2">
+                        <Step number={1} title="Navigate to System Services">
+                             In your GPO, go to:
+                            <CodeBlock>Computer Configuration &rarr; Policies &rarr; Windows Settings &rarr; Security Settings &rarr; System Services</CodeBlock>
+                        </Step>
+                         <Step number={2} title="Configure Service Startup">
+                            Find **Windows Management Instrumentation** (for WMI) and **Remote Procedure Call (RPC)** in the list. For each one, double-click, check "Define this policy setting", and set the startup mode to **Automatic**.
+                        </Step>
+                    </div>
+                </CardContent>
+            </Card>
+
         </div>
     )
 }
