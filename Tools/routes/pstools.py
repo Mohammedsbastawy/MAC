@@ -254,17 +254,38 @@ def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip","")
     _, _, pwd, winrm_user = get_auth_from_request(data)
+    
     logger.info(f"Executing 'query user' (WinRM) on {ip}.")
     
-    rc, out, err = run_winrm_command(ip, winrm_user, pwd, "query user")
+    # We use pywinrm's run_cmd for this as 'query user' is a CMD command
+    try:
+        import winrm
+        p = winrm.Protocol(
+            endpoint=f"http://{ip}:5985/wsman",
+            transport='ntlm',
+            username=winrm_user,
+            password=pwd,
+            server_cert_validation='ignore',
+            operation_timeout_sec=20)
+        
+        shell_id = p.open_shell()
+        command_id = p.run_command(shell_id, 'query user')
+        rs_stdout, rs_stderr, rc = p.get_command_output(shell_id, command_id)
+        p.close_shell(shell_id)
 
-    structured_data = None
-    if rc == 0:
-        # The output of "query user" is text, so we parse it here in Python.
+        out = rs_stdout.decode('utf-8', errors='ignore')
+        err = rs_stderr.decode('utf-8', errors='ignore')
+        
+        if rc != 0:
+            logger.error(f"'query user' command failed on {ip} with RC={rc}. Stderr: {err}")
+            return json_result(rc, out, err, structured_data={"psloggedon": []})
+
         parsed_users = parse_query_user_output(out)
-        structured_data = {"psloggedon": parsed_users}
-    
-    return json_result(rc, out, err, structured_data)
+        return json_result(rc, out, err, structured_data={"psloggedon": parsed_users})
+
+    except Exception as e:
+        logger.error(f"Failed to execute 'query user' via pywinrm on {ip}: {e}", exc_info=True)
+        return json_result(1, "", f"Failed to execute remote command: {e}", structured_data={"psloggedon": []})
 
 
 @pstools_bp.route('/psshutdown', methods=['POST'])
@@ -278,7 +299,7 @@ def api_psshutdown():
 
     if action == 'logoff' and session_id:
         logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
-        rc, out, err = run_winrm_command(ip, winrm_user, pwd, f"logoff {session_id}")
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, f"logoff {session_id}", type='cmd')
         return json_result(rc, out, err)
 
     flag = {"restart": "-r", "shutdown": "-s"}.get(action)
@@ -558,3 +579,4 @@ def api_enable_prereqs():
     
 
     
+

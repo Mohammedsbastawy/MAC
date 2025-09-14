@@ -1378,6 +1378,7 @@ export default function DeviceActionsPanel({
             if (refreshResult?.ok) {
                 setDialogState(prev => ({
                     ...prev,
+                    isOpen: true, // Keep dialog open
                     structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data?.psloggedon }
                 }));
             }
@@ -1632,6 +1633,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 
