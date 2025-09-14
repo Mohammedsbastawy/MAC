@@ -195,15 +195,51 @@ def api_psloglist():
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
-    ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
-    logger.info(f"Executing psinfo on {ip}.")
-    rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
+    ip = data.get("ip", "")
+    _, _, pwd, winrm_user = get_auth_from_request(data)
+    logger.info(f"Executing Get-ComputerInfo (WinRM) on {ip}.")
+
+    ps_command = """
+    $os = Get-CimInstance -ClassName Win32_OperatingSystem
+    $cs = Get-CimInstance -ClassName Win32_ComputerSystem
+    $uptime_span = (Get-Date) - $os.LastBootUpTime
+    $uptime_str = "$($uptime_span.Days) days, $($uptime_span.Hours) hours, $($uptime_span.Minutes) minutes"
+    $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
+        [pscustomobject]@{
+            Volume = $_.DriveLetter;
+            SizeGB = [math]::Round($_.Size / 1GB, 2);
+            FreeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
+            FreePercent = "{0}%" -f [math]::Round(($_.SizeRemaining / $_.Size) * 100);
+        }
+    }
+
+    $system_info = @{
+        "Kernel version" = $os.Version;
+        "Uptime" = $uptime_str;
+        "Install date" = $os.InstallDate.ToString('yyyy-MM-dd');
+        "OS" = $os.Caption;
+        "Domain" = $cs.Domain;
+        "Logged on users" = $cs.NumberOfUsers;
+    }
+
+    @{
+        psinfo = @{
+            system_info = $system_info.GetEnumerator() | ForEach-Object { @{ key=$_.Name; value=$_.Value } };
+            disk_info = $disks
+        }
+    } | ConvertTo-Json -Depth 3 -Compress
+    """
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
     
     structured_data = None
     if rc == 0 and out:
-        structured_data = parse_psinfo_output(out)
-        
+        try:
+            parsed_json = json.loads(out)
+            structured_data = parsed_json
+        except json.JSONDecodeError:
+            err = f"Failed to parse JSON from WinRM psinfo. Raw output: {out}"
+            rc = 1
+
     return json_result(rc, out, err, structured_data)
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
@@ -463,5 +499,7 @@ def api_enable_winrm():
             "error": "Failed to execute remote command via PsExec.",
             "details": err or out
         }), 500
+
+    
 
     

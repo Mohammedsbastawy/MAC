@@ -128,11 +128,11 @@ const ICONS: Record<Device["type"], React.ElementType> = {
 type PsInfoData = {
     system_info: { key: string, value: string }[];
     disk_info: {
-        volume: string;
-        type: string;
-        size_gb: string;
-        free_gb: string;
-        free_percent: string;
+        Volume: string;
+        Type: string;
+        SizeGB: number;
+        FreeGB: number;
+        FreePercent: string;
     }[];
 }
 
@@ -259,7 +259,6 @@ const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Volume</TableHead>
-                                <TableHead>Type</TableHead>
                                 <TableHead className="text-right">Size (GB)</TableHead>
                                 <TableHead className="text-right">Free (GB)</TableHead>
                                 <TableHead className="text-right">Free %</TableHead>
@@ -267,12 +266,11 @@ const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
                         </TableHeader>
                         <TableBody>
                             {data.disk_info.map(disk => (
-                                <TableRow key={disk.volume}>
-                                    <TableCell className="font-medium">{disk.volume}</TableCell>
-                                    <TableCell>{disk.type}</TableCell>
-                                    <TableCell className="text-right">{disk.size_gb}</TableCell>
-                                    <TableCell className="text-right">{disk.free_gb}</TableCell>
-                                    <TableCell className="text-right">{disk.free_percent}</TableCell>
+                                <TableRow key={disk.Volume}>
+                                    <TableCell className="font-medium">{disk.Volume}</TableCell>
+                                    <TableCell className="text-right">{disk.SizeGB}</TableCell>
+                                    <TableCell className="text-right">{disk.FreeGB}</TableCell>
+                                    <TableCell className="text-right">{disk.FreePercent}</TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>
@@ -678,7 +676,7 @@ const PsBrowseResult: React.FC<{
     onDownload: (path: string, filename: string) => void;
     onUpload: (path: string, file: File) => void;
     onDeleteItem: (path: string, name: string, isFolder: boolean) => void;
-    onRenameItem: (path: string, oldName: string, newName: string) => void;
+    onRenameItem: (path: string, newName: string) => void;
     onCreateFolder: (path: string, folderName: string) => void;
     isLoading: boolean;
 }> = ({ data, currentPath, onNavigate, onDownload, onUpload, onDeleteItem, onRenameItem, onCreateFolder, isLoading }) => {
@@ -692,10 +690,9 @@ const PsBrowseResult: React.FC<{
 
     const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        if (file) {
+        if (file && currentPath !== 'drives') {
             onUpload(currentPath, file);
         }
-        // Reset file input to allow uploading the same file again
         if (event.currentTarget) {
             event.currentTarget.value = "";
         }
@@ -714,7 +711,6 @@ const PsBrowseResult: React.FC<{
         const parts = currentPath.split('\\').filter(Boolean);
         const segments = parts.map((part, index) => {
             const path = parts.slice(0, index + 1).join('\\');
-            // For C:, path should be C:\
             return {
                 name: part,
                 path: path.endsWith(':') ? path + '\\' : path,
@@ -752,9 +748,10 @@ const PsBrowseResult: React.FC<{
         if (!newName) return;
 
         if (actionDialog.type === 'rename' && actionDialog.item) {
-            onRenameItem(actionDialog.item.FullName, actionDialog.item.Name, newName);
-        } else if (actionDialog.type === 'create_folder') {
-            onCreateFolder(currentPath, newName);
+            onRenameItem(actionDialog.item.FullName, newName);
+        } else if (actionDialog.type === 'create_folder' && currentPath !== 'drives') {
+             const newFolderPath = currentPath.endsWith('\\') ? `${currentPath}${newName}` : `${currentPath}\\${newName}`;
+            onCreateFolder(newFolderPath, newName);
         }
         setActionDialog({type: 'rename', isOpen: false});
     };
@@ -910,22 +907,23 @@ const CommandOutputDialog: React.FC<{
 }> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseAction, browsePath }) => {
     
     const [isLoading, setIsLoading] = React.useState(false);
-
-    const isBrowseView = !!state.structuredData?.psbrowse;
-    const isProcessView = !!state.structuredData?.pslist;
-    const isHackerTheme = !isBrowseView && !(state.structuredData?.psinfo || isProcessView || state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
-    const handleFileAction = async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+    const onModificationAction = async (action: 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
         if (!onBrowseAction) return;
         setIsLoading(true);
         await onBrowseAction(action, params);
         setIsLoading(false);
     };
 
+    const isBrowseView = !!state.structuredData?.psbrowse;
+    const isProcessView = !!state.structuredData?.pslist;
+    const isInfoView = !!state.structuredData?.psinfo;
+    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !(state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            isBrowseView || isProcessView ? "max-w-4xl" : "max-w-2xl",
+            isBrowseView || isProcessView || isInfoView ? "max-w-4xl" : "max-w-2xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -936,7 +934,7 @@ const CommandOutputDialog: React.FC<{
             </AlertDialogHeader>
             <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
                 {/* Structured data views */}
-                {state.structuredData?.psinfo && <PsInfoResult data={state.structuredData.psinfo} />}
+                {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!} onKill={onProcessKill} />}
                 {state.structuredData?.psloggedon && <PsLoggedOnResult data={state.structuredData.psloggedon} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
@@ -953,18 +951,23 @@ const CommandOutputDialog: React.FC<{
                         data={state.structuredData!.psbrowse!}
                         currentPath={browsePath}
                         isLoading={isLoading}
-                        onNavigate={(path) => handleFileAction('navigate', {path})}
-                        onDownload={(path, filename) => handleFileAction('download', {path, filename})}
-                        onUpload={(path, file) => handleFileAction('upload', {path, file})}
-                        onDeleteItem={(path, name, isFolder) => handleFileAction('delete', {path, name, isFolder})}
-                        onRenameItem={(path, oldName, newName) => handleFileAction('rename', {path, oldName, newName})}
-                        onCreateFolder={(path, folderName) => handleFileAction('create_folder', {path, folderName})}
+                        onNavigate={(path) => onBrowseAction('navigate', {path})}
+                        onDownload={(path, filename) => onBrowseAction('download', {path, filename})}
+                        onUpload={(path, file) => onModificationAction('upload', {path, file})}
+                        onDeleteItem={(path, name, isFolder) => {
+                             const confirmation = confirm(`Are you sure you want to delete ${isFolder ? 'the folder' : 'the file'} "${name}"? This cannot be undone.`);
+                             if (confirmation) {
+                                 onModificationAction('delete', {path, name, isFolder});
+                             }
+                        }}
+                        onRenameItem={(path, newName) => onModificationAction('rename', {path, newName})}
+                        onCreateFolder={(path, folderName) => onModificationAction('create_folder', {path, folderName})}
                     />
                 }
 
 
                 {/* Raw output for non-structured data or if there's an error */}
-                {!isBrowseView && !isProcessView && (
+                {!(isBrowseView || isProcessView || isInfoView) && (
                     <>
                     {(state.output && !isHackerTheme) && (
                          <details className="mt-4">
@@ -1052,8 +1055,8 @@ const WinRMDiagnosticsDialog: React.FC<{
         return <XCircle className="h-4 w-4 text-destructive" />;
     };
 
-    const CheckRow: React.FC<{ label: string; check: { status: WinRMCheckStatus; message: string }, onFixClick?: () => void; isFixing?: boolean; showFixButton?: boolean }> = 
-        ({ label, check, onFixClick, isFixing, showFixButton = false }) => (
+    const CheckRow: React.FC<{ label: string; check: { status: WinRMCheckStatus; message: string }, onFixClick?: () => void; isFixing?: boolean }> = 
+        ({ label, check, onFixClick, isFixing }) => (
         <div className="flex items-center justify-between p-3 rounded-lg border border-border">
             <div 
                 className={cn("flex items-center gap-3", check.status === 'failure' && 'cursor-pointer')}
@@ -1070,7 +1073,7 @@ const WinRMDiagnosticsDialog: React.FC<{
                 )}>
                     {check.status === 'checking' ? 'Checking...' : check.status === 'success' ? 'OK' : 'Failed'}
                 </span>
-                {showFixButton && check.status === 'failure' && (
+                {check.status === 'failure' && onFixClick && (
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -1091,7 +1094,7 @@ const WinRMDiagnosticsDialog: React.FC<{
     return (
         <div className="space-y-3">
             <CheckRow label="WMI / RPC Service" check={state.service} />
-            <CheckRow label="WinRM Listener" check={state.listener} onFixClick={onFix} isFixing={isFixing} showFixButton={true} />
+            <CheckRow label="WinRM Listener" check={state.listener} onFixClick={onFix} isFixing={isFixing} />
             <CheckRow label="Firewall Rule (HTTP-In)" check={state.firewall} />
         </div>
     );
@@ -1194,22 +1197,19 @@ export default function DeviceActionsPanel({
   }, [device, user, initialDiagnosticsState]);
 
   const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
-      const endpointMap: Record<string, string> = {
-          navigate: 'psbrowse',
-          download: 'download-file',
-          upload: 'upload-file',
-          delete: 'delete-item',
-          rename: 'rename-item',
-          create_folder: 'create-folder',
-      };
-      const endpoint = endpointMap[action];
-      if (!endpoint) return;
+    const endpointMap: Record<string, string> = {
+        navigate: 'psbrowse',
+        download: 'download-file',
+        upload: 'upload-file',
+        delete: 'delete-item',
+        rename: 'rename-item',
+        create_folder: 'create-folder',
+    };
+    const endpoint = endpointMap[action];
+    if (!endpoint) return;
 
-      const isModification = ['upload', 'delete', 'rename', 'create_folder'].includes(action);
-
-      let apiParams: Record<string, any> = {};
-
-      if (action === 'upload') {
+    let apiParams: Record<string, any> = { ...params };
+     if (action === 'upload') {
           const file = params.file as File;
           const base64 = await new Promise<string>((resolve, reject) => {
               const reader = new FileReader();
@@ -1218,53 +1218,52 @@ export default function DeviceActionsPanel({
               reader.onerror = error => reject(error);
           });
           apiParams = { destinationPath: `${params.path}\\${file.name}`, fileContent: base64 };
-      } else {
-          apiParams = { ...params };
       }
       
-      const result = await runApiAction(endpoint, apiParams, !isModification);
-      if (!result) return;
+    const result = await runApiAction(endpoint, apiParams);
+    if (!result) return;
+    
+    const isModification = ['upload', 'delete', 'rename', 'create_folder'].includes(action);
 
-      if (result.ok) {
-           if (action === 'navigate') {
-              setBrowsePath(params.path);
-              setDialogState({
-                  isOpen: true,
-                  title: `File Browser`,
-                  description: `Browsing ${params.path} on ${device?.name}`,
-                  output: result.stdout || '',
-                  error: result.stderr || result.error || '',
-                  structuredData: result.structured_data || null,
-              });
-          } else if (action === 'download') {
-              const byteCharacters = atob(result.content);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i);
-              }
-              const byteArray = new Uint8Array(byteNumbers);
-              const blob = new Blob([byteArray]);
-              const url = window.URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = params.filename;
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-              window.URL.revokeObjectURL(url);
-              toast({ title: "Success", description: `"${params.filename}" downloaded.`});
-          } else if (isModification) {
-              toast({ title: "Success", description: result.message || "Action completed successfully." });
-              // Refresh the current directory
-              handleBrowseAction('navigate', { path: params.path });
-          }
-      } else {
-          toast({ variant: 'destructive', title: `${action.charAt(0).toUpperCase() + action.slice(1)} Failed`, description: result.error });
-           if (action === 'navigate') {
-              setDialogState(prev => ({ ...prev, isOpen: true, error: result.error || 'An unknown error occurred.' }));
-          }
-      }
-  }, [runApiAction, toast, device]);
+    if (result.ok) {
+        if (action === 'navigate') {
+            setBrowsePath(params.path);
+            setDialogState({
+                isOpen: true,
+                title: `File Browser`,
+                description: `Browsing ${params.path} on ${device?.name}`,
+                output: result.stdout || '',
+                error: result.stderr || result.error || '',
+                structuredData: result.structured_data || null,
+            });
+        } else if (action === 'download') {
+            const byteCharacters = atob(result.content);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray]);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = params.filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            toast({ title: "Success", description: `"${params.filename}" downloaded.`});
+        } else if (isModification) {
+            toast({ title: "Success", description: result.message || "Action completed successfully." });
+            handleBrowseAction('navigate', { path: browsePath }); // Refresh directory
+        }
+    } else {
+        toast({ variant: 'destructive', title: `${action.charAt(0).toUpperCase() + action.slice(1)} Failed`, description: result.error });
+        if (!isModification) {
+           setDialogState(prev => ({ ...prev, isOpen: true, error: result.error || 'An unknown error occurred.' }));
+        }
+    }
+  }, [runApiAction, toast, device, browsePath]);
 
   const handleOpenDiagnostics = () => {
     setIsDiagnosticsOpen(true);
@@ -1280,7 +1279,7 @@ export default function DeviceActionsPanel({
     
     if (result?.ok) {
         toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for changes to apply
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for changes to apply
         await runWinRMDiagnostics();
     } else {
         toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
@@ -1335,11 +1334,13 @@ export default function DeviceActionsPanel({
         }
     }
 
+    // This hook is essential to prevent calling hooks conditionally
+    const Icon = device ? (ICONS[device.type] || Laptop) : React.Fragment;
+
     if (!device) {
         return null;
     }
 
-    const Icon = ICONS[device.type] || Laptop;
 
   return (
     <>
@@ -1530,5 +1531,7 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    
 
     
