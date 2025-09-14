@@ -201,7 +201,7 @@ type DialogState = {
     structuredData?: {
         psinfo?: PsInfoData | null;
         pslist?: {pslist: WinRMProcess[]} | null;
-        psloggedon?: LoggedOnUser[] | null;
+        psloggedon?: {psloggedon: LoggedOnUser[]} | null;
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
@@ -961,7 +961,7 @@ const CommandOutputDialog: React.FC<{
     const isBrowseView = !!state.structuredData?.psbrowse;
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
-    const isLoggedOnView = !!state.structuredData?.psloggedon && Array.isArray(state.structuredData.psloggedon);
+    const isLoggedOnView = !!state.structuredData?.psloggedon?.psloggedon && Array.isArray(state.structuredData.psloggedon.psloggedon);
     
     const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
@@ -981,7 +981,7 @@ const CommandOutputDialog: React.FC<{
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
-                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
+                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!.psloggedon!} onLogoff={onUserLogoff} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -1386,7 +1386,7 @@ export default function DeviceActionsPanel({
             if (refreshResult?.ok) {
                 setDialogState(prev => ({
                     ...prev,
-                    structuredData: refreshResult.structured_data
+                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data }
                 }));
             }
         } else {
@@ -1640,5 +1640,6 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 

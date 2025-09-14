@@ -5,7 +5,7 @@ import subprocess
 import json
 import base64
 from flask import Blueprint, request, jsonify, current_app, session
-from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, run_winrm_command
+from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, parse_query_user_output, run_winrm_command
 from Tools.utils.logger import logger
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
@@ -255,56 +255,17 @@ def api_psloggedon():
     ip = data.get("ip","")
     _, _, pwd, winrm_user = get_auth_from_request(data)
     logger.info(f"Executing 'query user' (WinRM) on {ip}.")
-
-    # This PowerShell script runs 'query user', parses its text output, and converts it to JSON.
-    ps_command = r"""
-    $output = query user
-    $results = $output | Select-Object -Skip 1 | ForEach-Object {
-        $line = $_.Trim()
-        if ($line) {
-            # Regex to capture the fields, handling the ">" at the start and variable whitespace
-            # It captures: SESSIONNAME, USERNAME, ID, STATE, IDLE TIME, LOGON TIME
-            $match = $line -match '^\s*(>?)([^ ]+)\s+([^ ]+)\s+([0-9]+)\s+([A-Za-z]+)\s+([^ ]+)\s+(.+)';
-            if ($match) {
-                # The first field (username) might have a '>' prepended
-                $username = $match.Groups[2].Value
-                [PSCustomObject]@{
-                    username     = $username
-                    session_name = $match.Groups[3].Value
-                    id           = $match.Groups[4].Value
-                    state        = $match.Groups[5].Value
-                    idle_time    = $match.Groups[6].Value
-                    logon_time   = $match.Groups[7].Value
-                }
-            }
-        }
-    }
-    $results | ConvertTo-Json -Compress
-    """
-    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=60)
+    
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, "query user")
 
     structured_data = None
-    if rc == 0 and out:
-        try:
-            parsed_json = json.loads(out)
-            # Ensure it's always a list, even if one user is returned
-            if isinstance(parsed_json, dict):
-                 parsed_json = [parsed_json]
-            structured_data = {"psloggedon": parsed_json}
-        except (json.JSONDecodeError, TypeError):
-            logger.warning(f"Could not parse JSON from psloggedon (WinRM) on {ip}: {out}")
-            # If JSON parsing fails, this can happen if no users are logged on.
-            # Return an empty list in this case.
-            if "No user exists for" in out:
-                structured_data = {"psloggedon": []}
-            else:
-                err = f"Failed to parse WinRM output. Raw: {out}"
-                rc = 1 # Indicate failure
-    elif rc == 0:
-        # Command succeeded but produced no output (e.g., no users logged on)
-        structured_data = {"psloggedon": []}
+    if rc == 0:
+        # The output of "query user" is text, so we parse it here in Python.
+        parsed_users = parse_query_user_output(out)
+        structured_data = {"psloggedon": parsed_users}
     
     return json_result(rc, out, err, structured_data)
+
 
 @pstools_bp.route('/psshutdown', methods=['POST'])
 def api_psshutdown():
@@ -317,8 +278,7 @@ def api_psshutdown():
 
     if action == 'logoff' and session_id:
         logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
-        ps_command = f"logoff {session_id}"
-        rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, f"logoff {session_id}")
         return json_result(rc, out, err)
 
     flag = {"restart": "-r", "shutdown": "-s"}.get(action)
