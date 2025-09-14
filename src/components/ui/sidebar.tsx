@@ -4,7 +4,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { VariantProps, cva } from "class-variance-authority"
-import { PanelLeft, PanelRight } from "lucide-react"
+import { PanelLeft, PanelRight, ChevronUp, ChevronDown } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
@@ -19,6 +19,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import * as Collapsible from "@radix-ui/react-collapsible";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -372,6 +373,75 @@ export const SidebarMenuButton = React.forwardRef<
 )
 SidebarMenuButton.displayName = "SidebarMenuButton"
 
+// Sub-menu components using Collapsible
+export const SidebarSub = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<typeof Collapsible.Root>
+>(({ ...props }, ref) => {
+  const { state } = useSidebar();
+  if (state === 'collapsed') {
+    // In collapsed state, sub-menus are not interactive and children are not rendered.
+    // The trigger itself will have a tooltip.
+    return (
+      <div ref={ref} data-sidebar="sub-menu-collapsed-wrapper">
+        {React.Children.map(props.children, child => {
+          if (React.isValidElement(child) && child.type === SidebarSubTrigger) {
+            return React.cloneElement(child, { 'data-collapsed': true } as React.Attributes);
+          }
+          return null; // Don't render content in collapsed state
+        })}
+      </div>
+    );
+  }
+  return <Collapsible.Root ref={ref} {...props} />;
+});
+SidebarSub.displayName = "SidebarSub";
+
+export const SidebarSubTrigger = React.forwardRef<
+  HTMLButtonElement,
+  React.ComponentProps<typeof Collapsible.Trigger>
+>(({ className, children, ...props }, ref) => {
+  const { state } = useSidebar();
+  const isCollapsed = state === 'collapsed';
+  
+  return (
+    <Collapsible.Trigger ref={ref} asChild {...props}>
+      <button className={cn("group/sub-trigger flex w-full items-center justify-between", className)}>
+        {children}
+         {!isCollapsed && (
+          <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+        )}
+      </button>
+    </Collapsible.Trigger>
+  );
+});
+SidebarSubTrigger.displayName = "SidebarSubTrigger";
+
+
+export const SidebarSubContent = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<typeof Collapsible.Content>
+>(({ className, children, ...props }, ref) => {
+  return (
+    <Collapsible.Content
+      ref={ref}
+      className={cn("overflow-hidden transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down", className)}
+      {...props}
+    >
+      <ul className="ml-7 flex flex-col gap-1 border-l border-sidebar-border py-2 pl-2">
+        {children}
+      </ul>
+    </Collapsible.Content>
+  );
+});
+SidebarSubContent.displayName = "SidebarSubContent";
+
+
 // Dummy components for API compatibility, can be expanded if needed
 export const SidebarSection = (props: React.HTMLAttributes<HTMLDivElement>) => <div {...props} />;
 export const SidebarItem = (props: React.HTMLAttributes<HTMLDivElement>) => <div {...props} />;
+
+export const SidebarTrigger = (props: React.HTMLAttributes<HTMLButtonElement>) => {
+    const { toggleSidebar } = useSidebar();
+    return <Button onClick={toggleSidebar} {...props} />
+}

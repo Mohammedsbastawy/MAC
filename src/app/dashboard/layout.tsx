@@ -3,8 +3,8 @@
 
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar, SidebarHeader } from "@/components/ui/sidebar";
-import { Globe, Users, NotebookText, HelpCircle, Settings } from "lucide-react";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar, SidebarHeader, SidebarSub, SidebarSubTrigger, SidebarSubContent } from "@/components/ui/sidebar";
+import { Globe, Users, NotebookText, HelpCircle, Settings, File, Briefcase } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -63,12 +63,34 @@ const AppSidebar = () => {
                             </SidebarMenuButton>
                         </SidebarMenuItem>
                          <SidebarMenuItem>
-                             <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/help')} onClick={closeSidebar}>
-                                <Link href="/dashboard/help">
-                                    <HelpCircle />
-                                    <span className={cn(state === 'collapsed' && "hidden")}>Help & Prerequisites</span>
-                                </Link>
-                            </SidebarMenuButton>
+                             <SidebarSub>
+                                <SidebarSubTrigger>
+                                     <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/help')}>
+                                        <span>
+                                            <HelpCircle />
+                                            <span className={cn(state === 'collapsed' && "hidden")}>Help & Guides</span>
+                                        </span>
+                                    </SidebarMenuButton>
+                                </SidebarSubTrigger>
+                                <SidebarSubContent>
+                                    <SidebarMenuItem>
+                                        <SidebarMenuButton asChild isActive={pathname === '/dashboard/help'} onClick={closeSidebar}>
+                                            <Link href="/dashboard/help">
+                                                <File className="mr-2 h-4 w-4" />
+                                                All Prerequisites
+                                            </Link>
+                                        </SidebarMenuButton>
+                                    </SidebarMenuItem>
+                                    <SidebarMenuItem>
+                                         <SidebarMenuButton asChild isActive={pathname === '/dashboard/help/workgroup'} onClick={closeSidebar}>
+                                            <Link href="/dashboard/help/workgroup">
+                                                 <Briefcase className="mr-2 h-4 w-4" />
+                                                Workgroup Setup
+                                            </Link>
+                                        </SidebarMenuButton>
+                                    </SidebarMenuItem>
+                                </SidebarSubContent>
+                            </SidebarSub>
                         </SidebarMenuItem>
                    </SidebarMenu>
                 </SidebarGroup>
