@@ -57,6 +57,7 @@ import {
   Edit,
   FolderPlus,
   Upload,
+  Wrench,
 } from "lucide-react";
 import {
   Sheet,
@@ -128,10 +129,10 @@ const ICONS: Record<Device["type"], React.ElementType> = {
 type PsInfoData = {
     system_info: { key: string, value: string }[];
     disk_info: {
-        Volume: string;
-        SizeGB: number;
-        FreeGB: number;
-        FreePercent: string;
+        volume: string;
+        size_gb: string;
+        free_gb: string;
+        free_percent: string;
     }[];
 }
 
@@ -265,11 +266,11 @@ const PsInfoResult: React.FC<{ data: PsInfoData }> = ({ data }) => (
                         </TableHeader>
                         <TableBody>
                             {data.disk_info.map(disk => (
-                                <TableRow key={disk.Volume}>
-                                    <TableCell className="font-medium">{disk.Volume}</TableCell>
-                                    <TableCell className="text-right">{disk.SizeGB}</TableCell>
-                                    <TableCell className="text-right">{disk.FreeGB}</TableCell>
-                                    <TableCell className="text-right">{disk.FreePercent}</TableCell>
+                                <TableRow key={disk.volume}>
+                                    <TableCell className="font-medium">{disk.volume}</TableCell>
+                                    <TableCell className="text-right">{disk.size_gb}</TableCell>
+                                    <TableCell className="text-right">{disk.free_gb}</TableCell>
+                                    <TableCell className="text-right">{disk.free_percent}</TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>
@@ -672,13 +673,9 @@ const PsBrowseResult: React.FC<{
     data: PsBrowseItem[];
     currentPath: string;
     onNavigate: (path: string) => void;
-    onDownload: (path: string, filename: string) => void;
-    onUpload: (path: string, file: File) => void;
-    onDeleteItem: (path: string, name: string, isFolder: boolean) => void;
-    onRenameItem: (path: string, newName: string) => void;
-    onCreateFolder: (path: string, folderName: string) => void;
+    onAction: (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     isLoading: boolean;
-}> = ({ data, currentPath, onNavigate, onDownload, onUpload, onDeleteItem, onRenameItem, onCreateFolder, isLoading }) => {
+}> = ({ data, currentPath, onNavigate, onAction, isLoading }) => {
     
     const [actionDialog, setActionDialog] = React.useState<{type: 'rename' | 'create_folder', item?: PsBrowseItem, isOpen: boolean}>({type: 'rename', isOpen: false});
     const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -690,7 +687,7 @@ const PsBrowseResult: React.FC<{
     const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file && currentPath !== 'drives') {
-            onUpload(currentPath, file);
+            onAction('upload', {path: currentPath, file});
         }
         if (event.currentTarget) {
             event.currentTarget.value = "";
@@ -747,10 +744,10 @@ const PsBrowseResult: React.FC<{
         if (!newName) return;
 
         if (actionDialog.type === 'rename' && actionDialog.item) {
-            onRenameItem(actionDialog.item.FullName, newName);
+            onAction('rename', {path: actionDialog.item.FullName, newName});
         } else if (actionDialog.type === 'create_folder' && currentPath !== 'drives') {
              const newFolderPath = currentPath.endsWith('\\') ? `${currentPath}${newName}` : `${currentPath}\\${newName}`;
-            onCreateFolder(newFolderPath, newName);
+            onAction('create_folder', {path: newFolderPath, folderName: newName});
         }
         setActionDialog({type: 'rename', isOpen: false});
     };
@@ -838,7 +835,7 @@ const PsBrowseResult: React.FC<{
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end">
                                             {!item.Mode.startsWith('d') && (
-                                                <DropdownMenuItem onClick={() => onDownload(item.FullName, item.Name)}>
+                                                <DropdownMenuItem onClick={() => onAction('download', {path: item.FullName, filename: item.Name})}>
                                                     <Download className="mr-2 h-4 w-4" /> Download
                                                 </DropdownMenuItem>
                                             )}
@@ -846,7 +843,7 @@ const PsBrowseResult: React.FC<{
                                                 <Edit className="mr-2 h-4 w-4" /> Rename
                                             </DropdownMenuItem>
                                             <DropdownMenuSeparator />
-                                            <DropdownMenuItem className="text-destructive" onClick={() => onDeleteItem(item.FullName, item.Name, item.Mode.startsWith('d'))}>
+                                            <DropdownMenuItem className="text-destructive" onClick={() => onAction('delete', {path: item.FullName, name: item.Name, isFolder: item.Mode.startsWith('d')})}>
                                                 <Trash2 className="mr-2 h-4 w-4" /> Delete
                                             </DropdownMenuItem>
                                         </DropdownMenuContent>
@@ -901,19 +898,17 @@ const CommandOutputDialog: React.FC<{
     onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void;
     onServiceInfo?: (service: PsServiceData) => void;
     onProcessKill?: (processId: number) => void;
-    onBrowseAction?: (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
+    onBrowseNavigate?: (path: string) => void;
+    onBrowseAction?: (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     browsePath?: string;
-}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseAction, browsePath }) => {
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseNavigate, onBrowseAction, browsePath }) => {
     
     const [isLoading, setIsLoading] = React.useState(false);
     
-    const onModificationAction = async (action: 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+    const handleModificationAction = async (action: 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
         if (!onBrowseAction) return;
         setIsLoading(true);
-        // We pass the callback to re-fetch the directory view after the action is done
-        if (onBrowseAction) {
-           await onBrowseAction(action, params);
-        }
+        await onBrowseAction(action, params);
         setIsLoading(false);
     };
 
@@ -948,22 +943,22 @@ const CommandOutputDialog: React.FC<{
                     />
                 }
                 {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
-                {isBrowseView && onBrowseAction && browsePath &&
+                {isBrowseView && onBrowseNavigate && onBrowseAction && browsePath &&
                     <PsBrowseResult 
                         data={state.structuredData!.psbrowse!}
                         currentPath={browsePath}
                         isLoading={isLoading}
-                        onNavigate={(path) => onBrowseAction('navigate', {path})}
-                        onDownload={(path, filename) => onBrowseAction('download', {path, filename})}
-                        onUpload={(path, file) => onModificationAction('upload', {path, file})}
-                        onDeleteItem={(path, name, isFolder) => {
-                             const confirmation = confirm(`Are you sure you want to delete ${isFolder ? 'the folder' : 'the file'} "${name}"? This cannot be undone.`);
-                             if (confirmation) {
-                                 onModificationAction('delete', {path, name, isFolder});
-                             }
+                        onNavigate={onBrowseNavigate}
+                        onAction={(action, params) => {
+                            if (action === 'delete') {
+                                const confirmation = confirm(`Are you sure you want to delete ${params.isFolder ? 'the folder' : 'the file'} "${params.name}"? This cannot be undone.`);
+                                if (confirmation) {
+                                    handleModificationAction(action, params);
+                                }
+                            } else {
+                                handleModificationAction(action, params);
+                            }
                         }}
-                        onRenameItem={(path, newName) => onModificationAction('rename', {path, newName})}
-                        onCreateFolder={(path, folderName) => onModificationAction('create_folder', {path, folderName})}
                     />
                 }
 
@@ -1068,11 +1063,14 @@ const WinRMDiagnosticsDialog: React.FC<{
                 <span className="font-medium">{label}</span>
             </div>
             <div className="flex items-center gap-2">
-                <span className={cn(
-                    "text-sm",
-                    check.status === 'success' && 'text-muted-foreground',
-                    check.status === 'failure' && 'text-destructive'
-                )}>
+                <span
+                    onClick={() => check.status === 'failure' && onOpenLog(check.message)}
+                    className={cn(
+                        "text-sm",
+                        check.status === 'success' && 'text-muted-foreground',
+                        check.status === 'failure' && 'text-destructive cursor-pointer hover:underline'
+                    )}
+                >
                     {check.status === 'checking' ? 'Checking...' : check.status === 'success' ? 'OK' : 'Failed'}
                 </span>
                 {check.status === 'failure' && onFixClick && (
@@ -1123,7 +1121,8 @@ export default function DeviceActionsPanel({
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = React.useState(false);
   const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
-  
+  const [isEnablingPrereqs, setIsEnablingPrereqs] = React.useState(false);
+
   const initialDiagnosticsState: WinRMDiagnosticsState = {
         service: { status: 'checking', message: '' },
         listener: { status: 'checking', message: '' },
@@ -1131,37 +1130,37 @@ export default function DeviceActionsPanel({
     };
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
   
-    const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
-        if (!user || !device) return null;
+  const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
+      if (!device) return null;
 
-        if (showToast) {
-            toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
-        }
+      if (showToast) {
+          toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
+      }
 
-        try {
-            const response = await fetch(`/api/pstools/${endpoint}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ip: device.ipAddress,
-                    username: user.user,
-                    domain: user.domain,
-                    pwd: password,
-                    ...params,
-                }),
-            });
+      try {
+          const response = await fetch(`/api/pstools/${endpoint}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  ip: device.ipAddress,
+                  username: user?.user,
+                  domain: user?.domain,
+                  pwd: password,
+                  ...params,
+              }),
+          });
 
-            const result = await response.json();
+          const result = await response.json();
 
-            if (!response.ok && !result.error) {
-                result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
-            }
-            return result;
+          if (!response.ok && !result.error) {
+              result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
+          }
+          return result;
 
-        } catch (err: any) {
-            return { ok: false, error: `Client-side error: ${err.message}` };
-        }
-    }, [device, user, password, toast]);
+      } catch (err: any) {
+          return { ok: false, error: `Client-side error: ${err.message}` };
+      }
+  }, [device, user, password, toast]);
   
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device || !user) return;
@@ -1199,6 +1198,8 @@ export default function DeviceActionsPanel({
   }, [device, user, initialDiagnosticsState]);
 
   const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
+    if (!device) return;
+    
     const endpointMap: Record<string, string> = {
         navigate: 'psbrowse',
         download: 'download-file',
@@ -1211,7 +1212,10 @@ export default function DeviceActionsPanel({
     if (!endpoint) return;
 
     let apiParams: Record<string, any> = { ...params };
-     if (action === 'upload') {
+    let isModification = ['upload', 'delete', 'rename', 'create_folder'].includes(action);
+
+    // Special handling for upload to convert file to base64
+    if (action === 'upload') {
         if (!(params.file instanceof File)) return;
         const file = params.file as File;
         const base64 = await new Promise<string>((resolve, reject) => {
@@ -1223,18 +1227,16 @@ export default function DeviceActionsPanel({
         apiParams = { destinationPath: `${params.path}\\${file.name}`, fileContent: base64 };
     }
       
-    const result = await runApiAction(endpoint, apiParams);
+    const result = await runApiAction(endpoint, apiParams, !isModification);
     if (!result) return;
     
-    const isModification = ['upload', 'delete', 'rename', 'create_folder'].includes(action);
-
     if (result.ok) {
         if (action === 'navigate') {
             setBrowsePath(params.path);
             setDialogState({
                 isOpen: true,
                 title: `File Browser`,
-                description: `Browsing ${params.path} on ${device?.name}`,
+                description: `Browsing ${params.path} on ${device.name}`,
                 output: result.stdout || '',
                 error: result.stderr || result.error || '',
                 structuredData: result.structured_data || null,
@@ -1252,18 +1254,18 @@ export default function DeviceActionsPanel({
             a.href = url;
             a.download = params.filename;
             document.body.appendChild(a);
-a.click();
+            a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
             toast({ title: "Success", description: `"${params.filename}" downloaded.`});
         } else if (isModification) {
             toast({ title: "Success", description: result.message || "Action completed successfully." });
-            handleBrowseAction('navigate', { path: browsePath }); // Refresh directory
+            await handleBrowseAction('navigate', { path: browsePath }); // Refresh directory
         }
     } else {
         toast({ variant: 'destructive', title: `${action.charAt(0).toUpperCase() + action.slice(1)} Failed`, description: result.error });
         if (isModification) {
-            handleBrowseAction('navigate', { path: browsePath }); // still refresh on failure
+            await handleBrowseAction('navigate', { path: browsePath }); // still refresh on failure
         } else {
            setDialogState(prev => ({ ...prev, isOpen: true, error: result.error || 'An unknown error occurred.' }));
         }
@@ -1275,32 +1277,46 @@ a.click();
     runWinRMDiagnostics();
   }
 
-    const handleEnableWinRM = async () => {
-        if (!device) return;
-        setIsEnablingWinRM(true);
-        toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
-        
-        const result = await runApiAction('enable-winrm', {}, false);
-        
-        if (result?.ok) {
-            toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
-            // Wait 5 seconds for service changes to apply on the remote host
-            await new Promise(resolve => setTimeout(resolve, 5000)); 
-            await runWinRMDiagnostics();
-        } else {
-            toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
-        }
-        setIsEnablingWinRM(false);
-    };
+  const handleEnableWinRM = async () => {
+      if (!device) return;
+      setIsEnablingWinRM(true);
+      toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
+      
+      const result = await runApiAction('enable-winrm', {}, false);
+      
+      if (result?.ok) {
+          toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
+          // Wait 5 seconds for service changes to apply on the remote host
+          await new Promise(resolve => setTimeout(resolve, 5000)); 
+          await runWinRMDiagnostics();
+      } else {
+          toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
+      }
+      setIsEnablingWinRM(false);
+  };
+  
+  const handleEnablePrereqs = async () => {
+      if (!device) return;
+      setIsEnablingPrereqs(true);
+      toast({ title: "Attempting to Enable Prerequisites...", description: `Configuring services and firewall on ${device.name}. This might take a moment.` });
+      
+      const result = await runApiAction('enable-prereqs', {}, false);
+      
+      if (result?.ok) {
+          toast({ title: "Commands Sent Successfully", description: "Prerequisites for RPC/WMI access have been configured. Please wait a moment before retrying." });
+      } else {
+          toast({ variant: "destructive", title: "Failed to Enable Prerequisites", description: result?.details || result?.error });
+      }
+      setIsEnablingPrereqs(false);
+  };
 
   const handleGenericAction = async (tool: string, extraParams: Record<string, any> = {}) => {
-      if (!device) return;
       const result = await runApiAction(tool, extraParams);
       if (result) {
         setDialogState({
             isOpen: true,
             title: `Result from: ${tool}`,
-            description: `Command executed on ${device.name} (${device.ipAddress}).`,
+            description: `Command executed on ${device?.name} (${device?.ipAddress}).`,
             output: result.stdout || '',
             error: result.stderr || result.error || '',
             structuredData: result.structured_data || null,
@@ -1343,7 +1359,7 @@ a.click();
     const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
     
     if (!device) {
-        return null;
+      return null;
     }
 
 
@@ -1427,6 +1443,12 @@ a.click();
                     <span>Browse Files (WinRM)</span>
                     <ChevronRight className="ml-auto h-4 w-4" />
                 </Button>
+                
+                <Button variant={"outline"} className="justify-start w-full" onClick={handleEnablePrereqs} disabled={device.status !== 'online' || isEnablingPrereqs}>
+                    {isEnablingPrereqs ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wrench className="mr-2 h-4 w-4" />}
+                    <span>Repair RPC/WMI Access</span>
+                    <ChevronRight className="ml-auto h-4 w-4" />
+                </Button>
             </div>
 
             <Separator />
@@ -1434,13 +1456,12 @@ a.click();
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">PSTools Actions</h4>
               <div className="grid grid-cols-1 gap-2">
-                <ActionButton icon={Info} label="System Info" onClick={() => handleGenericAction('psinfo')} />
-                <ActionButton icon={Activity} label="Process List" onClick={() => handleGenericAction('pslist')} />
+                <ActionButton icon={Info} label="System Info (WinRM)" onClick={() => handleGenericAction('psinfo')} />
+                <ActionButton icon={Activity} label="Process List (WinRM)" onClick={() => handleGenericAction('pslist')} />
                 <ActionButton icon={Users} label="Logged On Users" onClick={() => handleGenericAction('psloggedon')} />
                 <ActionButton icon={Settings2} label="Manage Services" onClick={() => handleGenericAction('psservice', { action: 'query' })} />
                 <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handleGenericAction('psloglist', { kind: 'system' })} />
                 <ActionButton icon={FileLock} label="Opened Files" onClick={() => handleGenericAction('psfile')} />
-                <ActionButton icon={Fingerprint} label="Get SID" onClick={() => handleGenericAction('psgetsid')} />
               </div>
             </div>
 
@@ -1506,6 +1527,7 @@ a.click();
         onServiceAction={handleServiceAction}
         onServiceInfo={(service) => setServiceInfo(service)}
         onProcessKill={handleProcessKill}
+        onBrowseNavigate={(path) => handleBrowseAction('navigate', { path })}
         onBrowseAction={handleBrowseAction}
         browsePath={browsePath}
     />
@@ -1540,3 +1562,4 @@ a.click();
     
 
     
+
