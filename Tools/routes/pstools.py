@@ -508,6 +508,44 @@ def api_enable_winrm():
             "details": err or out
         }), 500
 
+
+@pstools_bp.route('/enable-prereqs', methods=['POST'])
+def api_enable_prereqs():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, _ = get_auth_from_request(data)
+
+    logger.info(f"Attempting to enable prerequisites (RPC/WMI) on {ip} using PsExec.")
+
+    # Commands to enable RemoteRegistry and configure the firewall for WMI/RPC and SMB
+    chained_command = (
+        'sc config "RemoteRegistry" start= auto && '
+        'net start "RemoteRegistry" && '
+        'netsh advfirewall firewall set rule group="windows management instrumentation (wmi)" new enable=yes && '
+        'netsh advfirewall firewall set rule group="remote administration" new enable=yes && '
+        'netsh advfirewall firewall set rule group="file and printer sharing" new enable=yes'
+    )
+    
+    cmd_args = ["cmd", "/c", chained_command]
+
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
+    
+    if rc == 0 or (rc != 0 and ("service has already been started" in err or "No rules match the specified criteria" in err)):
+        logger.info(f"Successfully sent prerequisite configuration commands to {ip}.")
+        final_message = out + "\n" + err
+        return jsonify({
+            "ok": True,
+            "message": "Prerequisite configuration commands sent successfully. Some services may have already been running or rules enabled, which is expected.",
+            "details": final_message
+        })
+    else:
+        logger.error(f"Failed to enable prerequisites on {ip} via PsExec. RC={rc}. Stderr: {err}. Stdout: {out}")
+        return jsonify({
+            "ok": False,
+            "error": "Failed to execute remote prerequisite commands via PsExec.",
+            "details": err or out
+        }), 500
     
 
     
+
