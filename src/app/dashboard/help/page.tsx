@@ -7,7 +7,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog, Zap, Wrench, Lan, ArrowRight } from "lucide-react"
+import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog, Zap, Wrench, ArrowRight } from "lucide-react"
 import Link from "next/link"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -44,7 +44,7 @@ export default function HelpPage() {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <Lan /> Managing Workgroup (Non-Domain) Machines
+                        <Network /> Managing Workgroup (Non-Domain) Machines
                     </CardTitle>
                     <CardDescription>
                         To manage computers that are not part of your Active Directory domain, a special PowerShell script must be run on each target machine. This page explains how to do it.

@@ -10,7 +10,7 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Lan, ShieldAlert } from "lucide-react";
+import { Network, ShieldAlert } from "lucide-react";
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <pre className="mt-2 rounded-md bg-muted p-4">
@@ -24,7 +24,7 @@ export default function WorkgroupHelpPage() {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <Lan /> Managing Non-Domain (Workgroup) Machines
+                        <Network /> Managing Non-Domain (Workgroup) Machines
                     </CardTitle>
                     <CardDescription>
                         To manage computers that are not part of your Active Directory domain, you must run this PowerShell script on each target machine. This script configures WinRM to trust your control panel machine.
