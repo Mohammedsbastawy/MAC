@@ -255,51 +255,63 @@ def api_psloggedon():
     ip = data.get("ip","")
     _, _, pwd, winrm_user = get_auth_from_request(data)
     
-    logger.info(f"Executing Get-CimInstance for logged on users (WinRM) on {ip}.")
+    logger.info(f"Executing quser.exe (WinRM) on {ip}.")
     
-    ps_command = """
-    $sessions = Get-CimInstance -ClassName Win32_LogonSession | Where-Object { $_.LogonType -in @(2, 10) }
-    $users = $sessions | ForEach-Object {
-        try {
-            $userAccount = Get-CimAssociatedInstance -InputObject $_ -ResultClassName Win32_UserAccount -ErrorAction Stop
-            if ($userAccount) {
-                [PSCustomObject]@{
-                    username   = $userAccount.Name
-                    id         = $_.LogonId
-                    state      = "Active" 
-                    logon_time = $_.StartTime.ToString('yyyy-MM-dd HH:mm:ss')
-                    session_name = '' 
-                    idle_time    = ''
-                }
+    # This PowerShell script is more robust. It uses quser.exe and converts the output
+    # directly to PSCustomObject, which is then converted to JSON. This avoids
+    # fragile regex parsing in Python.
+    ps_command = r"""
+    $output = quser.exe
+    $results = $output | Select-Object -Skip 1 | ForEach-Object {
+        $line = $_.Trim() -replace '\s{2,}', ','
+        $parts = $line.Split(',')
+        if ($parts.Length -ge 5) {
+            # The first part is the username, sometimes preceded by '>'
+            $username = $parts[0].Replace('>', '').Trim()
+            $session_name = $parts[1].Trim()
+            $id = $parts[2].Trim()
+            $state = $parts[3].Trim()
+            # The rest of the parts form the logon time
+            $logon_time = $parts[4..($parts.Length-1)] -join ' '
+            
+            [PSCustomObject]@{
+                username     = $username
+                session_name = $session_name
+                id           = $id
+                state        = $state
+                idle_time    = "" # Quser doesn't provide this easily
+                logon_time   = $logon_time.Trim()
             }
-        } catch {
-            # Ignore sessions that don't have a user (e.g. system services)
         }
     }
-    $users | ConvertTo-Json -Compress
+    $results | ConvertTo-Json -Compress
     """
 
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=30)
     
     if rc != 0:
-        logger.error(f"Get-CimInstance for users failed on {ip} with RC={rc}. Stderr: {err}")
+        logger.error(f"quser.exe command via WinRM failed on {ip} with RC={rc}. Stderr: {err}")
+        # Even if the command fails, return a properly structured empty list
         return json_result(rc, out, err, structured_data={"psloggedon": []})
     
     parsed_users = []
-    if out and out.strip():
+    if out and out.strip() and out.strip() != "null":
         try:
+            # The output from PS is now guaranteed to be JSON
             parsed_json = json.loads(out)
-            # Handle both single object and array from PowerShell
+            # If a single user is found, PS returns a single object. We must wrap it in a list.
             if isinstance(parsed_json, dict):
                 parsed_users = [parsed_json]
             else:
                 parsed_users = parsed_json
         except json.JSONDecodeError:
-            logger.error(f"Failed to parse JSON from Get-CimInstance on {ip}. Raw output: {out}")
-            # If JSON parsing fails, return an empty list but indicate the error
+            logger.error(f"Failed to parse JSON from WinRM on {ip}. Raw output: {out}")
+            # If JSON parsing fails for some reason, return an empty list but log the error
             err = f"Failed to parse user data from remote host: {out}"
             rc = 1 # Indicate a non-fatal error
     
+    # If we are here, 'out' was either empty or we parsed it successfully.
+    # In any case, we return a well-formed structure.
     return json_result(rc, out, err, structured_data={"psloggedon": parsed_users})
 
 
@@ -314,8 +326,6 @@ def api_psshutdown():
 
     if action == 'logoff' and session_id:
         logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
-        # Note: The new psloggedon doesn't return a logoff-compatible ID. 
-        # This is a limitation for now and the button is disabled in the UI.
         rc, out, err = run_winrm_command(ip, winrm_user, pwd, f"logoff {session_id}", type='cmd')
         if rc != 0 and not err:
             err = f"Failed to logoff session {session_id}. The user may have already logged off, or you may not have permission."
@@ -598,5 +608,6 @@ def api_enable_prereqs():
     
 
     
+
 
 

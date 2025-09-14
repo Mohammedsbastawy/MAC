@@ -886,16 +886,32 @@ const PsLoggedOnResult: React.FC<{ data: LoggedOnUser[], onLogoff: (sessionId: s
                             </TableCell>
                             <TableCell className="font-mono text-xs">{user.logon_time}</TableCell>
                             <TableCell className="text-right">
-                                <TooltipProvider>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button variant="ghost" size="icon" disabled className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">
-                                                <LogOut className="h-4 w-4" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent><p>Log off user (Coming Soon)</p></TooltipContent>
-                                    </Tooltip>
-                                </TooltipProvider>
+                                <AlertDialog>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <AlertDialogTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">
+                                                        <LogOut className="h-4 w-4" />
+                                                    </Button>
+                                                </AlertDialogTrigger>
+                                            </TooltipTrigger>
+                                            <TooltipContent><p>Log off user</p></TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                     <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                This will log off user <strong className="font-medium">{user.username}</strong> (Session ID: {user.id}). Any unsaved work will be lost.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => onLogoff(user.id, user.username)} className="bg-destructive hover:bg-destructive/90">Log Off</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
                             </TableCell>
                         </TableRow>
                     )) : (
@@ -1355,18 +1371,17 @@ export default function DeviceActionsPanel({
     }
 
     const handleUserLogoff = async (sessionId: string, username: string) => {
-        toast({ title: "Confirm Logoff", description: `Are you sure you want to log off ${username}?`});
-        // This is a placeholder as the logoff functionality needs to be confirmed/fixed
-        // const result = await runApiAction('psshutdown', { action: 'logoff', session: sessionId });
-        // if (result?.ok) {
-        //     toast({ title: "Success", description: `Logoff command sent for session ${sessionId}.`});
-        //     const refreshResult = await runApiAction('psloggedon', {}, false);
-        //     if (refreshResult?.ok) {
-        //         setDialogState(prev => ({ ...prev, structuredData: refreshResult.structured_data }));
-        //     }
-        // } else {
-        //     toast({ variant: "destructive", title: "Logoff Failed", description: result?.error || result?.stderr });
-        // }
+        const result = await runApiAction('psshutdown', { action: 'logoff', session: sessionId });
+        if (result?.ok) {
+            toast({ title: "Success", description: `Logoff command sent for user ${username}.`});
+            // Refresh the user list
+            const refreshResult = await runApiAction('psloggedon', {}, false);
+            if (refreshResult?.ok) {
+                setDialogState(prev => ({ ...prev, structuredData: refreshResult.structured_data }));
+            }
+        } else {
+            toast({ variant: "destructive", title: "Logoff Failed", description: result?.error || result?.stderr });
+        }
     }
 
     const handleOpenDiagnostics = () => {
@@ -1615,6 +1630,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 
