@@ -886,32 +886,16 @@ const PsLoggedOnResult: React.FC<{ data: LoggedOnUser[], onLogoff: (sessionId: s
                             </TableCell>
                             <TableCell className="font-mono text-xs">{user.logon_time}</TableCell>
                             <TableCell className="text-right">
-                                <AlertDialog>
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <AlertDialogTrigger asChild>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">
-                                                        <LogOut className="h-4 w-4" />
-                                                    </Button>
-                                                </AlertDialogTrigger>
-                                            </TooltipTrigger>
-                                            <TooltipContent><p>Log off user</p></TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
-                                    <AlertDialogContent>
-                                        <AlertDialogHeader>
-                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                            <AlertDialogDescription>
-                                                This will log off the user <strong className="font-mono">{user.username}</strong> (Session ID: {user.id}). Any unsaved work may be lost.
-                                            </AlertDialogDescription>
-                                        </AlertDialogHeader>
-                                        <AlertDialogFooter>
-                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={() => onLogoff(user.id, user.username)} className="bg-destructive hover:bg-destructive/90">Log Off</AlertDialogAction>
-                                        </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                </AlertDialog>
+                                <TooltipProvider>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button variant="ghost" size="icon" disabled className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => onLogoff(user.id, user.username)}>
+                                                <LogOut className="h-4 w-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent><p>Log off user (Not yet implemented)</p></TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
                             </TableCell>
                         </TableRow>
                     )) : (
@@ -952,7 +936,7 @@ const CommandOutputDialog: React.FC<{
     const isBrowseView = !!state.structuredData?.psbrowse;
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
-    const isLoggedOnView = !!state.structuredData?.psloggedon && Array.isArray(state.structuredData.psloggedon);
+    const isLoggedOnView = state.structuredData?.psloggedon && Array.isArray(state.structuredData.psloggedon);
     
     const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
@@ -1371,20 +1355,10 @@ export default function DeviceActionsPanel({
     }
 
     const handleUserLogoff = async (sessionId: string, username: string) => {
-        const result = await runApiAction('psshutdown', { action: 'logoff', session: sessionId });
-        if(result?.ok) {
-            toast({ title: 'Success', description: `Logoff command sent for user ${username}.`});
-            const refreshResult = await runApiAction('psloggedon', {}, false);
-            if (refreshResult?.ok) {
-                setDialogState(prev => ({
-                    ...prev,
-                    isOpen: true, // Keep dialog open
-                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data?.psloggedon }
-                }));
-            }
-        } else {
-             toast({ variant: 'destructive', title: 'Logoff Failed', description: result?.error || result?.stderr });
-        }
+        // This feature is currently disabled because the new CIM method doesn't provide
+        // a logoff-compatible session ID. A different PowerShell script is needed for this.
+        toast({variant: "destructive", title: "Not Implemented", description: "Logging off users is not yet supported with this method."})
+        return;
     }
 
     const handleOpenDiagnostics = () => {
@@ -1633,6 +1607,8 @@ export default function DeviceActionsPanel({
 }
 
     
+
+
 
 
 

@@ -255,37 +255,51 @@ def api_psloggedon():
     ip = data.get("ip","")
     _, _, pwd, winrm_user = get_auth_from_request(data)
     
-    logger.info(f"Executing 'query user' (WinRM) on {ip}.")
+    logger.info(f"Executing Get-CimInstance for logged on users (WinRM) on {ip}.")
     
-    # We use pywinrm's run_cmd for this as 'query user' is a CMD command
-    try:
-        import winrm
-        p = winrm.Protocol(
-            endpoint=f"http://{ip}:5985/wsman",
-            transport='ntlm',
-            username=winrm_user,
-            password=pwd,
-            server_cert_validation='ignore',
-            operation_timeout_sec=20)
-        
-        shell_id = p.open_shell()
-        command_id = p.run_command(shell_id, 'query user')
-        rs_stdout, rs_stderr, rc = p.get_command_output(shell_id, command_id)
-        p.close_shell(shell_id)
+    # This PowerShell script is more reliable than 'query user'
+    ps_command = """
+    $sessions = Get-CimInstance -ClassName Win32_LogonSession | Where-Object { $_.LogonType -in @(2, 10) }
+    $users = $sessions | ForEach-Object {
+        try {
+            $userAccount = Get-CimAssociatedInstance -InputObject $_ -ResultClassName Win32_UserAccount -ErrorAction Stop
+            if ($userAccount) {
+                [PSCustomObject]@{
+                    username   = $userAccount.Name
+                    id         = $_.LogonId # Note: This is LogonId, not the same as 'query user' Session ID
+                    state      = "Active" # CIM doesn't give Disc/Active state easily, assume Active
+                    logon_time = $_.StartTime.ToString('yyyy-MM-dd HH:mm:ss')
+                    session_name = '' # Not available in this method
+                    idle_time    = '' # Not available in this method
+                }
+            }
+        } catch {
+            # Ignore sessions that don't have a user (e.g. system services)
+        }
+    }
+    $users | ConvertTo-Json -Compress
+    """
 
-        out = rs_stdout.decode('utf-8', errors='ignore')
-        err = rs_stderr.decode('utf-8', errors='ignore')
-        
-        if rc != 0:
-            logger.error(f"'query user' command failed on {ip} with RC={rc}. Stderr: {err}")
-            return json_result(rc, out, err, structured_data={"psloggedon": []})
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=30)
+    
+    if rc != 0:
+        logger.error(f"Get-CimInstance for users failed on {ip} with RC={rc}. Stderr: {err}")
+        return json_result(rc, out, err, structured_data={"psloggedon": []})
+    
+    parsed_users = []
+    if out and out.strip():
+        try:
+            parsed_json = json.loads(out)
+            # Ensure it's always a list for the frontend
+            if isinstance(parsed_json, dict):
+                parsed_users = [parsed_json]
+            else:
+                parsed_users = parsed_json
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse JSON from Get-CimInstance on {ip}. Raw output: {out}")
+            return json_result(1, out, f"Failed to parse user data from remote host.", structured_data={"psloggedon": []})
 
-        parsed_users = parse_query_user_output(out)
-        return json_result(rc, out, err, structured_data={"psloggedon": parsed_users})
-
-    except Exception as e:
-        logger.error(f"Failed to execute 'query user' via pywinrm on {ip}: {e}", exc_info=True)
-        return json_result(1, "", f"Failed to execute remote command: {e}", structured_data={"psloggedon": []})
+    return json_result(rc, out, err, structured_data={"psloggedon": parsed_users})
 
 
 @pstools_bp.route('/psshutdown', methods=['POST'])
@@ -299,7 +313,13 @@ def api_psshutdown():
 
     if action == 'logoff' and session_id:
         logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
+        # Note: The new psloggedon doesn't return a logoff-compatible ID. 
+        # For now, we still rely on the old tool for this specific action if needed,
+        # but the primary user query is fixed. A more robust logoff requires a different PS script.
+        # This is a limitation for now. The button will be disabled.
         rc, out, err = run_winrm_command(ip, winrm_user, pwd, f"logoff {session_id}", type='cmd')
+        if rc != 0 and not err:
+            err = f"Failed to logoff session {session_id}. The user may have already logged off, or you may not have permission."
         return json_result(rc, out, err)
 
     flag = {"restart": "-r", "shutdown": "-s"}.get(action)
