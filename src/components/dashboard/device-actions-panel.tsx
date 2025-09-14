@@ -1164,7 +1164,7 @@ export default function DeviceActionsPanel({
   const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
   const [isEnablingPrereqs, setIsEnablingPrereqs] = React.useState(false);
-
+  
   const initialDiagnosticsState: WinRMDiagnosticsState = {
         service: { status: 'checking', message: '' },
         listener: { status: 'checking', message: '' },
