@@ -200,8 +200,8 @@ type DialogState = {
     error: string;
     structuredData?: {
         psinfo?: PsInfoData | null;
-        pslist?: WinRMProcess[] | null;
-        psloggedon?: PsLoggedOnUser[] | null;
+        pslist?: { pslist: WinRMProcess[] } | null;
+        psloggedon?: { psloggedon: PsLoggedOnUser[] } | null;
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
@@ -975,8 +975,8 @@ const CommandOutputDialog: React.FC<{
             <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
-                {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!} onKill={onProcessKill} />}
-                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
+                {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist} onKill={onProcessKill} />}
+                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!.psloggedon} onLogoff={onUserLogoff} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -1099,8 +1099,7 @@ const WinRMDiagnosticsDialog: React.FC<{
         ({ label, check, onFixClick, isFixing }) => (
         <div className="flex items-center justify-between p-3 rounded-lg border border-border">
             <div 
-                className={cn("flex items-center gap-3", check.status === 'failure' && 'cursor-pointer')}
-                onClick={() => check.status === 'failure' && onOpenLog(check.message)}
+                className={cn("flex items-center gap-3")}
             >
                 <StatusIcon status={check.status} />
                 <span className="font-medium">{label}</span>
@@ -1186,9 +1185,6 @@ export default function DeviceActionsPanel({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                   ip: device.ipAddress,
-                  username: user?.user,
-                  domain: user?.domain,
-                  pwd: password,
                   ...params,
               }),
           });
@@ -1203,7 +1199,7 @@ export default function DeviceActionsPanel({
       } catch (err: any) {
           return { ok: false, error: `Client-side error: ${err.message}` };
       }
-  }, [device, user, password, toast]);
+  }, [device, toast]);
   
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device || !user) return;
@@ -1353,7 +1349,7 @@ export default function DeviceActionsPanel({
              if (refreshResult?.ok) {
                 setDialogState(prev => ({
                     ...prev,
-                    structuredData: { ...prev.structuredData, pslist: refreshResult.structured_data.pslist }
+                    structuredData: { ...prev.structuredData, pslist: refreshResult.structured_data }
                 }));
             }
         } else {
@@ -1369,17 +1365,13 @@ export default function DeviceActionsPanel({
             if (refreshResult?.ok) {
                 setDialogState(prev => ({
                     ...prev,
-                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data.psloggedon }
+                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data }
                 }));
             }
         } else {
             toast({ variant: 'destructive', title: 'Logoff Failed', description: result?.error || result?.stderr });
         }
     };
-    
-    if (!device) {
-    return null;
-    }
 
     const handleOpenDiagnostics = () => {
         setIsDiagnosticsOpen(true);
@@ -1387,8 +1379,8 @@ export default function DeviceActionsPanel({
     }
 
     const handleEnableWinRM = async () => {
-        if (!device || !user || !password) {
-            toast({ variant: 'destructive', title: "Error", description: "Authentication details are missing." });
+        if (!device) {
+            toast({ variant: 'destructive', title: "Error", description: "No device selected." });
             return;
         };
         setIsEnablingWinRM(true);
@@ -1421,6 +1413,10 @@ export default function DeviceActionsPanel({
         }
         setIsEnablingPrereqs(false);
     };
+    
+    if (!device) {
+        return null;
+    }
 
 
     const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;

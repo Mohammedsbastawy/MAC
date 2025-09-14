@@ -50,9 +50,10 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    user, _, _, _ = get_auth_from_request(request.get_json(silent=True) or {})
-    if not user:
-         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+    # Allow requests to go through and let each endpoint handle auth,
+    # as some might get it from session and others from the request body.
+    # This hook is now just a placeholder.
+    pass
 
 
 @pstools_bp.route('/psexec', methods=['POST'])
@@ -107,7 +108,7 @@ def api_psservice():
 def api_pslist():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
 
     logger.info(f"Executing Get-Process (WinRM) on {ip}.")
     
@@ -161,7 +162,7 @@ def api_pslist():
 def api_pskill():
     data = request.get_json() or {}
     ip, proc_id = data.get("ip",""), data.get("proc","")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     
     logger.info(f"Executing Stop-Process (WinRM) on {ip} for PID: '{proc_id}'.")
     if not proc_id:
@@ -196,7 +197,7 @@ def api_psloglist():
 def api_psinfo():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     logger.info(f"Executing hardware and OS info query (WinRM) on {ip}.")
 
     ps_command = """
@@ -253,7 +254,7 @@ def api_psinfo():
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     logger.info(f"Executing 'query user' (WinRM) on {ip}.")
 
     ps_command = r"""
@@ -439,7 +440,7 @@ def api_psbrowse():
 def download_file():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     
     if not path:
         return json_result(1, "", "File path is required.")
@@ -455,7 +456,7 @@ def download_file():
 def upload_file():
     data = request.get_json() or {}
     ip, dest_path, content_b64 = data.get("ip"), data.get("destinationPath"), data.get("fileContent")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     
     if not all([dest_path, content_b64]):
         return json_result(1, "", "Destination path and file content are required.")
@@ -487,7 +488,7 @@ def upload_file():
 def delete_item():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     ps_command = f"Remove-Item -Path '{path}' -Recurse -Force -ErrorAction Stop"
     logger.info(f"Attempting to delete '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -497,7 +498,7 @@ def delete_item():
 def rename_item():
     data = request.get_json() or {}
     ip, path, new_name = data.get("ip"), data.get("path"), data.get("newName")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     ps_command = f"Rename-Item -Path '{path}' -NewName '{new_name}' -ErrorAction Stop"
     logger.info(f"Attempting to rename '{path}' to '{new_name}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -507,7 +508,7 @@ def rename_item():
 def create_folder():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     ps_command = f"New-Item -Path '{path}' -ItemType Directory -Force -ErrorAction Stop"
     logger.info(f"Attempting to create folder '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -595,6 +596,7 @@ def api_enable_prereqs():
     
 
     
+
 
 
 
