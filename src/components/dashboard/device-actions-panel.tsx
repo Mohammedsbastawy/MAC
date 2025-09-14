@@ -889,11 +889,11 @@ const PsLoggedOnResult: React.FC<{ data: LoggedOnUser[], onLogoff: (sessionId: s
                                 <TooltipProvider>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <Button variant="ghost" size="icon" disabled className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => onLogoff(user.id, user.username)}>
+                                            <Button variant="ghost" size="icon" disabled className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">
                                                 <LogOut className="h-4 w-4" />
                                             </Button>
                                         </TooltipTrigger>
-                                        <TooltipContent><p>Log off user (Not yet implemented)</p></TooltipContent>
+                                        <TooltipContent><p>Log off user (Coming Soon)</p></TooltipContent>
                                     </Tooltip>
                                 </TooltipProvider>
                             </TableCell>
@@ -1355,10 +1355,18 @@ export default function DeviceActionsPanel({
     }
 
     const handleUserLogoff = async (sessionId: string, username: string) => {
-        // This feature is currently disabled because the new CIM method doesn't provide
-        // a logoff-compatible session ID. A different PowerShell script is needed for this.
-        toast({variant: "destructive", title: "Not Implemented", description: "Logging off users is not yet supported with this method."})
-        return;
+        toast({ title: "Confirm Logoff", description: `Are you sure you want to log off ${username}?`});
+        // This is a placeholder as the logoff functionality needs to be confirmed/fixed
+        // const result = await runApiAction('psshutdown', { action: 'logoff', session: sessionId });
+        // if (result?.ok) {
+        //     toast({ title: "Success", description: `Logoff command sent for session ${sessionId}.`});
+        //     const refreshResult = await runApiAction('psloggedon', {}, false);
+        //     if (refreshResult?.ok) {
+        //         setDialogState(prev => ({ ...prev, structuredData: refreshResult.structured_data }));
+        //     }
+        // } else {
+        //     toast({ variant: "destructive", title: "Logoff Failed", description: result?.error || result?.stderr });
+        // }
     }
 
     const handleOpenDiagnostics = () => {
@@ -1607,6 +1615,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 

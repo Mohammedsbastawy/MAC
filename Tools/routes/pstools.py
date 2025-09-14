@@ -257,7 +257,6 @@ def api_psloggedon():
     
     logger.info(f"Executing Get-CimInstance for logged on users (WinRM) on {ip}.")
     
-    # This PowerShell script is more reliable than 'query user'
     ps_command = """
     $sessions = Get-CimInstance -ClassName Win32_LogonSession | Where-Object { $_.LogonType -in @(2, 10) }
     $users = $sessions | ForEach-Object {
@@ -266,11 +265,11 @@ def api_psloggedon():
             if ($userAccount) {
                 [PSCustomObject]@{
                     username   = $userAccount.Name
-                    id         = $_.LogonId # Note: This is LogonId, not the same as 'query user' Session ID
-                    state      = "Active" # CIM doesn't give Disc/Active state easily, assume Active
+                    id         = $_.LogonId
+                    state      = "Active" 
                     logon_time = $_.StartTime.ToString('yyyy-MM-dd HH:mm:ss')
-                    session_name = '' # Not available in this method
-                    idle_time    = '' # Not available in this method
+                    session_name = '' 
+                    idle_time    = ''
                 }
             }
         } catch {
@@ -290,15 +289,17 @@ def api_psloggedon():
     if out and out.strip():
         try:
             parsed_json = json.loads(out)
-            # Ensure it's always a list for the frontend
+            # Handle both single object and array from PowerShell
             if isinstance(parsed_json, dict):
                 parsed_users = [parsed_json]
             else:
                 parsed_users = parsed_json
         except json.JSONDecodeError:
             logger.error(f"Failed to parse JSON from Get-CimInstance on {ip}. Raw output: {out}")
-            return json_result(1, out, f"Failed to parse user data from remote host.", structured_data={"psloggedon": []})
-
+            # If JSON parsing fails, return an empty list but indicate the error
+            err = f"Failed to parse user data from remote host: {out}"
+            rc = 1 # Indicate a non-fatal error
+    
     return json_result(rc, out, err, structured_data={"psloggedon": parsed_users})
 
 
@@ -314,9 +315,7 @@ def api_psshutdown():
     if action == 'logoff' and session_id:
         logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
         # Note: The new psloggedon doesn't return a logoff-compatible ID. 
-        # For now, we still rely on the old tool for this specific action if needed,
-        # but the primary user query is fixed. A more robust logoff requires a different PS script.
-        # This is a limitation for now. The button will be disabled.
+        # This is a limitation for now and the button is disabled in the UI.
         rc, out, err = run_winrm_command(ip, winrm_user, pwd, f"logoff {session_id}", type='cmd')
         if rc != 0 and not err:
             err = f"Failed to logoff session {session_id}. The user may have already logged off, or you may not have permission."
@@ -599,4 +598,5 @@ def api_enable_prereqs():
     
 
     
+
 
