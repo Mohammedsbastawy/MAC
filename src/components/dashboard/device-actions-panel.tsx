@@ -129,7 +129,6 @@ type PsInfoData = {
     system_info: { key: string, value: string }[];
     disk_info: {
         Volume: string;
-        Type: string;
         SizeGB: number;
         FreeGB: number;
         FreePercent: string;
@@ -911,7 +910,10 @@ const CommandOutputDialog: React.FC<{
     const onModificationAction = async (action: 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
         if (!onBrowseAction) return;
         setIsLoading(true);
-        await onBrowseAction(action, params);
+        // We pass the callback to re-fetch the directory view after the action is done
+        if (onBrowseAction) {
+           await onBrowseAction(action, params);
+        }
         setIsLoading(false);
     };
 
@@ -1129,37 +1131,37 @@ export default function DeviceActionsPanel({
     };
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
   
-  const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
-    if (!user || !device) return null;
+    const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
+        if (!user || !device) return null;
 
-    if (showToast) {
-        toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
-    }
-
-    try {
-        const response = await fetch(`/api/pstools/${endpoint}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ip: device.ipAddress,
-                username: user.user,
-                domain: user.domain,
-                pwd: password,
-                ...params,
-            }),
-        });
-
-        const result = await response.json();
-
-        if (!response.ok && !result.error) {
-            result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
+        if (showToast) {
+            toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
         }
-        return result;
 
-    } catch (err: any) {
-        return { ok: false, error: `Client-side error: ${err.message}` };
-    }
-  }, [device, user, password, toast]);
+        try {
+            const response = await fetch(`/api/pstools/${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ip: device.ipAddress,
+                    username: user.user,
+                    domain: user.domain,
+                    pwd: password,
+                    ...params,
+                }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok && !result.error) {
+                result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
+            }
+            return result;
+
+        } catch (err: any) {
+            return { ok: false, error: `Client-side error: ${err.message}` };
+        }
+    }, [device, user, password, toast]);
   
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device || !user) return;
@@ -1210,15 +1212,16 @@ export default function DeviceActionsPanel({
 
     let apiParams: Record<string, any> = { ...params };
      if (action === 'upload') {
-          const file = params.file as File;
-          const base64 = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.readAsDataURL(file);
-              reader.onload = () => resolve(reader.result?.toString().split(',')[1] || '');
-              reader.onerror = error => reject(error);
-          });
-          apiParams = { destinationPath: `${params.path}\\${file.name}`, fileContent: base64 };
-      }
+        if (!(params.file instanceof File)) return;
+        const file = params.file as File;
+        const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result?.toString().split(',')[1] || '');
+            reader.onerror = error => reject(error);
+        });
+        apiParams = { destinationPath: `${params.path}\\${file.name}`, fileContent: base64 };
+    }
       
     const result = await runApiAction(endpoint, apiParams);
     if (!result) return;
@@ -1249,7 +1252,7 @@ export default function DeviceActionsPanel({
             a.href = url;
             a.download = params.filename;
             document.body.appendChild(a);
-            a.click();
+a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
             toast({ title: "Success", description: `"${params.filename}" downloaded.`});
@@ -1259,7 +1262,9 @@ export default function DeviceActionsPanel({
         }
     } else {
         toast({ variant: 'destructive', title: `${action.charAt(0).toUpperCase() + action.slice(1)} Failed`, description: result.error });
-        if (!isModification) {
+        if (isModification) {
+            handleBrowseAction('navigate', { path: browsePath }); // still refresh on failure
+        } else {
            setDialogState(prev => ({ ...prev, isOpen: true, error: result.error || 'An unknown error occurred.' }));
         }
     }
@@ -1270,22 +1275,23 @@ export default function DeviceActionsPanel({
     runWinRMDiagnostics();
   }
 
-  const handleEnableWinRM = async () => {
-    if (!device) return;
-    setIsEnablingWinRM(true);
-    toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
-    
-    const result = await runApiAction('enable-winrm', {}, false);
-    
-    if (result?.ok) {
-        toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for changes to apply
-        await runWinRMDiagnostics();
-    } else {
-        toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
-    }
-    setIsEnablingWinRM(false);
-  };
+    const handleEnableWinRM = async () => {
+        if (!device) return;
+        setIsEnablingWinRM(true);
+        toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
+        
+        const result = await runApiAction('enable-winrm', {}, false);
+        
+        if (result?.ok) {
+            toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
+            // Wait 5 seconds for service changes to apply on the remote host
+            await new Promise(resolve => setTimeout(resolve, 5000)); 
+            await runWinRMDiagnostics();
+        } else {
+            toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
+        }
+        setIsEnablingWinRM(false);
+    };
 
   const handleGenericAction = async (tool: string, extraParams: Record<string, any> = {}) => {
       if (!device) return;
@@ -1334,9 +1340,8 @@ export default function DeviceActionsPanel({
         }
     }
 
-    // This hook is essential to prevent calling hooks conditionally
-    const Icon = device ? (ICONS[device.type] || Laptop) : React.Fragment;
-
+    const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
+    
     if (!device) {
         return null;
     }

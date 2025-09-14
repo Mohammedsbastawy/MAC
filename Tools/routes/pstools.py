@@ -197,13 +197,17 @@ def api_psinfo():
     data = request.get_json() or {}
     ip = data.get("ip", "")
     _, _, pwd, winrm_user = get_auth_from_request(data)
-    logger.info(f"Executing Get-ComputerInfo (WinRM) on {ip}.")
+    logger.info(f"Executing hardware and OS info query (WinRM) on {ip}.")
 
     ps_command = """
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
     $cs = Get-CimInstance -ClassName Win32_ComputerSystem
+    $proc = Get-CimInstance -ClassName Win32_Processor
+    $gpu = Get-CimInstance -ClassName Win32_VideoController
+    
     $uptime_span = (Get-Date) - $os.LastBootUpTime
     $uptime_str = "$($uptime_span.Days) days, $($uptime_span.Hours) hours, $($uptime_span.Minutes) minutes"
+    
     $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
         [pscustomobject]@{
             Volume = $_.DriveLetter;
@@ -214,11 +218,14 @@ def api_psinfo():
     }
 
     $system_info = @{
+        "OS" = $os.Caption;
         "Kernel version" = $os.Version;
+        "Processor" = $proc.Name;
+        "Total Memory" = "{0:N2} GB" -f ($cs.TotalPhysicalMemory / 1GB);
+        "Video Card" = $gpu.Name;
+        "Domain" = $cs.Domain;
         "Uptime" = $uptime_str;
         "Install date" = $os.InstallDate.ToString('yyyy-MM-dd');
-        "OS" = $os.Caption;
-        "Domain" = $cs.Domain;
         "Logged on users" = $cs.NumberOfUsers;
     }
 
@@ -485,7 +492,8 @@ def api_enable_winrm():
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     
     # Check for success messages in stdout, even if RC is non-zero (e.g. service already started)
-    if rc == 0 or ("WinRM has been updated" in out and "[SC] ChangeServiceConfig SUCCESS" in out):
+    # RC 2 can mean the service was already started, which is not a failure for our goal.
+    if rc == 0 or (rc == 2 and "service has already been started" in err):
         logger.info(f"Successfully sent WinRM configuration commands to {ip}.")
         return jsonify({
             "ok": True,
