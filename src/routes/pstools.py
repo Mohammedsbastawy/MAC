@@ -253,7 +253,8 @@ def api_psinfo():
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_request(data)
+    
     logger.info(f"Executing 'query user' (WinRM) on {ip}.")
     
     # We use pywinrm's run_cmd for this as 'query user' is a CMD command
@@ -286,6 +287,7 @@ def api_psloggedon():
         logger.error(f"Failed to execute 'query user' via pywinrm on {ip}: {e}", exc_info=True)
         return json_result(1, "", f"Failed to execute remote command: {e}")
 
+
 @pstools_bp.route('/psshutdown', methods=['POST'])
 def api_psshutdown():
     data = request.get_json() or {}
@@ -298,6 +300,8 @@ def api_psshutdown():
     if action == 'logoff' and session_id:
         logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
         rc, out, err = run_winrm_command(ip, winrm_user, pwd, f"logoff {session_id}", type='cmd')
+        if rc != 0 and not err:
+            err = f"Failed to logoff session {session_id}. The user may have already logged off, or you may not have permission."
         return json_result(rc, out, err)
 
     flag = {"restart": "-r", "shutdown": "-s"}.get(action)
@@ -577,5 +581,4 @@ def api_enable_prereqs():
     
 
     
-
 

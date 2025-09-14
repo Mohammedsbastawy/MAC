@@ -71,23 +71,21 @@ def get_tools_path(exe_name: str) -> str:
     # If not found, return the expected path, allowing subprocess to fail with a clear "not found" error.
     return candidate
 
-def run_winrm_command(host, user, password, script, timeout=10):
+def run_winrm_command(host, user, password, command, timeout=20, type='powershell'):
     """
-    Executes a PowerShell script on a remote host using pywinrm.
+    Executes a command on a remote host using pywinrm.
     Returns (return_code, stdout, stderr).
-    This version includes robust error handling.
     """
     try:
         import winrm
         from winrm.exceptions import WinRMTransportError, WinRMOperationTimeoutError, WinRMError
-        # requests is a dependency of pywinrm
         from requests.exceptions import ConnectTimeout
     except ImportError:
         logger.error("The 'pywinrm' library is not installed. Please run 'pip install pywinrm'.")
         return 1, "", "The pywinrm library is not installed on the server."
         
     logger.info(f"Initiating WinRM connection to {host} for user {user}.")
-    logger.debug(f"WinRM script to be executed on {host}: {script}")
+    logger.debug(f"WinRM command to be executed on {host}: {command}")
 
     try:
         session = winrm.Session(
@@ -95,15 +93,15 @@ def run_winrm_command(host, user, password, script, timeout=10):
             auth=(user, password),
             transport='ntlm',
             server_cert_validation='ignore',
-            # The operation timeout should be the main timeout control.
-            # Connect timeout is handled by requests library under the hood.
             operation_timeout_sec=timeout,
-            # Set a slightly longer read timeout.
             read_timeout_sec=timeout + 5
         )
         
-        result = session.run_ps(script)
-        
+        if type == 'powershell':
+            result = session.run_ps(command)
+        else: # cmd
+            result = session.run_cmd(command)
+
         stdout = result.std_out.decode('utf-8', errors='ignore') if result.std_out else ""
         stderr = result.std_err.decode('utf-8', errors='ignore') if result.std_err else ""
 
@@ -120,7 +118,7 @@ def run_winrm_command(host, user, password, script, timeout=10):
         logger.error(f"WinRM timeout on {host}: {err_msg}")
         return 1, "", err_msg
     except WinRMOperationTimeoutError:
-        err_msg = f"Operation timed out. The host {host} responded but the command '{script[:30]}...' took longer than {timeout} seconds to complete."
+        err_msg = f"Operation timed out. The host {host} responded but the command '{command[:50]}...' took longer than {timeout} seconds to complete."
         logger.error(f"WinRM operation timeout on {host}: {err_msg}")
         return 1, "", err_msg
     except WinRMTransportError as e:
@@ -375,48 +373,48 @@ def parse_psloglist_output(output):
 def parse_query_user_output(output):
     """
     Parses the text output of the 'query user' command into a list of dicts.
+    This version is more robust and does not use complex regex.
     """
     users = []
     lines = output.strip().splitlines()
     if len(lines) <= 1:
         return users
-
-    # The header line defines the start positions of the columns
-    header = lines[0]
-    # Find column start positions
-    username_pos = header.find("USERNAME")
-    sessionname_pos = header.find("SESSIONNAME")
-    id_pos = header.find("ID")
-    state_pos = header.find("STATE")
-    idle_time_pos = header.find("IDLE TIME")
-    logon_time_pos = header.find("LOGON TIME")
-
-    # Process each user line
+    
+    # Skip the header line
     for line in lines[1:]:
-        # The active user line starts with '>'
+        # The active session line starts with '>'
         clean_line = line[1:] if line.startswith('>') else line
-
-        username = clean_line[username_pos:sessionname_pos].strip()
-        session_name = clean_line[sessionname_pos:id_pos].strip()
-        session_id = clean_line[id_pos:state_pos].strip()
-        state = clean_line[state_pos:idle_time_pos].strip()
-        idle_time = clean_line[idle_time_pos:logon_time_pos].strip()
-        logon_time = clean_line[logon_time_pos:].strip()
         
-        if username:
+        # Split by spaces and filter out empty strings
+        parts = [p for p in clean_line.split(' ') if p]
+        
+        # A valid line has at least 6 parts (e.g., USER, SESSION, ID, STATE, IDLE, TIME)
+        if len(parts) < 6:
+            continue
+            
+        try:
+            # The structure is fairly consistent:
+            # USERNAME, SESSIONNAME, ID, STATE, IDLE_TIME, LOGON_TIME...
+            # We reconstruct the logon time in case it contains spaces
+            logon_time_parts = parts[5:]
+            
             users.append({
-                "username": username,
-                "session_name": session_name,
-                "id": session_id,
-                "state": state,
-                "idle_time": idle_time,
-                "logon_time": logon_time,
+                "username": parts[0],
+                "session_name": parts[1],
+                "id": parts[2],
+                "state": parts[3],
+                "idle_time": parts[4],
+                "logon_time": ' '.join(logon_time_parts),
             })
+        except IndexError:
+            # Skip malformed lines
+            logger.warning(f"Skipping malformed 'query user' line: {line}")
+            continue
+
     return users
     
 
     
 
     
-
 
