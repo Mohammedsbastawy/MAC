@@ -373,47 +373,44 @@ def parse_psloglist_output(output):
 def parse_query_user_output(output):
     """
     Parses the text output of the 'query user' command into a list of dicts.
-    More robustly handles whitespace and missing session names.
+    This version is more robust and does not use complex regex.
     """
     users = []
     lines = output.strip().splitlines()
     if len(lines) <= 1:
         return users
     
-    # Regex to robustly capture fields based on patterns, not just spacing
-    # It looks for:
-    # 1. (Optional) ">" at the start
-    # 2. A username (no spaces)
-    # 3. A session name (can be alphanumeric, or rdp-tcp#number), or it might be skipped
-    # 4. A session ID (number)
-    # 5. A state (word)
-    # 6. Idle time (can be "." or "dd:dd")
-    # 7. Logon time (the rest of the line)
-    line_regex = re.compile(
-        r"^\s*(>?)(?P<username>\S+)"  # Group 1: >?, Group 2: USERNAME
-        r"\s+(?P<session_name>\S+)"       # Group 3: SESSIONNAME
-        r"\s+(?P<id>\d+)"                # Group 4: ID
-        r"\s+(?P<state>[A-Za-z]+)"        # Group 5: STATE
-        r"\s+(?P<idle_time>\S+)"          # Group 6: IDLE TIME
-        r"\s+(?P<logon_time>.+)\s*$"      # Group 7: LOGON TIME
-    )
-
-    for line in lines[1:]: # Skip header
-        match = line_regex.match(line)
-        if match:
-            user_data = match.groupdict()
-            # Clean up the username if it starts with '>'
-            if line.strip().startswith('>'):
-                user_data['username'] = user_data['username']
+    # Skip the header line
+    for line in lines[1:]:
+        # The active session line starts with '>'
+        clean_line = line[1:] if line.startswith('>') else line
+        
+        # Split by spaces and filter out empty strings
+        parts = [p for p in clean_line.split(' ') if p]
+        
+        # A valid line has at least 6 parts (e.g., USER, SESSION, ID, STATE, IDLE, TIME)
+        if len(parts) < 6:
+            continue
+            
+        try:
+            # The structure is fairly consistent:
+            # USERNAME, SESSIONNAME, ID, STATE, IDLE_TIME, LOGON_TIME...
+            # We reconstruct the logon time in case it contains spaces
+            logon_time_parts = parts[5:]
             
             users.append({
-                "username": user_data["username"],
-                "session_name": user_data["session_name"],
-                "id": user_data["id"],
-                "state": user_data["state"],
-                "idle_time": user_data["idle_time"],
-                "logon_time": user_data["logon_time"].strip(),
+                "username": parts[0],
+                "session_name": parts[1],
+                "id": parts[2],
+                "state": parts[3],
+                "idle_time": parts[4],
+                "logon_time": ' '.join(logon_time_parts),
             })
+        except IndexError:
+            # Skip malformed lines
+            logger.warning(f"Skipping malformed 'query user' line: {line}")
+            continue
+
     return users
     
 
