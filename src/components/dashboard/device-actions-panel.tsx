@@ -148,8 +148,12 @@ type WinRMProcess = {
 };
 
 type PsLoggedOnUser = {
-    time: string;
-    user: string;
+    username: string;
+    session_name: string;
+    id: string;
+    state: string;
+    idle_time: string;
+    logon_time: string;
 };
 
 type PsFileData = {
@@ -412,26 +416,40 @@ const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[] }> = ({ data }) => (
     <Card>
         <CardHeader>
             <CardTitle className="flex items-center text-lg">
-                <UserCheck className="mr-2 h-5 w-5" /> Logged On Users
+                <Users className="mr-2 h-5 w-5" /> Logged On Users
             </CardTitle>
         </CardHeader>
         <CardContent>
-            <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Logon Time</TableHead>
-                        <TableHead>User</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {data.map((logon, index) => (
-                        <TableRow key={index}>
-                            <TableCell className="font-mono text-xs">{logon.time}</TableCell>
-                            <TableCell className="font-medium">{logon.user}</TableCell>
+            {data.length > 0 ? (
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Username</TableHead>
+                            <TableHead>Session</TableHead>
+                            <TableHead>State</TableHead>
+                            <TableHead>Logon Time</TableHead>
                         </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
+                    </TableHeader>
+                    <TableBody>
+                        {data.map((logon, index) => (
+                            <TableRow key={index}>
+                                <TableCell className="font-medium">{logon.username}</TableCell>
+                                <TableCell>{logon.session_name}</TableCell>
+                                <TableCell>
+                                     <Badge variant={logon.state.toLowerCase() === 'active' ? 'default' : 'secondary'}
+                                         className={cn(logon.state.toLowerCase() === 'active' && "bg-green-600")}
+                                     >
+                                        {logon.state}
+                                    </Badge>
+                                </TableCell>
+                                <TableCell className="font-mono text-xs">{logon.logon_time}</TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            ) : (
+                 <div className="text-center text-muted-foreground py-10">No users are currently logged on.</div>
+            )}
         </CardContent>
     </Card>
 );
@@ -915,12 +933,13 @@ const CommandOutputDialog: React.FC<{
     const isBrowseView = !!state.structuredData?.psbrowse;
     const isProcessView = !!state.structuredData?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
-    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !(state.structuredData?.psloggedon || state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    const isLoggedOnView = !!state.structuredData?.psloggedon;
+    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            isBrowseView || isProcessView || isInfoView ? "max-w-4xl" : "max-w-2xl",
+            isBrowseView || isProcessView || isInfoView || isLoggedOnView ? "max-w-4xl" : "max-w-2xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -933,7 +952,7 @@ const CommandOutputDialog: React.FC<{
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!} onKill={onProcessKill} />}
-                {state.structuredData?.psloggedon && <PsLoggedOnResult data={state.structuredData.psloggedon} />}
+                {isLoggedOnView && <PsLoggedOnResult data={state.structuredData!.psloggedon!} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -964,7 +983,7 @@ const CommandOutputDialog: React.FC<{
 
 
                 {/* Raw output for non-structured data or if there's an error */}
-                {!(isBrowseView || isProcessView || isInfoView) && (
+                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView) && (
                     <>
                     {(state.output && !isHackerTheme) && (
                          <details className="mt-4">
@@ -1130,6 +1149,7 @@ export default function DeviceActionsPanel({
     };
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
   
+  // This must be defined before any conditional returns
   const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
       if (!device) return null;
 
@@ -1271,6 +1291,10 @@ export default function DeviceActionsPanel({
         }
     }
   }, [runApiAction, toast, device, browsePath]);
+  
+  if (!device) {
+    return null;
+  }
 
   const handleOpenDiagnostics = () => {
     setIsDiagnosticsOpen(true);
@@ -1278,11 +1302,14 @@ export default function DeviceActionsPanel({
   }
 
   const handleEnableWinRM = async () => {
-      if (!device) return;
+      if (!device || !user || !password) {
+        toast({ variant: 'destructive', title: "Error", description: "Authentication details are missing." });
+        return;
+      };
       setIsEnablingWinRM(true);
       toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
       
-      const result = await runApiAction('enable-winrm', {}, false);
+      const result = await runApiAction('enable-winrm', { email: user.email, pwd: password }, false);
       
       if (result?.ok) {
           toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
@@ -1357,10 +1384,6 @@ export default function DeviceActionsPanel({
     }
 
     const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
-    
-    if (!device) {
-      return null;
-    }
 
 
   return (
@@ -1458,7 +1481,7 @@ export default function DeviceActionsPanel({
               <div className="grid grid-cols-1 gap-2">
                 <ActionButton icon={Info} label="System Info (WinRM)" onClick={() => handleGenericAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List (WinRM)" onClick={() => handleGenericAction('pslist')} />
-                <ActionButton icon={Users} label="Logged On Users" onClick={() => handleGenericAction('psloggedon')} />
+                <ActionButton icon={Users} label="Logged On Users (WinRM)" onClick={() => handleGenericAction('psloggedon')} />
                 <ActionButton icon={Settings2} label="Manage Services" onClick={() => handleGenericAction('psservice', { action: 'query' })} />
                 <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handleGenericAction('psloglist', { kind: 'system' })} />
                 <ActionButton icon={FileLock} label="Opened Files" onClick={() => handleGenericAction('psfile')} />
@@ -1558,8 +1581,3 @@ export default function DeviceActionsPanel({
     </>
   );
 }
-
-    
-
-    
-
