@@ -297,22 +297,31 @@ def api_psloggedon():
     
     return json_result(rc, out, err, structured_data)
 
+
 @pstools_bp.route('/psshutdown', methods=['POST'])
 def api_psshutdown():
     data = request.get_json() or {}
-    ip, action = data.get("ip",""), data.get("action","restart")
-    user, domain, pwd, _ = get_auth_from_request(data)
-    flag = {"restart": "-r", "shutdown": "-s", "logoff": "-l"}.get(action)
+    ip = data.get("ip","")
+    action = data.get("action","restart")
+    session_id = data.get("session")
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    
     logger.info(f"Executing psshutdown on {ip} with action: '{action}'.")
+
+    if action == 'logoff' and session_id:
+        logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
+        ps_command = f"logoff {session_id}"
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
+        return json_result(rc, out, err)
+
+    flag = {"restart": "-r", "shutdown": "-s"}.get(action)
     if not flag:
         return json_result(2, "", "Invalid power action")
     
-    args = [flag, "-t", "0"]
-    if action in ["restart", "shutdown"]:
-        args.append("-f")
-
+    args = [flag, "-t", "0", "-f"]
     rc, out, err = run_ps_command("psshutdown", ip, user, domain, pwd, args, timeout=60)
     return json_result(rc, out, err)
+
 
 @pstools_bp.route('/psfile', methods=['POST'])
 def api_psfile():
@@ -586,5 +595,6 @@ def api_enable_prereqs():
     
 
     
+
 
 

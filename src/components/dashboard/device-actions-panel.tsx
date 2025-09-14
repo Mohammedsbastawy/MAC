@@ -412,7 +412,7 @@ const PsListResult: React.FC<{ data: WinRMProcess[], onKill: (processId: number)
     )
 }
 
-const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[] }> = ({ data }) => (
+const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[], onLogoff: (sessionId: string, username: string) => void; }> = ({ data, onLogoff }) => (
     <Card>
         <CardHeader>
             <CardTitle className="flex items-center text-lg">
@@ -428,11 +428,12 @@ const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[] }> = ({ data }) => (
                             <TableHead>Session</TableHead>
                             <TableHead>State</TableHead>
                             <TableHead>Logon Time</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {data.map((logon, index) => (
-                            <TableRow key={index}>
+                        {data.map((logon) => (
+                            <TableRow key={logon.id}>
                                 <TableCell className="font-medium">{logon.username}</TableCell>
                                 <TableCell>{logon.session_name}</TableCell>
                                 <TableCell>
@@ -443,6 +444,27 @@ const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[] }> = ({ data }) => (
                                     </Badge>
                                 </TableCell>
                                 <TableCell className="font-mono text-xs">{logon.logon_time}</TableCell>
+                                <TableCell className="text-right">
+                                    <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                            <Button variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive">
+                                                <UserX className="mr-2 h-3 w-3" /> Log off
+                                            </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                    This will log off the user <strong>{logon.username}</strong> from session {logon.id}. Any unsaved work may be lost.
+                                                </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                <AlertDialogAction onClick={() => onLogoff(logon.id, logon.username)} className="bg-destructive hover:bg-destructive/90">Confirm Log off</AlertDialogAction>
+                                            </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </AlertDialog>
+                                </TableCell>
                             </TableRow>
                         ))}
                     </TableBody>
@@ -453,6 +475,7 @@ const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[] }> = ({ data }) => (
         </CardContent>
     </Card>
 );
+
 
 const PsFileResult: React.FC<{ data: PsFileData[] }> = ({ data }) => (
     <Card>
@@ -916,10 +939,11 @@ const CommandOutputDialog: React.FC<{
     onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void;
     onServiceInfo?: (service: PsServiceData) => void;
     onProcessKill?: (processId: number) => void;
+    onUserLogoff?: (sessionId: string, username: string) => void;
     onBrowseNavigate?: (path: string) => void;
     onBrowseAction?: (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     browsePath?: string;
-}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseNavigate, onBrowseAction, browsePath }) => {
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onUserLogoff, onBrowseNavigate, onBrowseAction, browsePath }) => {
     
     const [isLoading, setIsLoading] = React.useState(false);
     
@@ -952,7 +976,7 @@ const CommandOutputDialog: React.FC<{
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!} onKill={onProcessKill} />}
-                {isLoggedOnView && <PsLoggedOnResult data={state.structuredData!.psloggedon!} />}
+                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -1149,7 +1173,6 @@ export default function DeviceActionsPanel({
     };
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
   
-  // This must be defined before any conditional returns
   const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
       if (!device) return null;
 
@@ -1291,51 +1314,6 @@ export default function DeviceActionsPanel({
         }
     }
   }, [runApiAction, toast, device, browsePath]);
-  
-  if (!device) {
-    return null;
-  }
-
-  const handleOpenDiagnostics = () => {
-    setIsDiagnosticsOpen(true);
-    runWinRMDiagnostics();
-  }
-
-  const handleEnableWinRM = async () => {
-      if (!device || !user || !password) {
-        toast({ variant: 'destructive', title: "Error", description: "Authentication details are missing." });
-        return;
-      };
-      setIsEnablingWinRM(true);
-      toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
-      
-      const result = await runApiAction('enable-winrm', { email: user.email, pwd: password }, false);
-      
-      if (result?.ok) {
-          toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
-          // Wait 5 seconds for service changes to apply on the remote host
-          await new Promise(resolve => setTimeout(resolve, 5000)); 
-          await runWinRMDiagnostics();
-      } else {
-          toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
-      }
-      setIsEnablingWinRM(false);
-  };
-  
-  const handleEnablePrereqs = async () => {
-      if (!device) return;
-      setIsEnablingPrereqs(true);
-      toast({ title: "Attempting to Enable Prerequisites...", description: `Configuring services and firewall on ${device.name}. This might take a moment.` });
-      
-      const result = await runApiAction('enable-prereqs', {}, false);
-      
-      if (result?.ok) {
-          toast({ title: "Commands Sent Successfully", description: "Prerequisites for RPC/WMI access have been configured. Please wait a moment before retrying." });
-      } else {
-          toast({ variant: "destructive", title: "Failed to Enable Prerequisites", description: result?.details || result?.error });
-      }
-      setIsEnablingPrereqs(false);
-  };
 
   const handleGenericAction = async (tool: string, extraParams: Record<string, any> = {}) => {
       const result = await runApiAction(tool, extraParams);
@@ -1382,6 +1360,68 @@ export default function DeviceActionsPanel({
              toast({ variant: 'destructive', title: 'Action Failed', description: result?.error || result?.stderr });
         }
     }
+
+    const handleUserLogoff = async (sessionId: string, username: string) => {
+        const result = await runApiAction('psshutdown', { action: 'logoff', session: sessionId });
+        if (result?.ok) {
+            toast({ title: 'Success', description: `Logoff command sent for user ${username}.` });
+            const refreshResult = await runApiAction('psloggedon', {}, false);
+            if (refreshResult?.ok) {
+                setDialogState(prev => ({
+                    ...prev,
+                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data.psloggedon }
+                }));
+            }
+        } else {
+            toast({ variant: 'destructive', title: 'Logoff Failed', description: result?.error || result?.stderr });
+        }
+    };
+    
+    if (!device) {
+    return null;
+    }
+
+    const handleOpenDiagnostics = () => {
+        setIsDiagnosticsOpen(true);
+        runWinRMDiagnostics();
+    }
+
+    const handleEnableWinRM = async () => {
+        if (!device || !user || !password) {
+            toast({ variant: 'destructive', title: "Error", description: "Authentication details are missing." });
+            return;
+        };
+        setIsEnablingWinRM(true);
+        toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
+
+        const result = await runApiAction('enable-winrm', {}, false);
+
+        if (result?.ok) {
+            toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
+            // Wait 5 seconds for service changes to apply on the remote host
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            await runWinRMDiagnostics();
+        } else {
+            toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
+        }
+        setIsEnablingWinRM(false);
+    };
+
+    const handleEnablePrereqs = async () => {
+        if (!device) return;
+        setIsEnablingPrereqs(true);
+        toast({ title: "Attempting to Enable Prerequisites...", description: `Configuring services and firewall on ${device.name}. This might take a moment.` });
+
+        const result = await runApiAction('enable-prereqs', {}, false);
+
+        if (result?.ok) {
+            toast({ title: "Commands Sent Successfully", description: "Prerequisites for RPC/WMI access have been configured. Please wait a moment before retrying." });
+        } else {
+            toast({ variant: "destructive", title: "Failed to Enable Prerequisites", description: result?.details || result?.error });
+        }
+        setIsEnablingPrereqs(false);
+    };
+
 
     const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
 
@@ -1495,7 +1535,6 @@ export default function DeviceActionsPanel({
                 <div className="grid grid-cols-1 gap-2">
                     <ActionButton icon={RefreshCw} label="Restart" onClick={() => handleGenericAction('psshutdown', { action: 'restart' })} />
                     <ActionButton icon={PowerOff} label="Shutdown" onClick={() => handleGenericAction('psshutdown', { action: 'shutdown' })} variant="destructive" />
-                    <ActionButton icon={UserX} label="Logoff User" onClick={() => handleGenericAction('psshutdown', { action: 'logoff' })} variant="destructive" />
                 </div>
             </div>
 
@@ -1550,6 +1589,7 @@ export default function DeviceActionsPanel({
         onServiceAction={handleServiceAction}
         onServiceInfo={(service) => setServiceInfo(service)}
         onProcessKill={handleProcessKill}
+        onUserLogoff={handleUserLogoff}
         onBrowseNavigate={(path) => handleBrowseAction('navigate', { path })}
         onBrowseAction={handleBrowseAction}
         browsePath={browsePath}
