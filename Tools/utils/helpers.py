@@ -373,42 +373,46 @@ def parse_psloglist_output(output):
 def parse_query_user_output(output):
     """
     Parses the text output of the 'query user' command into a list of dicts.
+    More robustly handles whitespace and missing session names.
     """
     users = []
     lines = output.strip().splitlines()
     if len(lines) <= 1:
         return users
+    
+    # Regex to robustly capture fields based on patterns, not just spacing
+    # It looks for:
+    # 1. (Optional) ">" at the start
+    # 2. A username (no spaces)
+    # 3. A session name (can be alphanumeric, or rdp-tcp#number), or it might be skipped
+    # 4. A session ID (number)
+    # 5. A state (word)
+    # 6. Idle time (can be "." or "dd:dd")
+    # 7. Logon time (the rest of the line)
+    line_regex = re.compile(
+        r"^\s*(>?)(?P<username>\S+)"  # Group 1: >?, Group 2: USERNAME
+        r"\s+(?P<session_name>\S+)"       # Group 3: SESSIONNAME
+        r"\s+(?P<id>\d+)"                # Group 4: ID
+        r"\s+(?P<state>[A-Za-z]+)"        # Group 5: STATE
+        r"\s+(?P<idle_time>\S+)"          # Group 6: IDLE TIME
+        r"\s+(?P<logon_time>.+)\s*$"      # Group 7: LOGON TIME
+    )
 
-    # The header line defines the start positions of the columns
-    header = lines[0]
-    # Find column start positions
-    username_pos = header.find("USERNAME")
-    sessionname_pos = header.find("SESSIONNAME")
-    id_pos = header.find("ID")
-    state_pos = header.find("STATE")
-    idle_time_pos = header.find("IDLE TIME")
-    logon_time_pos = header.find("LOGON TIME")
-
-    # Process each user line
-    for line in lines[1:]:
-        # The active user line starts with '>'
-        clean_line = line[1:] if line.startswith('>') else line
-
-        username = clean_line[username_pos:sessionname_pos].strip()
-        session_name = clean_line[sessionname_pos:id_pos].strip()
-        session_id = clean_line[id_pos:state_pos].strip()
-        state = clean_line[state_pos:idle_time_pos].strip()
-        idle_time = clean_line[idle_time_pos:logon_time_pos].strip()
-        logon_time = clean_line[logon_time_pos:].strip()
-        
-        if username:
+    for line in lines[1:]: # Skip header
+        match = line_regex.match(line)
+        if match:
+            user_data = match.groupdict()
+            # Clean up the username if it starts with '>'
+            if line.strip().startswith('>'):
+                user_data['username'] = user_data['username']
+            
             users.append({
-                "username": username,
-                "session_name": session_name,
-                "id": session_id,
-                "state": state,
-                "idle_time": idle_time,
-                "logon_time": logon_time,
+                "username": user_data["username"],
+                "session_name": user_data["session_name"],
+                "id": user_data["id"],
+                "state": user_data["state"],
+                "idle_time": user_data["idle_time"],
+                "logon_time": user_data["logon_time"].strip(),
             })
     return users
     
@@ -416,4 +420,3 @@ def parse_query_user_output(output):
     
 
     
-
