@@ -372,8 +372,51 @@ def parse_psloglist_output(output):
             events.append(event_data)
     return {"psloglist": events} if events else None
 
+def parse_query_user_output(output):
+    """
+    Parses the text output of the 'query user' command into a list of dicts.
+    """
+    users = []
+    lines = output.strip().splitlines()
+    if len(lines) <= 1:
+        return users
+
+    # The header line defines the start positions of the columns
+    header = lines[0]
+    # Find column start positions
+    username_pos = header.find("USERNAME")
+    sessionname_pos = header.find("SESSIONNAME")
+    id_pos = header.find("ID")
+    state_pos = header.find("STATE")
+    idle_time_pos = header.find("IDLE TIME")
+    logon_time_pos = header.find("LOGON TIME")
+
+    # Process each user line
+    for line in lines[1:]:
+        # The active user line starts with '>'
+        clean_line = line[1:] if line.startswith('>') else line
+
+        username = clean_line[username_pos:sessionname_pos].strip()
+        session_name = clean_line[sessionname_pos:id_pos].strip()
+        session_id = clean_line[id_pos:state_pos].strip()
+        state = clean_line[state_pos:idle_time_pos].strip()
+        idle_time = clean_line[idle_time_pos:logon_time_pos].strip()
+        logon_time = clean_line[logon_time_pos:].strip()
+        
+        if username:
+            users.append({
+                "username": username,
+                "session_name": session_name,
+                "id": session_id,
+                "state": state,
+                "idle_time": idle_time,
+                "logon_time": logon_time,
+            })
+    return users
     
 
     
 
     
+
+

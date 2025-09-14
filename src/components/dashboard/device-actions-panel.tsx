@@ -76,7 +76,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import type { Device } from "@/lib/types";
+import type { Device, LoggedOnUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import * as React from "react";
@@ -182,15 +182,6 @@ type PsBrowseItem = {
     Mode: string; // e.g., 'd-----', 'a----'
 };
 
-type LoggedOnUser = {
-    username: string;
-    session_name: string;
-    id: string;
-    state: string;
-    idle_time: string;
-    logon_time: string;
-};
-
 
 type DialogState = {
     isOpen: boolean;
@@ -201,7 +192,7 @@ type DialogState = {
     structuredData?: {
         psinfo?: PsInfoData | null;
         pslist?: {pslist: WinRMProcess[]} | null;
-        psloggedon?: {psloggedon: LoggedOnUser[]} | null;
+        psloggedon?: LoggedOnUser[] | null;
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
@@ -961,14 +952,15 @@ const CommandOutputDialog: React.FC<{
     const isBrowseView = !!state.structuredData?.psbrowse;
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
-    const isLoggedOnView = !!state.structuredData?.psloggedon?.psloggedon && Array.isArray(state.structuredData.psloggedon.psloggedon);
+    const isLoggedOnView = !!state.structuredData?.psloggedon && Array.isArray(state.structuredData.psloggedon);
     
     const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            (isBrowseView || isProcessView || isInfoView || isLoggedOnView) ? "max-w-4xl" : "max-w-2xl",
+            "max-w-2xl",
+            (isBrowseView || isProcessView || isInfoView || isLoggedOnView) && "max-w-4xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -981,7 +973,7 @@ const CommandOutputDialog: React.FC<{
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
-                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!.psloggedon!} onLogoff={onUserLogoff} />}
+                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -1386,7 +1378,7 @@ export default function DeviceActionsPanel({
             if (refreshResult?.ok) {
                 setDialogState(prev => ({
                     ...prev,
-                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data }
+                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data?.psloggedon }
                 }));
             }
         } else {
@@ -1640,6 +1632,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 
