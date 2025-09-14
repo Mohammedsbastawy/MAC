@@ -1,0 +1,103 @@
+// This is a placeholder file to satisfy the type checker.
+// The actual types are provided by the lucide-react package.
+// We add 'LogOut' here because it seems to be missing from the
+// inferred types in some environments.
+declare module 'lucide-react' {
+    import { FC, SVGProps } from 'react';
+
+    type Icon = FC<SVGProps<SVGSVGElement>>;
+
+    export const Activity: Icon;
+    export const ArrowRight: Icon;
+    export const ArrowUpDown: Icon;
+    export const AlertCircle: Icon;
+    export const Avatar: Icon;
+    export const Briefcase: Icon;
+    export const Calendar: Icon;
+    export const Check: Icon;
+    export const CheckCircle2: Icon;
+    export const ChevronDown: Icon;
+    export const ChevronLeft: Icon;
+    export const ChevronRight: Icon;
+    export const ChevronUp: Icon;
+    export const Clock: Icon;
+    export const Cpu: Icon;
+    export const CreditCard: Icon;
+    export const Database: Icon;
+    export const Download: Icon;
+    export const DownloadCloud: Icon;
+    export const Edit: Icon;
+    export const File: Icon;
+    export const FileCode: Icon;
+    export const FileLock: Icon;
+    export const FileText: Icon;
+    export const Fingerprint: Icon;
+    export const Folder: Icon;
+    export const FolderPlus: Icon;
+    export const Globe: Icon;
+    export const HardDrive: Icon;
+    export const Hash: Icon;
+    export const HelpCircle: Icon;
+    export const Home: Icon;
+    export const Hourglass: Icon;
+    export const Info: Icon;
+    export const InfoIcon: Icon;
+    export const KeyRound: Icon;
+    export const Laptop: Icon;
+    export const LifeBuoy: Icon;
+    export const Lightbulb: Icon;
+    export const Loader2: Icon;
+    export const Lock: Icon;
+    export const LogOut: Icon;
+    export const Mail: Icon;
+    export const MemoryStick: Icon;
+    export const MessageSquare: Icon;
+    export const Monitor: Icon;
+    export const Moon: Icon;
+    export const MoreHorizontal: Icon;
+    export const MoreVertical: Icon;
+    export const Network: Icon;
+    export const NotebookText: Icon;
+    export const PanelLeft: Icon;
+    export const PanelRight: Icon;
+    export const PauseCircle: Icon;
+    export const PlayCircle: Icon;
+    export const Plus: Icon;
+    export const PlusCircle: Icon;
+    export const Power: Icon;
+    export const PowerOff: Icon;
+    export const RefreshCw: Icon;
+    export const Router: Icon;
+    export const Search: Icon;
+    export const Send: Icon;
+    export const Server: Icon;
+    export const ServerCrash: Icon;
+    export const Settings: Icon;
+    export const Settings2: Icon;
+    export const Shield: Icon;
+    export const ShieldAlert: Icon;
+    export const ShieldCheck: Icon;
+    export const Siren: Icon;
+    export const Skull: Icon;
+    export const Smartphone: Icon;
+    export const StopCircle: Icon;
+    export const Sun: Icon;
+    export const Terminal: Icon;
+    export const ToyBrick: Icon;
+    export const Trash2: Icon;
+    export const Upload: Icon;
+    export const User: Icon;
+    export const UserCheck: Icon;
+    export const UserCog: Icon;
+    export const UserPlus: Icon;
+    export const UserX: Icon;
+    export const Users: Icon;
+    export const Wifi: Icon;
+    export const WifiOff: Icon;
+    export const Wrench: Icon;
+    export const X: Icon;
+    export const XCircle: Icon;
+    export const Zap: Icon;
+
+    export type LucideIcon = Icon;
+}

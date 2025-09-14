@@ -58,6 +58,7 @@ import {
   FolderPlus,
   Upload,
   Wrench,
+  LogOut,
 } from "lucide-react";
 import {
   Sheet,
@@ -173,13 +174,21 @@ type PsLogListData = {
     message: string;
 };
 
-// Type for a single file/folder item from PsBrowse
 type PsBrowseItem = {
     Name: string;
     FullName: string;
     Length: number | null;
     LastWriteTime: string;
     Mode: string; // e.g., 'd-----', 'a----'
+};
+
+type LoggedOnUser = {
+    username: string;
+    session_name: string;
+    id: string;
+    state: string;
+    idle_time: string;
+    logon_time: string;
 };
 
 
@@ -192,6 +201,7 @@ type DialogState = {
     structuredData?: {
         psinfo?: PsInfoData | null;
         pslist?: {pslist: WinRMProcess[]} | null;
+        psloggedon?: LoggedOnUser[] | null;
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
@@ -857,6 +867,75 @@ const PsBrowseResult: React.FC<{
     )
 };
 
+const PsLoggedOnResult: React.FC<{ data: LoggedOnUser[], onLogoff: (sessionId: string, username: string) => void }> = ({ data, onLogoff }) => (
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center text-lg">
+                <Users className="mr-2 h-5 w-5" /> Logged On Users
+            </CardTitle>
+        </CardHeader>
+        <CardContent>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Username</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead>Logon Time</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {data && data.length > 0 ? data.map(user => (
+                        <TableRow key={user.id}>
+                            <TableCell className="font-medium">{user.username}</TableCell>
+                            <TableCell>
+                                <Badge variant={user.state.toLowerCase() === 'active' ? 'default' : 'secondary'} className={cn(user.state.toLowerCase() === 'active' && 'bg-green-600')}>
+                                    {user.state}
+                                </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{user.logon_time}</TableCell>
+                            <TableCell className="text-right">
+                                <AlertDialog>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <AlertDialogTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">
+                                                        <LogOut className="h-4 w-4" />
+                                                    </Button>
+                                                </AlertDialogTrigger>
+                                            </TooltipTrigger>
+                                            <TooltipContent><p>Log off user</p></TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                This will log off the user <strong className="font-mono">{user.username}</strong> (Session ID: {user.id}). Any unsaved work may be lost.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => onLogoff(user.id, user.username)} className="bg-destructive hover:bg-destructive/90">Log Off</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
+                            </TableCell>
+                        </TableRow>
+                    )) : (
+                        <TableRow>
+                            <TableCell colSpan={4} className="text-center h-24 text-muted-foreground">
+                                No users currently logged on.
+                            </TableCell>
+                        </TableRow>
+                    )}
+                </TableBody>
+            </Table>
+        </CardContent>
+    </Card>
+);
+
 
 const CommandOutputDialog: React.FC<{
     state: DialogState;
@@ -864,10 +943,11 @@ const CommandOutputDialog: React.FC<{
     onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void;
     onServiceInfo?: (service: PsServiceData) => void;
     onProcessKill?: (processId: number) => void;
+    onUserLogoff?: (sessionId: string, username: string) => void;
     onBrowseNavigate?: (path: string) => void;
     onBrowseAction?: (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     browsePath?: string;
-}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseNavigate, onBrowseAction, browsePath }) => {
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onUserLogoff, onBrowseNavigate, onBrowseAction, browsePath }) => {
     
     const [isLoading, setIsLoading] = React.useState(false);
     
@@ -881,12 +961,13 @@ const CommandOutputDialog: React.FC<{
     const isBrowseView = !!state.structuredData?.psbrowse;
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
-    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    const isLoggedOnView = !!state.structuredData?.psloggedon;
+    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            isBrowseView || isProcessView || isInfoView ? "max-w-4xl" : "max-w-2xl",
+            (isBrowseView || isProcessView || isInfoView || isLoggedOnView) ? "max-w-4xl" : "max-w-2xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -899,6 +980,7 @@ const CommandOutputDialog: React.FC<{
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
+                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -929,7 +1011,7 @@ const CommandOutputDialog: React.FC<{
 
 
                 {/* Raw output for non-structured data or if there's an error */}
-                {!(isBrowseView || isProcessView || isInfoView) && (
+                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView) && (
                     <>
                     {(state.output && !isHackerTheme) && (
                          <details className="mt-4">
@@ -1279,6 +1361,22 @@ export default function DeviceActionsPanel({
         }
     }
 
+    const handleUserLogoff = async (sessionId: string, username: string) => {
+        const result = await runApiAction('psshutdown', { action: 'logoff', session: sessionId });
+        if(result?.ok) {
+            toast({ title: 'Success', description: `Logoff command sent for user ${username}.`});
+            const refreshResult = await runApiAction('psloggedon', {}, false);
+            if (refreshResult?.ok) {
+                setDialogState(prev => ({
+                    ...prev,
+                    structuredData: refreshResult.structured_data
+                }));
+            }
+        } else {
+             toast({ variant: 'destructive', title: 'Logoff Failed', description: result?.error || result?.stderr });
+        }
+    }
+
     const handleOpenDiagnostics = () => {
         setIsDiagnosticsOpen(true);
         runWinRMDiagnostics();
@@ -1423,6 +1521,7 @@ export default function DeviceActionsPanel({
               <div className="grid grid-cols-1 gap-2">
                 <ActionButton icon={Info} label="System Info (WinRM)" onClick={() => handleGenericAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List (WinRM)" onClick={() => handleGenericAction('pslist')} />
+                <ActionButton icon={Users} label="Logged On Users (WinRM)" onClick={() => handleGenericAction('psloggedon')} />
                 <ActionButton icon={Settings2} label="Manage Services" onClick={() => handleGenericAction('psservice', { action: 'query' })} />
                 <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handleGenericAction('psloglist', { kind: 'system' })} />
                 <ActionButton icon={FileLock} label="Opened Files" onClick={() => handleGenericAction('psfile')} />
@@ -1490,6 +1589,7 @@ export default function DeviceActionsPanel({
         onServiceAction={handleServiceAction}
         onServiceInfo={(service) => setServiceInfo(service)}
         onProcessKill={handleProcessKill}
+        onUserLogoff={handleUserLogoff}
         onBrowseNavigate={(path) => handleBrowseAction('navigate', { path })}
         onBrowseAction={handleBrowseAction}
         browsePath={browsePath}

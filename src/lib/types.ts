@@ -57,3 +57,12 @@ export type ADOu = {
   path: string;
   created: string;
 };
+
+export type LoggedOnUser = {
+  username: string;
+  session_name: string;
+  id: string;
+  state: string;
+  idle_time: string;
+  logon_time: string;
+};

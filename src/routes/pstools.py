@@ -5,7 +5,7 @@ import subprocess
 import json
 import base64
 from flask import Blueprint, request, jsonify, current_app, session
-from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psloggedon_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, run_winrm_command
+from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, run_winrm_command
 from Tools.utils.logger import logger
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
@@ -149,7 +149,7 @@ def api_pslist():
             # Ensure it's always a list
             if isinstance(parsed_json, dict):
                  parsed_json = [parsed_json]
-            structured_data = {"pslist": parsed_json}
+            structured_data = {"pslist": {"pslist": parsed_json}}
         except json.JSONDecodeError:
             err = f"Failed to parse JSON from WinRM pslist. Raw output: {out}"
             rc = 1
@@ -256,12 +256,14 @@ def api_psloggedon():
     _, _, pwd, winrm_user = get_auth_from_request(data)
     logger.info(f"Executing 'query user' (WinRM) on {ip}.")
 
+    # This PowerShell script runs 'query user', parses its text output, and converts it to JSON.
     ps_command = r"""
     $output = query user
     $results = $output | Select-Object -Skip 1 | ForEach-Object {
         $line = $_.Trim()
         if ($line) {
             # Regex to capture the fields, handling the ">" at the start and variable whitespace
+            # It captures: SESSIONNAME, USERNAME, ID, STATE, IDLE TIME, LOGON TIME
             $match = $line -match '^\s*(>?)([^ ]+)\s+([^ ]+)\s+([0-9]+)\s+([A-Za-z]+)\s+([^ ]+)\s+(.+)';
             if ($match) {
                 # The first field (username) might have a '>' prepended
@@ -285,14 +287,14 @@ def api_psloggedon():
     if rc == 0 and out:
         try:
             parsed_json = json.loads(out)
-            # Ensure it's always a list
+            # Ensure it's always a list, even if one user is returned
             if isinstance(parsed_json, dict):
                  parsed_json = [parsed_json]
             structured_data = {"psloggedon": parsed_json}
         except json.JSONDecodeError:
-            logger.warning(f"Could not parse JSON from psloggedon (WinRM): {out}")
-            # If JSON parsing fails, we don't set an error but just return no structured data.
-            # This can happen if no users are logged on.
+            logger.warning(f"Could not parse JSON from psloggedon (WinRM) on {ip}: {out}")
+            # If JSON parsing fails, this can happen if no users are logged on.
+            # Return an empty list in this case.
             structured_data = {"psloggedon": []}
     
     return json_result(rc, out, err, structured_data)
@@ -300,12 +302,11 @@ def api_psloggedon():
 @pstools_bp.route('/psshutdown', methods=['POST'])
 def api_psshutdown():
     data = request.get_json() or {}
-    ip = data.get("ip","")
-    action = data.get("action","restart")
+    ip, action = data.get("ip",""), data.get("action","restart")
     session_id = data.get("session")
     user, domain, pwd, winrm_user = get_auth_from_request(data)
     
-    logger.info(f"Executing psshutdown on {ip} with action: '{action}'.")
+    logger.info(f"Executing shutdown/restart/logoff on {ip} with action: '{action}'.")
 
     if action == 'logoff' and session_id:
         logger.info(f"Attempting to log off session {session_id} on {ip} via WinRM.")
@@ -519,10 +520,6 @@ def api_enable_winrm():
     ip = data.get("ip")
     user, domain, pwd, _ = get_auth_from_request(data)
 
-    if not all([ip, user, pwd]):
-        return jsonify({'ok': False, 'error': 'IP, email, and password are required.'}), 400
-
-
     logger.info(f"Attempting to robustly enable WinRM on {ip} using PsExec.")
 
     # Note: Double quotes inside the command need to be escaped for the shell.
@@ -538,13 +535,13 @@ def api_enable_winrm():
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     
     # Check for success messages in stdout, even if RC is non-zero (e.g. service already started)
-    # A non-zero RC isn't always a failure for our goal here.
-    if "service has already been started" in err or "WinRM has been updated" in out or "WinRM is already running" in out or rc == 0:
+    # RC 2 can mean the service was already started, which is not a failure for our goal.
+    if rc == 0 or (rc == 2 and "service has already been started" in err):
         logger.info(f"Successfully sent WinRM configuration commands to {ip}.")
         return jsonify({
             "ok": True,
             "message": "WinRM configuration commands sent successfully. It may take a moment to apply.",
-            "details": out + "\n" + err
+            "details": out
         })
     else:
         logger.error(f"Failed to enable WinRM on {ip} via PsExec. RC={rc}. Stderr: {err}. Stdout: {out}")
@@ -592,10 +589,5 @@ def api_enable_prereqs():
             "details": err or out
         }), 500
     
-
-    
-
-
-
 
     
