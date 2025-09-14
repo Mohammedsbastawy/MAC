@@ -1149,7 +1149,7 @@ export default function DeviceActionsPanel({
   onClose,
 }: DeviceActionsPanelProps) {
   const { toast } = useToast();
-  const { user, password } = useAuth();
+  const { user } = useAuth();
   const [dialogState, setDialogState] = React.useState<DialogState>({
       isOpen: false,
       title: "",
@@ -1414,13 +1414,13 @@ export default function DeviceActionsPanel({
         setIsEnablingPrereqs(false);
     };
     
+    const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
+
+    // This is the correct place for early returns in a component.
+    // All hooks must be called before this point.
     if (!device) {
         return null;
     }
-
-
-    const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
-
 
   return (
     <>
@@ -1617,3 +1617,5 @@ export default function DeviceActionsPanel({
     </>
   );
 }
+
+    
