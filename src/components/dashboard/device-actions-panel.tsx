@@ -1109,7 +1109,7 @@ const WinRMDiagnosticsDialog: React.FC<{
                 <span className="font-medium">{label}</span>
             </div>
             <div className="flex items-center gap-2">
-                <span
+                 <span
                     onClick={() => check.status === 'failure' && onOpenLog(check.message)}
                     className={cn(
                         "text-sm",
@@ -1193,11 +1193,19 @@ export default function DeviceActionsPanel({
               }),
           });
 
-          const result = await response.json();
-
-          if (!response.ok && !result.error) {
-              result.error = `The server returned an error (HTTP ${response.status}) but did not provide specific details.`;
+          if (!response.ok) {
+                let errorDetails = `The server returned an error (HTTP ${response.status}).`;
+                try {
+                    // Try to get more specific error from the body
+                    const errorJson = await response.json();
+                    errorDetails = errorJson.error || errorJson.message || errorDetails;
+                } catch (e) {
+                    // Ignore if body is not JSON
+                }
+                 return { ok: false, error: errorDetails, stderr: errorDetails, structured_data: null };
           }
+          
+          const result = await response.json();
           return result;
 
       } catch (err: any) {
@@ -1318,9 +1326,17 @@ export default function DeviceActionsPanel({
   const handleGenericAction = async (tool: string, extraParams: Record<string, any> = {}) => {
       const result = await runApiAction(tool, extraParams);
       if (result) {
+        const titleMap: Record<string, string> = {
+            psinfo: "System Information",
+            pslist: "Process List",
+            psloggedon: "Logged On Users",
+            psservice: "Services",
+            psloglist: "Event Log",
+            psfile: "Opened Files",
+        }
         setDialogState({
             isOpen: true,
-            title: `Result from: ${tool}`,
+            title: titleMap[tool] || `Result from: ${tool}`,
             description: `Command executed on ${device?.name} (${device?.ipAddress}).`,
             output: result.stdout || '',
             error: result.stderr || result.error || '',
