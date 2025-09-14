@@ -181,11 +181,7 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
             if tool_name.lower() not in ['psping']:
                  raise ValueError("Invalid or missing IP address for target.")
 
-        # PsLoggedOn requires credentials to come first
-        if tool_name.lower() == 'psloggedon':
-            cmd_list += cred_args + target_arg
-        else:
-            cmd_list += target_arg + cred_args
+        cmd_list += target_arg + cred_args
         
         # Add any other arguments
         cmd_list += extra_args
@@ -298,22 +294,6 @@ def parse_pslist_output(output):
                 })
     return {"pslist": data} if data else None
 
-def parse_psloggedon_output(output):
-    users = []
-    lines = output.strip().split('\n')
-    user_section = False
-    for line in lines:
-        line = line.strip()
-        if not line or "Users logged on locally" in line or "No one is logged on locally" in line or "Error" in line: continue
-        if line.startswith("----"):
-            user_section = True
-            continue
-        if user_section:
-            match = re.match(r'(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\s+(.*)', line)
-            if match:
-                users.append({"time": match.group(1).strip(), "user": match.group(2).strip()})
-    return {"psloggedon": users} if users else None
-
 def parse_psfile_output(output):
     data = []
     lines = output.strip().split('\n')
@@ -397,4 +377,5 @@ def parse_psloglist_output(output):
     
 
     
+
 

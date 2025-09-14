@@ -5,7 +5,7 @@ import subprocess
 import json
 import base64
 from flask import Blueprint, request, jsonify, current_app, session
-from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psloggedon_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, run_winrm_command
+from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, run_winrm_command
 from Tools.utils.logger import logger
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
@@ -149,7 +149,7 @@ def api_pslist():
             # Ensure it's always a list
             if isinstance(parsed_json, dict):
                  parsed_json = [parsed_json]
-            structured_data = {"pslist": parsed_json}
+            structured_data = {"pslist": {"pslist": parsed_json}}
         except json.JSONDecodeError:
             err = f"Failed to parse JSON from WinRM pslist. Raw output: {out}"
             rc = 1
@@ -246,20 +246,6 @@ def api_psinfo():
         except json.JSONDecodeError:
             err = f"Failed to parse JSON from WinRM psinfo. Raw output: {out}"
             rc = 1
-
-    return json_result(rc, out, err, structured_data)
-
-@pstools_bp.route('/psloggedon', methods=['POST'])
-def api_psloggedon():
-    data = request.get_json() or {}
-    ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
-    logger.info(f"Executing psloggedon on {ip}.")
-    rc, out, err = run_ps_command("psloggedon", ip, user, domain, pwd, [], timeout=60)
-
-    structured_data = None
-    if rc == 0 and out:
-        structured_data = parse_psloggedon_output(out)
 
     return json_result(rc, out, err, structured_data)
 
@@ -548,4 +534,5 @@ def api_enable_prereqs():
     
 
     
+
 

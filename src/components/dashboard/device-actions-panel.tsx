@@ -147,15 +147,6 @@ type WinRMProcess = {
     ElapsedTime: string;
 };
 
-type PsLoggedOnUser = {
-    username: string;
-    session_name: string;
-    id: string;
-    state: string;
-    idle_time: string;
-    logon_time: string;
-};
-
 type PsFileData = {
     id: string;
     user: string;
@@ -200,8 +191,7 @@ type DialogState = {
     error: string;
     structuredData?: {
         psinfo?: PsInfoData | null;
-        pslist?: WinRMProcess[] | null;
-        psloggedon?: PsLoggedOnUser[] | null;
+        pslist?: {pslist: WinRMProcess[]} | null;
         psfile?: PsFileData[] | null;
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
@@ -411,71 +401,6 @@ const PsListResult: React.FC<{ data: WinRMProcess[], onKill: (processId: number)
         </Card>
     )
 }
-
-const PsLoggedOnResult: React.FC<{ data: PsLoggedOnUser[], onLogoff: (sessionId: string, username: string) => void; }> = ({ data, onLogoff }) => (
-    <Card>
-        <CardHeader>
-            <CardTitle className="flex items-center text-lg">
-                <Users className="mr-2 h-5 w-5" /> Logged On Users
-            </CardTitle>
-        </CardHeader>
-        <CardContent>
-            {data.length > 0 ? (
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Username</TableHead>
-                            <TableHead>Session</TableHead>
-                            <TableHead>State</TableHead>
-                            <TableHead>Logon Time</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {data.map((logon) => (
-                            <TableRow key={logon.id}>
-                                <TableCell className="font-medium">{logon.username}</TableCell>
-                                <TableCell>{logon.session_name}</TableCell>
-                                <TableCell>
-                                     <Badge variant={logon.state.toLowerCase() === 'active' ? 'default' : 'secondary'}
-                                         className={cn(logon.state.toLowerCase() === 'active' && "bg-green-600")}
-                                     >
-                                        {logon.state}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell className="font-mono text-xs">{logon.logon_time}</TableCell>
-                                <TableCell className="text-right">
-                                    <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                            <Button variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive">
-                                                <UserX className="mr-2 h-3 w-3" /> Log off
-                                            </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>
-                                                    This will log off the user <strong>{logon.username}</strong> from session {logon.id}. Any unsaved work may be lost.
-                                                </AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => onLogoff(logon.id, logon.username)} className="bg-destructive hover:bg-destructive/90">Confirm Log off</AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                    </AlertDialog>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            ) : (
-                 <div className="text-center text-muted-foreground py-10">No users are currently logged on.</div>
-            )}
-        </CardContent>
-    </Card>
-);
-
 
 const PsFileResult: React.FC<{ data: PsFileData[] }> = ({ data }) => (
     <Card>
@@ -939,11 +864,10 @@ const CommandOutputDialog: React.FC<{
     onServiceAction?: (serviceName: string, action: 'start' | 'stop' | 'restart') => void;
     onServiceInfo?: (service: PsServiceData) => void;
     onProcessKill?: (processId: number) => void;
-    onUserLogoff?: (sessionId: string, username: string) => void;
     onBrowseNavigate?: (path: string) => void;
     onBrowseAction?: (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     browsePath?: string;
-}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onUserLogoff, onBrowseNavigate, onBrowseAction, browsePath }) => {
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onBrowseNavigate, onBrowseAction, browsePath }) => {
     
     const [isLoading, setIsLoading] = React.useState(false);
     
@@ -955,15 +879,14 @@ const CommandOutputDialog: React.FC<{
     };
 
     const isBrowseView = !!state.structuredData?.psbrowse;
-    const isProcessView = !!state.structuredData?.pslist;
+    const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
-    const isLoggedOnView = !!state.structuredData?.psloggedon;
-    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
         <AlertDialogContent className={cn(
-            isBrowseView || isProcessView || isInfoView || isLoggedOnView ? "max-w-4xl" : "max-w-2xl",
+            isBrowseView || isProcessView || isInfoView ? "max-w-4xl" : "max-w-2xl",
             isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
@@ -975,8 +898,7 @@ const CommandOutputDialog: React.FC<{
             <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
                 {/* Structured data views */}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
-                {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!} onKill={onProcessKill} />}
-                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
+                {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
                 {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                 {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
                     <PsServiceResult 
@@ -1007,7 +929,7 @@ const CommandOutputDialog: React.FC<{
 
 
                 {/* Raw output for non-structured data or if there's an error */}
-                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView) && (
+                {!(isBrowseView || isProcessView || isInfoView) && (
                     <>
                     {(state.output && !isHackerTheme) && (
                          <details className="mt-4">
@@ -1349,29 +1271,13 @@ export default function DeviceActionsPanel({
              if (refreshResult?.ok) {
                 setDialogState(prev => ({
                     ...prev,
-                    structuredData: { ...prev.structuredData, pslist: refreshResult.structured_data.pslist }
+                    structuredData: { ...prev.structuredData, pslist: refreshResult.structured_data }
                 }));
             }
         } else {
              toast({ variant: 'destructive', title: 'Action Failed', description: result?.error || result?.stderr });
         }
     }
-
-    const handleUserLogoff = async (sessionId: string, username: string) => {
-        const result = await runApiAction('psshutdown', { action: 'logoff', session: sessionId });
-        if (result?.ok) {
-            toast({ title: 'Success', description: `Logoff command sent for user ${username}.` });
-            const refreshResult = await runApiAction('psloggedon', {}, false);
-            if (refreshResult?.ok) {
-                setDialogState(prev => ({
-                    ...prev,
-                    structuredData: { ...prev.structuredData, psloggedon: refreshResult.structured_data.psloggedon }
-                }));
-            }
-        } else {
-            toast({ variant: 'destructive', title: 'Logoff Failed', description: result?.error || result?.stderr });
-        }
-    };
 
     const handleOpenDiagnostics = () => {
         setIsDiagnosticsOpen(true);
@@ -1517,7 +1423,6 @@ export default function DeviceActionsPanel({
               <div className="grid grid-cols-1 gap-2">
                 <ActionButton icon={Info} label="System Info (WinRM)" onClick={() => handleGenericAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List (WinRM)" onClick={() => handleGenericAction('pslist')} />
-                <ActionButton icon={Users} label="Logged On Users (WinRM)" onClick={() => handleGenericAction('psloggedon')} />
                 <ActionButton icon={Settings2} label="Manage Services" onClick={() => handleGenericAction('psservice', { action: 'query' })} />
                 <ActionButton icon={FileCode} label="Event Log (System)" onClick={() => handleGenericAction('psloglist', { kind: 'system' })} />
                 <ActionButton icon={FileLock} label="Opened Files" onClick={() => handleGenericAction('psfile')} />
@@ -1585,7 +1490,6 @@ export default function DeviceActionsPanel({
         onServiceAction={handleServiceAction}
         onServiceInfo={(service) => setServiceInfo(service)}
         onProcessKill={handleProcessKill}
-        onUserLogoff={handleUserLogoff}
         onBrowseNavigate={(path) => handleBrowseAction('navigate', { path })}
         onBrowseAction={handleBrowseAction}
         browsePath={browsePath}
