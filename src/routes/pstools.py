@@ -295,7 +295,7 @@ def api_psloggedon():
             logger.warning(f"Could not parse JSON from psloggedon (WinRM) on {ip}: {out}")
             # If JSON parsing fails, this can happen if no users are logged on.
             # Return an empty list in this case.
-            if "No user exists for" in out:
+            if "No user exists for" in out or not out.strip():
                 structured_data = {"psloggedon": []}
             else:
                 err = f"Failed to parse WinRM output. Raw: {out}"
