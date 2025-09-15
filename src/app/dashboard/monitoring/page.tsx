@@ -320,9 +320,10 @@ export default function MonitoringPage() {
             const data = await res.json();
              if (data.ok) {
                 toast({ title: "Deployment Successful", description: data.message });
-                // Immediately try fetching data again for this device
+                // Immediately try fetching data again for this device after a short delay
                 setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+                // Wait for the task to run once
+                await new Promise(resolve => setTimeout(resolve, 5000)); 
                 fetchDevicePerformance(device, new AbortController().signal);
             } else {
                 toast({ variant: "destructive", title: "Deployment Failed", description: data.details || data.error, duration: 10000 });
@@ -333,59 +334,35 @@ export default function MonitoringPage() {
   }
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
-    // Don't set fetching state here to avoid UI flicker
-    // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
+    try {
+        const res = await fetch("/api/pstools/psinfo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ip: device.ipAddress, id: device.id, name: device.name }),
+            signal,
+        });
 
-    const maxRetries = 2;
-    let attempt = 0;
+        if (signal.aborted) return;
 
-    while (attempt <= maxRetries) {
-        if (signal.aborted) {
-            // Don't update state if aborted
+        const data = await res.json();
+
+        if (data.ok && data.structured_data?.psinfo) {
+            const perf = data.structured_data.psinfo;
+            const perfData: PerformanceData = {
+                cpuUsage: perf.cpuUsage,
+                totalMemoryGB: perf.totalMemoryGB,
+                usedMemoryGB: perf.usedMemoryGB,
+                diskInfo: perf.diskInfo,
+            };
+            setDevices(prev => prev.map(d => d.id === device.id ? { ...d, performance: perfData, isFetching: false, performanceError: null } : d));
+        } else {
+             throw new Error(data.error || data.stderr || "Failed to parse performance data.");
+        }
+    } catch (e: any) {
+         if (e.name === 'AbortError') {
             return;
         }
-        try {
-            const res = await fetch("/api/pstools/psinfo", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ip: device.ipAddress, id: device.id, name: device.name }),
-                signal,
-            });
-
-            if (signal.aborted) return;
-
-            if (!res.ok) {
-                const errorData = await res.json().catch(() => ({error: 'Invalid response from server'}));
-                throw new Error(errorData.error || errorData.message || "An unknown error occurred");
-            }
-            
-            const data = await res.json();
-
-            if (data.ok && data.structured_data?.psinfo) {
-                const perf = data.structured_data.psinfo;
-                const perfData: PerformanceData = {
-                    cpuUsage: perf.cpuUsage,
-                    totalMemoryGB: perf.totalMemoryGB,
-                    usedMemoryGB: perf.usedMemoryGB,
-                    diskInfo: perf.diskInfo,
-                };
-                setDevices(prev => prev.map(d => d.id === device.id ? { ...d, performance: perfData, isFetching: false, performanceError: null } : d));
-                return;
-            } else {
-                 throw new Error(data.error || data.stderr || "Failed to parse performance data.");
-            }
-        } catch (e: any) {
-             if (e.name === 'AbortError') {
-                return;
-            }
-            if (attempt < maxRetries) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                attempt++;
-            } else {
-                setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false, performanceError: e.message || "An unknown error occurred." } : d));
-                return;
-            }
-        }
+        setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false, performanceError: e.message || "An unknown error occurred." } : d));
     }
 }, []);
 
@@ -424,9 +401,6 @@ export default function MonitoringPage() {
 
             const onlineDevices = newDevices.filter((d: MonitoredDevice) => d.status === 'online');
             
-            // Set fetching state only for online devices that will be fetched
-            setDevices(prev => prev.map(d => onlineDevices.some(od => od.id === d.id) ? { ...d, isFetching: true, performance: d.performance, performanceError: null } : d));
-
             onlineDevices.forEach((device: MonitoredDevice) => {
                 fetchDevicePerformance(device, signal);
             });

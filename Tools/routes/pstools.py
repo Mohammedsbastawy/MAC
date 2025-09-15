@@ -731,10 +731,15 @@ def api_deploy_agent():
         logger.error(f"Failed to create scheduled task on {ip}: {task_err} {task_out}")
         return jsonify({"ok": False, "error": "Failed to create scheduled task.", "details": f"{task_err} {task_out}"}), 500
         
+    # --- Step 4: Run the task for the first time ---
+    logger.info(f"Step 4/4: Running the task for the first time on {ip}.")
+    run_task_rc, _, run_task_err = run_ps_command("psexec", ip, user, domain, pwd, ["schtasks", "/run", "/tn", "AtlasAgent"], timeout=60)
+    if run_task_rc != 0:
+        # This is not a critical failure, so we just log a warning.
+        logger.warning(f"Could not run the scheduled task immediately on {ip}. It will run on its next scheduled interval. Error: {run_task_err}")
+
     logger.info(f"Agent deployment successful on {ip}.")
     return jsonify({
         "ok": True,
         "message": f"Agent deployed successfully on {ip}. It will start sending data within a minute."
     })
-
-    
