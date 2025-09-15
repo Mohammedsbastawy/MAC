@@ -18,7 +18,12 @@ import datetime
 network_bp = Blueprint('network', __name__)
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'monitoring_cache.json')
+LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
 CACHE_EXPIRY_SECONDS = 30 # 30 seconds
+LOG_RETENTION_HOURS = 24
+
+if not os.path.exists(LOGS_DIR):
+    os.makedirs(LOGS_DIR)
 
 @network_bp.before_request
 def require_login():
@@ -572,3 +577,25 @@ def get_monitoring_data():
         logger.error(f"Failed to write to cache file: {e}")
 
     return jsonify(response_data)
+
+@network_bp.route('/api/network/get-historical-data', methods=['POST'])
+def get_historical_data():
+    data = request.get_json() or {}
+    device_id = data.get("id") # The device DN is used as ID
+    if not device_id:
+        return jsonify({"ok": False, "error": "Device ID is required."}), 400
+
+    # Sanitize the device_id to create a safe filename
+    safe_filename = "".join([c for c in device_id if c.isalnum() or c in (' ', '_')]).rstrip()
+    log_file = os.path.join(LOGS_DIR, f"{safe_filename}.json")
+
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, 'r') as f:
+                history = json.load(f)
+            return jsonify({"ok": True, "history": history})
+        except (IOError, json.JSONDecodeError) as e:
+            logger.error(f"Error reading history file for {device_id}: {e}")
+            return jsonify({"ok": False, "error": "Could not read history file."}), 500
+    else:
+        return jsonify({"ok": True, "history": []})

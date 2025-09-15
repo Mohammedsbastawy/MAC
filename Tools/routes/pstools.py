@@ -9,6 +9,12 @@ import base64
 from flask import Blueprint, request, jsonify, current_app, session
 from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, parse_query_user_output, run_winrm_command
 from Tools.utils.logger import logger
+import datetime
+
+pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
+
+LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
+LOG_RETENTION_HOURS = 24
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
     # Ensure stdout is serializable
@@ -35,7 +41,6 @@ def json_result(rc, out, err, structured_data=None, extra_data={}):
     return jsonify(response), 200
 
 
-pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 def get_auth_from_request(data):
     """Safely gets auth credentials from request JSON or falls back to session."""
@@ -52,6 +57,12 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
+    # Allow access to psinfo from the monitoring page which may not have a body
+    if request.endpoint == 'pstools.api_psinfo':
+        if 'user' not in session:
+             return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return
+        
     user, _, _, _ = get_auth_from_request(request.get_json(silent=True) or {})
     if not user:
          return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
@@ -197,8 +208,12 @@ def api_psloglist():
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
-    ip = data.get("ip", "")
+    ip = data.get("ip")
+    device_id = data.get("id") # DN of the device
+    device_name = data.get("name") # Name of the device
+    
     user, domain, pwd, winrm_user = get_auth_from_request(data)
+
     logger.info(f"Executing hardware and OS info query (WinRM) on {ip}.")
 
     ps_command = r"""
@@ -210,7 +225,7 @@ def api_psinfo():
     # Performance Data
     $cpuUsage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
     $totalMemory = $cs.TotalPhysicalMemory
-    $freeMemory = (Get-Counter -Counter "\Memory\Available Bytes").CounterSamples.CookedValue
+    $freeMemory = $os.FreePhysicalMemory * 1024 # Convert from KB to Bytes
     $usedMemory = $totalMemory - $freeMemory
     
     $uptime_span = (Get-Date) - $os.LastBootUpTime
@@ -229,11 +244,11 @@ def api_psinfo():
         "Kernel version" = $os.Version;
         "Processor" = $proc.Name;
         "Total Memory" = "{0:N2}" -f ($totalMemory / 1GB);
-        "Video Card" = $gpu.Name;
+        "Video Card" = if ($gpu) { $gpu.Name } else { "N/A" };
         "Domain" = $cs.Domain;
         "Uptime" = $uptime_str;
         "Install date" = $os.InstallDate.ToString('yyyy-MM-dd');
-        "Logged on users" = $cs.NumberOfUsers;
+        "Logged on users" = if ($cs.NumberOfUsers) { $cs.NumberOfUsers } else { 0 };
     }
     
     $performance_info = @{
@@ -256,8 +271,49 @@ def api_psinfo():
         try:
             parsed_json = json.loads(out)
             structured_data = parsed_json
-        except json.JSONDecodeError:
-            err = f"Failed to parse JSON from WinRM psinfo. Raw output: {out}"
+            
+            # --- Historical Logging ---
+            if device_name and parsed_json.get("psinfo"):
+                perf = parsed_json["psinfo"]["performance_info"]
+                cpu_usage = float(perf.find(lambda p: p['key'] == "CPU Usage")['value'])
+                used_memory_gb = float(perf.find(lambda p: p['key'] == "Used Memory")['value'])
+                
+                # Sanitize the device name to create a safe filename
+                safe_filename = "".join([c for c in device_name if c.isalnum() or c in (' ', '_')]).rstrip()
+                log_file = os.path.join(LOGS_DIR, f"{safe_filename}.json")
+
+                history = []
+                if os.path.exists(log_file):
+                    try:
+                        with open(log_file, 'r') as f:
+                            history = json.load(f)
+                    except (IOError, json.JSONDecodeError):
+                        history = []
+                
+                # Add new entry
+                history.append({
+                    "timestamp": datetime.datetime.utcnow().isoformat(),
+                    "cpuUsage": cpu_usage,
+                    "usedMemoryGB": used_memory_gb
+                })
+
+                # Prune old entries
+                retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+                now = datetime.datetime.utcnow()
+                history = [
+                    entry for entry in history
+                    if now - datetime.datetime.fromisoformat(entry["timestamp"]) < retention_delta
+                ]
+                
+                # Save updated history
+                try:
+                    with open(log_file, 'w') as f:
+                        json.dump(history, f)
+                except IOError as e:
+                    logger.error(f"Failed to write history log for {device_name}: {e}")
+
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            err = f"Failed to parse or process JSON from WinRM psinfo. Error: {str(e)}. Raw output: {out}"
             rc = 1
 
     return json_result(rc, out, err, structured_data)
@@ -648,3 +704,5 @@ def api_set_network_private():
 
 
     
+
+```

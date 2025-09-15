@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import type { Device, MonitoredDevice } from "@/lib/types";
+import type { Device, MonitoredDevice, PerformanceData } from "@/lib/types";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw, XCircle } from "lucide-react";
@@ -11,6 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import Link from 'next/link';
+
 import {
   Card,
   CardContent,
@@ -75,7 +77,11 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
     <Card className={cn(status !== 'online' && "opacity-50")}>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">{device.name}</CardTitle>
+            <CardTitle className="text-lg hover:underline">
+                 <Link href={`/dashboard/monitoring/${encodeURIComponent(device.id)}`}>
+                    {device.name}
+                </Link>
+            </CardTitle>
           <Badge variant={status === 'online' ? 'default' : 'secondary'} className={cn(status === 'online' && 'bg-green-600')}>
             {status}
           </Badge>
@@ -89,14 +95,16 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
             </div>
         ) : performanceError ? (
            <div className="flex flex-col items-center justify-center h-48 text-destructive text-center">
-                <XCircle className="h-6 w-6 mb-2" />
+                <XCircle className="h-8 w-8 mb-2" />
                 <p className="font-semibold">Failed to load data</p>
-                <p className="text-xs">{performanceError}</p>
+                <p className="text-xs max-w-full truncate" title={performanceError}>{performanceError}</p>
             </div>
         ) : device.performance ? (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <h4 className="text-sm font-semibold mb-2 text-center">CPU Usage</h4>
+               {device.performance.cpuUsage !== null ? (
+              <>
               <ChartContainer
                 config={cpuChartConfig}
                 className="mx-auto aspect-square h-[100px]"
@@ -124,9 +132,15 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
                 </ResponsiveContainer>
               </ChartContainer>
                <p className="text-center font-bold text-lg">{device.performance.cpuUsage.toFixed(1)}%</p>
+               </>
+                ) : (
+                    <div className="flex items-center justify-center h-[124px] text-muted-foreground text-xs">No data</div>
+                )}
             </div>
             <div>
               <h4 className="text-sm font-semibold mb-2 text-center">Memory Usage</h4>
+                {performance.totalMemoryGB > 0 ? (
+                <>
               <ChartContainer
                 config={memChartConfig}
                 className="mx-auto aspect-square h-[100px]"
@@ -151,6 +165,10 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
                <p className="text-center text-xs text-muted-foreground">
                 {device.performance.usedMemoryGB.toFixed(2)} / {device.performance.totalMemoryGB.toFixed(2)} GB
                </p>
+               </>
+               ) : (
+                 <div className="flex items-center justify-center h-[124px] text-muted-foreground text-xs">No data</div>
+               )}
             </div>
              <div className="col-span-2">
                 <h4 className="text-sm font-semibold mb-2 text-center">Disk Usage</h4>
@@ -191,7 +209,7 @@ export default function MonitoringPage() {
   const { toast } = useToast();
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice) => {
-    // Set isFetching to true for the specific device
+    // Set isFetching to true for the specific device, but keep old performance data
     setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true } : d));
 
     const maxRetries = 2; // Try original + 2 retries
@@ -202,30 +220,17 @@ export default function MonitoringPage() {
             const res = await fetch("/api/pstools/psinfo", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ip: device.ipAddress })
+                body: JSON.stringify({ ip: device.ipAddress, id: device.id, name: device.name })
             });
             const data = await res.json();
 
             if (data.ok && data.structured_data?.psinfo) {
                 const perf = data.structured_data.psinfo;
-                let diskData = [];
-                try {
-                    // disk_info can be a JSON string or an object, handle both
-                    if (typeof perf.disk_info === 'string') {
-                        diskData = JSON.parse(perf.disk_info);
-                    } else {
-                        diskData = perf.disk_info;
-                    }
-                } catch (e) {
-                    console.error("Failed to parse disk_info JSON", e);
-                    diskData = []; // Default to empty array on parsing error
-                }
-                
-                const newPerfData = {
+                const newPerfData: PerformanceData = {
                     cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || 0),
                     totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || 0),
                     usedMemoryGB: parseFloat(perf.performance_info.find((p:any) => p.key === "Used Memory")?.value || 0),
-                    diskInfo: Array.isArray(diskData) ? diskData.map((d: any) => ({
+                    diskInfo: Array.isArray(perf.disk_info) ? perf.disk_info.map((d: any) => ({
                         volume: d.volume,
                         sizeGB: parseFloat(d.sizeGB) || 0,
                         freeGB: parseFloat(d.freeGB) || 0,
@@ -267,21 +272,22 @@ export default function MonitoringPage() {
         const data = await response.json();
         
         if (data.ok) {
-            // When refreshing, we merge new status with existing data to prevent UI flicker
             setDevices(prevDevices => {
                 const existingDeviceMap = new Map(prevDevices.map(d => [d.id, d]));
                 const newDevices = data.devices.map((newDevice: MonitoredDevice) => {
                     const existingDevice = existingDeviceMap.get(newDevice.id);
                     return {
-                        ...existingDevice, // Keep old data (like performance)
-                        ...newDevice,      // Overwrite with new data (like status)
-                        isFetching: existingDevice ? existingDevice.isFetching : newDevice.status === 'online',
+                        ...existingDevice,
+                        ...newDevice,
+                        isFetching: newDevice.status === 'online',
                     };
                 });
                 return newDevices;
             });
             
-            setLastUpdated(data.last_updated);
+            if (data.last_updated) {
+              setLastUpdated(data.last_updated);
+            }
 
             if (forceRefresh) {
                 toast({ title: "Success", description: "Device status has been refreshed." });
@@ -369,9 +375,11 @@ export default function MonitoringPage() {
       <div className="flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Device Monitoring</h1>
-          <p className="text-muted-foreground">
-             {lastUpdated ? `Real-time performance metrics. Last cache update: ${new Date(lastUpdated).toLocaleTimeString()}`: 'Loading data...'}
-          </p>
+           {lastUpdated && (
+            <p className="text-muted-foreground">
+              Real-time performance metrics. Last cache update: {new Date(lastUpdated).toLocaleTimeString()}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4">
             <div className="flex items-center space-x-2">
@@ -393,5 +401,3 @@ export default function MonitoringPage() {
     </div>
   );
 }
-
-    
