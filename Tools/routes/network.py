@@ -544,7 +544,7 @@ def get_monitoring_data():
         if not ip:
             return {**computer, 'status': 'offline', 'performance': None, 'isFetching': False}
         
-        rc, out, err = run_winrm_command(ip, winrm_user, pwd, """
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, r"""
             $os = Get-CimInstance -ClassName Win32_OperatingSystem
             $cs = Get-CimInstance -ClassName Win32_ComputerSystem
             $cpu_usage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
@@ -627,4 +627,3 @@ def get_monitoring_data():
     
     
 
-```
