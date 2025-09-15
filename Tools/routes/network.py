@@ -523,12 +523,21 @@ def get_monitoring_data():
     # Check online status for all of them
     ips_to_check = [c['dns_hostname'] for c in all_ad_computers if c.get('dns_hostname')]
     online_ips = set()
-    if ips_to_check:
-        try:
-            status_res = api_check_status().get_json()
-            online_ips = set(status_res.get("online_ips", []))
-        except Exception as e:
-            logger.error(f"Failed to check host statuses during monitoring refresh: {e}")
+    
+    logger.info(f"Checking online status for {len(ips_to_check)} AD hosts.")
+    with ThreadPoolExecutor(max_workers=50) as executor:
+        # Use a combination of ping and TCP connect for robustness
+        future_to_ip = {executor.submit(check_host_status_ping, ip): ip for ip in ips_to_check}
+        future_to_ip.update({executor.submit(check_host_status_tcp_connect, ip): ip for ip in ips_to_check})
+
+        for future in as_completed(future_to_ip):
+            ip = future_to_ip[future]
+            try:
+                if future.result():
+                    online_ips.add(ip)
+            except Exception:
+                pass # Ignore errors in status checking
+    logger.info(f"Found {len(online_ips)} AD hosts online.")
 
     # Prepare list of devices for performance data fetching
     online_devices_to_poll = [c for c in all_ad_computers if c.get('dns_hostname') in online_ips]
@@ -544,7 +553,8 @@ def get_monitoring_data():
         if not ip:
             return {**computer, 'status': 'offline', 'performance': None, 'isFetching': False}
         
-        rc, out, err = run_winrm_command(ip, winrm_user, pwd, r"""
+        # PowerShell script to gather all data in one go
+        ps_script = r"""
             $os = Get-CimInstance -ClassName Win32_OperatingSystem
             $cs = Get-CimInstance -ClassName Win32_ComputerSystem
             $cpu_usage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
@@ -562,16 +572,22 @@ def get_monitoring_data():
                 usedMemoryGB = [math]::Round($used_memory / 1KB / 1MB, 2);
                 diskInfo = $disks | ConvertTo-Json -Compress
             } | ConvertTo-Json -Compress
-        """)
+        """
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_script)
 
         performance_data = None
         if rc == 0 and out:
             try:
                 raw_data = json.loads(out)
-                raw_data['diskInfo'] = json.loads(raw_data['diskInfo'])
-                # Ensure diskInfo is a list
-                if isinstance(raw_data['diskInfo'], dict):
-                    raw_data['diskInfo'] = [raw_data['diskInfo']]
+                # diskInfo is a JSON string itself, so we parse it again
+                disk_info_raw = raw_data.get('diskInfo')
+                if disk_info_raw:
+                    raw_data['diskInfo'] = json.loads(disk_info_raw)
+                    # Ensure diskInfo is always a list
+                    if isinstance(raw_data['diskInfo'], dict):
+                        raw_data['diskInfo'] = [raw_data['diskInfo']]
+                else:
+                    raw_data['diskInfo'] = []
                 performance_data = raw_data
             except (json.JSONDecodeError, KeyError) as e:
                 logger.error(f"Failed to parse performance JSON for {ip}: {e}. Raw: {out}")
@@ -585,7 +601,7 @@ def get_monitoring_data():
             'performance': performance_data
         }
 
-    # Concurrently fetch performance data
+    # Concurrently fetch performance data for online devices
     final_devices = []
     with ThreadPoolExecutor(max_workers=20) as executor:
         future_to_computer = {executor.submit(fetch_perf_for_device, c): c for c in online_devices_to_poll}
@@ -607,7 +623,7 @@ def get_monitoring_data():
             'performance': None
         })
 
-    # Sort the final list
+    # Sort the final list for consistent display
     final_devices.sort(key=lambda x: (x['status'] != 'online', x['name']))
 
     # 3. Write new data to cache
@@ -626,4 +642,5 @@ def get_monitoring_data():
     return jsonify(response_data)
     
     
+
 
