@@ -16,8 +16,6 @@ pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
 LOG_RETENTION_HOURS = 24
-# IMPORTANT: Define the share path at the top level
-MONITOR_SHARE_PATH = "\\\\172.16.16.2\\monitoring_data"
 
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
@@ -67,7 +65,13 @@ def require_login_hook():
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
         
-    user, _, _, _ = get_auth_from_request(request.get_json(silent=True) or {})
+    data = request.get_json(silent=True)
+    if data is None:
+        if 'user' not in session:
+            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return
+
+    user, _, _, _ = get_auth_from_request(data)
     if not user:
          return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
@@ -212,54 +216,56 @@ def api_psloglist():
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
+    ip = data.get("ip")
     device_name = data.get("name")
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     
-    if not device_name:
-        return json_result(1, "", "Device name is required.", None)
+    if not ip or not device_name:
+        return json_result(1, "", "IP address and device name are required.", None)
 
-    logger.info(f"Reading performance data for '{device_name}' from shared file.")
+    logger.info(f"Reading performance data for '{device_name}' from agent file on {ip}.")
     
-    # Construct the file path using the shared folder path and the device name
-    file_path = os.path.join(MONITOR_SHARE_PATH, f"{device_name}.json")
+    # Path to the agent's data file on the remote machine
+    remote_file_path = f"C:\\Atlas\\{device_name}.json"
+    ps_command = f"Get-Content -Path '{remote_file_path}' -Raw"
 
-    if not os.path.exists(file_path):
-        logger.warning(f"Performance data file not found for {device_name} at {file_path}")
-        return json_result(404, "", f"Data file for '{device_name}' not found. The agent might not be running or the share is inaccessible.", None)
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=15)
+    
+    if rc != 0:
+        logger.warning(f"Failed to read agent file from {ip} for {device_name}. Error: {err}")
+        return json_result(rc, out, err)
 
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            perf_data = json.load(f)
-
-        # Structure the data similarly to how the old psinfo command did
+        perf_data = json.loads(out)
         structured_data = {"psinfo": perf_data}
 
         # --- Historical Logging ---
-        # This logic is now greatly simplified as we just read the file.
-        # We can add historical logging here if needed, but it's now primarily handled by the agent.
-        # For now, we will focus on just serving the latest data.
-        
-        # Example of how you might log this read, though the agent itself is the source of truth
         log_file = os.path.join(LOGS_DIR, f"{device_name}.json")
         history = []
         if os.path.exists(log_file):
             try:
-                with open(log_file, 'r') as f:
+                with open(log_file, 'r', encoding='utf-8') as f:
                     history = json.load(f)
             except (IOError, json.JSONDecodeError):
                 history = []
         
         history.append({
-            "timestamp": perf_data["timestamp"],
-            "cpuUsage": perf_data["cpuUsage"],
-            "usedMemoryGB": perf_data["usedMemoryGB"]
+            "timestamp": perf_data.get("timestamp", datetime.datetime.utcnow().isoformat()),
+            "cpuUsage": perf_data.get("cpuUsage"),
+            "usedMemoryGB": perf_data.get("usedMemoryGB")
         })
 
         retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
         now = datetime.datetime.utcnow()
-        history = [
-            entry for entry in history
-            if now - datetime.datetime.fromisoformat(entry["timestamp"].replace('Z','+00:00')) < retention_delta
-        ]
+        try:
+            history = [
+                entry for entry in history
+                if now - datetime.datetime.fromisoformat(entry["timestamp"].replace('Z','+00:00')) < retention_delta
+            ]
+        except (TypeError, ValueError):
+            # If timestamps are bad, just keep the latest 500 entries as a fallback
+             history = history[-500:]
+
         
         try:
             with open(log_file, 'w') as f:
@@ -269,14 +275,12 @@ def api_psinfo():
 
         return json_result(0, json.dumps(perf_data), "", structured_data)
 
-    except FileNotFoundError:
-        return json_result(404, "", f"Data file not found for device {device_name}. Ensure the monitoring agent is running and the share path is correct.", None)
     except json.JSONDecodeError as e:
-        logger.error(f"Error decoding JSON for {device_name}: {e}")
-        return json_result(500, "", f"Failed to parse data file for {device_name}. The file may be corrupted.", None)
+        logger.error(f"Error decoding JSON from agent file for {device_name}: {e}. Raw data: {out}")
+        return json_result(500, out, f"Failed to parse data file from agent. The file may be corrupted or malformed.", None)
     except Exception as e:
-        logger.error(f"Unexpected error reading data for {device_name}: {e}", exc_info=True)
-        return json_result(500, "", f"An unexpected error occurred while reading data for {device_name}.", None)
+        logger.error(f"Unexpected error processing agent data for {device_name}: {e}", exc_info=True)
+        return json_result(500, "", f"An unexpected error occurred while processing data for {device_name}.", None)
 
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
@@ -572,12 +576,13 @@ def api_enable_winrm():
     
     # Check for success messages in stdout, even if RC is non-zero (e.g. service already started)
     # RC 2 can mean the service was already started, which is not a failure for our goal.
-    if rc == 0 or (rc == 2 and "service has already been started" in err):
+    if rc == 0 or (rc != 0 and "service has already been started" in err):
         logger.info(f"Successfully sent WinRM configuration commands to {ip}.")
+        final_message = out + "\n" + err if err else out
         return jsonify({
             "ok": True,
             "message": "WinRM configuration commands sent successfully. It may take a moment to apply.",
-            "details": out
+            "details": final_message
         })
     else:
         logger.error(f"Failed to enable WinRM on {ip} via PsExec. RC={rc}. Stderr: {err}. Stdout: {out}")
@@ -652,4 +657,3 @@ def api_set_network_private():
             "error": "Failed to execute remote command to set network profile.",
             "details": err or out
         }), 500
-    

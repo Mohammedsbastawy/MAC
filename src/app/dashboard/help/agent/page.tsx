@@ -35,21 +35,26 @@ const Step: React.FC<{ number: number, title: string, children: React.ReactNode 
 
 export default function AgentDeploymentPage() {
     const agentScript = `
-# Agent Script to be deployed on client machines
-# This script gathers performance data and saves it to a central JSON file.
+# Atlas Monitoring Agent Script
+# This script gathers performance data and saves it to a local JSON file.
 
-# Ensure the script stops on errors
+# Ensure the script stops on errors and the destination directory exists.
 $ErrorActionPreference = "Stop"
+$AgentPath = "C:\\Atlas"
 
 try {
+    if (-not (Test-Path -Path $AgentPath)) {
+        New-Item -ItemType Directory -Path $AgentPath -Force
+    }
+
     # 1. Gather Performance Data
-    $cpuCounter = Get-Counter -Counter "\\Processor(_Total)\\% Processor Time" -SampleInterval 1
+    # Use a brief sample interval for a more accurate point-in-time reading.
+    $cpuCounter = Get-Counter -Counter "\\Processor(_Total)\\% Processor Time" -SampleInterval 1 -MaxSamples 1
     $cpuUsage = $cpuCounter.CounterSamples.CookedValue
 
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
-    $totalMemoryGB = $os.TotalVisibleMemorySize / 1024 / 1024
-    $freeMemoryGB = $os.FreePhysicalMemory / 1024 / 1024
-    $usedMemoryGB = $totalMemoryGB - $freeMemoryGB
+    $totalMemoryGB = $os.TotalVisibleMemorySize / 1GB
+    $usedMemoryGB = ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1GB
 
     $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter } | ForEach-Object {
         [pscustomobject]@{
@@ -68,19 +73,16 @@ try {
         timestamp     = (Get-Date).ToUniversalTime().ToString("o") # ISO 8601 format
     }
 
-    # 3. Define the path and save the file
-    # IMPORTANT: Replace with your actual server and share name
-    $sharePath = "\\\\YOUR_SERVER_NAME\\monitoring_data"
-    $filePath = Join-Path -Path $sharePath -ChildPath "$($env:COMPUTERNAME).json"
+    # 3. Define the local path and save the file
+    $filePath = Join-Path -Path $AgentPath -ChildPath "$($env:COMPUTERNAME).json"
 
-    # Convert to JSON and save to the shared path
+    # Convert to JSON and save to the local path
     $data | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path $filePath -Encoding UTF8 -Force
 
 } catch {
-    # Optional: You can add error logging to a local file on the client
-    # for troubleshooting purposes.
-    # Example:
-    # $logPath = "C:\\Temp\\MonitorAgentErrors.log"
+    # Optional: For troubleshooting, you can write errors to a local log file.
+    # For example:
+    # $logPath = "C:\\Atlas\\MonitorAgentErrors.log"
     # $errorMessage = "[$((Get-Date).ToString('o'))] Error: $($_.Exception.Message)"
     # Add-Content -Path $logPath -Value $errorMessage
 }
@@ -94,32 +96,26 @@ try {
                         <Zap /> Monitoring Agent Deployment Guide
                     </CardTitle>
                     <CardDescription>
-                        Follow these steps to deploy the monitoring agent across your network using Group Policy. This is the recommended, most reliable, and scalable method for monitoring.
+                        Follow these steps to deploy the monitoring agent across your network using Group Policy. This is the most reliable and scalable method for live monitoring.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                    <Step number={1} title="Create a Shared Folder">
-                        <p>On your server (the machine running this application), create a folder. For example, <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">C:\monitoring_data</code>.</p>
-                        <p>Right-click the folder, go to Properties &rarr; Sharing &rarr; Advanced Sharing.</p>
-                        <p>Share the folder and name it (e.g., <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">monitoring_data</code>). Click on "Permissions".</p>
-                        <p>Grant the **"Domain Computers"** group **Full Control** permissions. This is crucial as it allows the computer accounts themselves to write to this share.</p>
-                        <img src="https://i.imgur.com/Bkc3y1k.png" alt="SMB Share Permissions" className="mt-2 rounded-lg border shadow-md" />
-                    </Step>
-
-                    <Step number={2} title="Save the Agent Script">
+                    
+                    <Step number={1} title="Save the Agent Script">
                         <p>Copy the PowerShell script below and save it as a file named <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">monitor_agent.ps1</code>.</p>
+                        <p>This script is self-contained. It will automatically create the <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">C:\Atlas</code> folder on the client machine and save the performance data there.</p>
+                         <CodeBlock>{agentScript}</CodeBlock>
+                        <p className="mt-2">Place this <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">monitor_agent.ps1</code> file in a location accessible by domain controllers, such as the NETLOGON share.</p>
                         <Alert>
                             <ShieldAlert className="h-4 w-4" />
-                            <AlertTitle>Crucial Edit</AlertTitle>
+                            <AlertTitle>NETLOGON Share</AlertTitle>
                             <AlertDescription>
-                                Open the script and **replace** <code className="font-mono bg-destructive/20 text-destructive px-1 py-0.5 rounded-sm">\\\\YOUR_SERVER_NAME\\monitoring_data</code> with the actual network path to the shared folder you created.
+                                The NETLOGON share is typically located at <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">\\YOUR_DOMAIN\NETLOGON</code>. Files placed here are replicated across all domain controllers, making it a reliable location for deployment scripts.
                             </AlertDescription>
                         </Alert>
-                        <CodeBlock>{agentScript}</CodeBlock>
-                        <p>Place this <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">monitor_agent.ps1</code> file in a location accessible by domain controllers, such as the NETLOGON share.</p>
                     </Step>
 
-                     <Step number={3} title="Create and Configure a Group Policy Object (GPO)">
+                     <Step number={2} title="Create and Configure a Group Policy Object (GPO)">
                         <p>Open **Group Policy Management** on your domain controller.</p>
                         <p>Create a new GPO and link it to the Organizational Unit (OU) that contains the computers you want to monitor.</p>
                         <p>Edit the GPO and navigate to:</p>
@@ -127,13 +123,13 @@ try {
                         <p>Right-click and select New &rarr; **Scheduled Task (At least Windows 7)**.</p>
                     </Step>
 
-                     <Step number={4} title="Configure the Scheduled Task">
+                     <Step number={3} title="Configure the Scheduled Task">
                         <p>Configure the task with the following settings:</p>
                         <ul className="list-disc pl-6 space-y-2">
                            <li>**General Tab:**
                                 <ul>
-                                    <li>Name: <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">System Monitor Agent</code></li>
-                                    <li>When running the task, use the following user account: Click "Change User or Group..." and type <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">NT AUTHORITY\System</code>. The SYSTEM account has the necessary local permissions.</li>
+                                    <li>Name: <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">Atlas System Monitor Agent</code></li>
+                                    <li>When running the task, use the following user account: Click "Change User or Group..." and type <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">NT AUTHORITY\System</code>. The SYSTEM account has the necessary local permissions to run the script.</li>
                                      <li>Run whether user is logged on or not.</li>
                                      <li>Run with highest privileges.</li>
                                 </ul>
@@ -143,7 +139,7 @@ try {
                                     <li>Click "New...".</li>
                                     <li>Begin the task: "On a schedule".</li>
                                     <li>Settings: "Daily".</li>
-                                    <li>Advanced settings: Check "Repeat task every:" and set it to **1 minute**. For a duration of: **Indefinitely**.</li>
+                                    <li>Advanced settings: Check "Repeat task every:" and set it to **1 minute**. For a duration of: **Indefinitely**. This ensures continuous monitoring.</li>
                                 </ul>
                            </li>
                             <li>**Actions Tab:**
@@ -151,15 +147,15 @@ try {
                                     <li>Click "New...".</li>
                                     <li>Action: "Start a program".</li>
                                     <li>Program/script: <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">powershell.exe</code></li>
-                                     <li>Add arguments (optional): <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">-ExecutionPolicy Bypass -File "\\YOUR_DOMAIN\NETLOGON\monitor_agent.ps1"</code></li>
+                                     <li>Add arguments (optional): <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">-ExecutionPolicy Bypass -File "\\YOUR_DOMAIN.com\NETLOGON\monitor_agent.ps1"</code></li>
                                 </ul>
                            </li>
                         </ul>
                          <img src="https://i.imgur.com/kF3b0tY.png" alt="GPO Scheduled Task Configuration" className="mt-2 rounded-lg border shadow-md" />
                     </Step>
-                     <Step number={5} title="Final Step">
-                        <p>Once the GPO is applied, the target computers will automatically create this scheduled task on their next policy update. The task will run the script every minute, sending fresh performance data to your shared folder.</p>
-                        <p>The monitoring page will now read from these files, resulting in a much faster and more reliable experience.</p>
+                     <Step number={4} title="Final Step">
+                        <p>Once the GPO is applied, the target computers will automatically create this scheduled task on their next policy update (or after a reboot). The task will run the script every minute, creating and updating the local performance file at <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">C:\Atlas\{"{COMPUTERNAME}"}.json</code>.</p>
+                        <p>The monitoring page will now read from these files directly, resulting in a much faster and more reliable experience.</p>
                      </Step>
                 </CardContent>
             </Card>

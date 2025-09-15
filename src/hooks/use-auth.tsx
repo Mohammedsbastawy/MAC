@@ -36,15 +36,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await fetch('/api/check-session');
       const data = await response.json();
       if (data.ok) {
-        setUser(data);
+        setUser(data.user);
+        // Important: We retrieve the password from session storage on session load.
+        const storedPassword = sessionStorage.getItem('atlas-session-pwd');
+        if (storedPassword) {
+            sessionPassword = storedPassword;
+        }
       } else {
         setUser(null);
         sessionPassword = undefined;
+        sessionStorage.removeItem('atlas-session-pwd');
       }
     } catch (error) {
       console.error("Failed to check session", error);
       setUser(null);
       sessionPassword = undefined;
+      sessionStorage.removeItem('atlas-session-pwd');
     } finally {
       setIsLoading(false);
     }
@@ -66,9 +73,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (data.ok) {
-        // Store password in our in-memory variable
+        // Store password in our in-memory variable AND session storage
         sessionPassword = password;
-        await checkSession(); // Re-check session to get user details
+        sessionStorage.setItem('atlas-session-pwd', password);
+        setUser(data);
         return { success: true };
       }
       return { success: false, error: data.error };
@@ -81,10 +89,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async (): Promise<void> => {
     try {
       await fetch('/api/logout', { method: 'POST' });
-      setUser(null);
-      sessionPassword = undefined;
     } catch (error) {
       console.error("Logout failed", error);
+    } finally {
+        setUser(null);
+        sessionPassword = undefined;
+        sessionStorage.removeItem('atlas-session-pwd');
     }
   };
 
@@ -102,5 +112,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-
-    
