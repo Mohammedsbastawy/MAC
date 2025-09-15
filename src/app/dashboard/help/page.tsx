@@ -7,7 +7,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog, Zap, Wrench, ArrowRight } from "lucide-react"
+import { DownloadCloud, ShieldAlert, ShieldCheck, Siren, Network, Search, UserCog, Zap, Wrench, ArrowRight, Lightbulb } from "lucide-react"
 import Link from "next/link"
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -40,6 +40,45 @@ export default function HelpPage() {
                     Follow these guides to ensure the application runs smoothly.
                 </p>
             </div>
+
+             <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-2xl">
+                        <Siren /> Troubleshooting Common Errors
+                    </CardTitle>
+                    <CardDescription>
+                        Solutions for frequent issues you might encounter while using the remote tools.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Accordion type="single" collapsible className="w-full">
+                        <AccordionItem value="item-1">
+                            <AccordionTrigger className="text-lg font-medium text-destructive">Error: "Network connection type is set to Public"</AccordionTrigger>
+                            <AccordionContent className="space-y-2 text-base">
+                                <p className="text-muted-foreground">
+                                    **Symptom:** WinRM commands (like File Browser, Process List) fail, and the error log mentions that the "network connection type is Public".
+                                </p>
+                                <p className="text-muted-foreground">
+                                    **Cause:** For security reasons, Windows blocks remote management features like WinRM when a computer's active network connection is classified as "Public".
+                                </p>
+                                <h5 className="font-semibold pt-2">Solution: Change Network Profile to Private</h5>
+                                <p className="text-muted-foreground">You must run the following PowerShell command **on the target machine** with Administrator privileges to re-classify the network as "Private".</p>
+                                <CodeBlock>
+                                    {'Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private'}
+                                </CodeBlock>
+                                <Alert className="mt-4">
+                                    <Lightbulb className="h-4 w-4" />
+                                    <AlertTitle>How to Run Remotely</AlertTitle>
+                                    <AlertDescription>
+                                        If you can't access the machine's desktop, you can use the **Execute Command** feature in the Device Actions Panel to run this. The command to use would be:
+                                         <CodeBlock>{'powershell -command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"'}</CodeBlock>
+                                    </AlertDescription>
+                                </Alert>
+                            </AccordionContent>
+                        </AccordionItem>
+                    </Accordion>
+                </CardContent>
+            </Card>
 
             <Card>
                 <CardHeader>
