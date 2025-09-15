@@ -555,7 +555,7 @@ def get_monitoring_data():
             'name': c['name'],
             'ipAddress': c.get('dns_hostname'),
             'status': 'online' if is_online else 'offline',
-            'isFetching': False, 
+            'isFetching': is_online, # Set to true for online devices to trigger frontend fetch
             'performance': None,
             'performanceError': None,
         })
@@ -584,9 +584,21 @@ def get_historical_data():
     device_id = data.get("id") # The device DN is used as ID
     if not device_id:
         return jsonify({"ok": False, "error": "Device ID is required."}), 400
+    
+    # Sanitize the device_id to create a safe filename from the CN part
+    # Example DN: CN=PROD01,OU=Production,DC=prismafoods,DC=co
+    try:
+        cn_part = next((part for part in device_id.split(',') if part.upper().startswith('CN=')), None)
+        if not cn_part:
+            raise ValueError("Could not find CN in distinguished name")
+        device_name = cn_part.split('=')[1]
+        safe_filename = "".join([c for c in device_name if c.isalnum() or c in (' ', '_')]).rstrip()
+    except Exception as e:
+        logger.error(f"Could not parse device name from DN '{device_id}': {e}")
+        # Fallback to a sanitized version of the full DN if parsing fails
+        safe_filename = "".join([c for c in device_id if c.isalnum() or c in (' ', '_')]).rstrip()
 
-    # Sanitize the device_id to create a safe filename
-    safe_filename = "".join([c for c in device_id if c.isalnum() or c in (' ', '_')]).rstrip()
+
     log_file = os.path.join(LOGS_DIR, f"{safe_filename}.json")
 
     if os.path.exists(log_file):

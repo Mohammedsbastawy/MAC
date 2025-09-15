@@ -101,7 +101,7 @@ const MonitoringCard: React.FC<{
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isFetching && !device.performance ? (
+        {device.isFetching ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
@@ -110,16 +110,18 @@ const MonitoringCard: React.FC<{
                 <XCircle className="h-8 w-8 mb-2" />
                 <p className="font-semibold">Failed to load data</p>
                 <p className="text-xs max-w-full truncate" title={performanceError}>{performanceError}</p>
-                <Button variant="secondary" size="sm" className="mt-4" onClick={() => onRunDiagnostics(device)}>
-                    <ShieldCheck className="mr-2 h-4 w-4" />
-                    Run Diagnostics
-                </Button>
+                 {performanceError.includes("5985") && // Only show diagnostics for WinRM-related errors
+                    <Button variant="secondary" size="sm" className="mt-4" onClick={() => onRunDiagnostics(device)}>
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                        Run Diagnostics
+                    </Button>
+                }
             </div>
-        ) : device.performance ? (
+        ) : performance ? (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <h4 className="text-sm font-semibold mb-2 text-center">CPU Usage</h4>
-               {device.performance.cpuUsage !== null ? (
+               {performance.cpuUsage !== null ? (
               <>
               <ChartContainer
                 config={cpuChartConfig}
@@ -133,8 +135,8 @@ const MonitoringCard: React.FC<{
                     />
                     <Pie
                       data={[
-                        { name: "used", value: device.performance.cpuUsage, fill: "hsl(var(--chart-1))" },
-                        { name: "free", value: 100 - device.performance.cpuUsage, fill: "hsl(var(--muted))" },
+                        { name: "used", value: performance.cpuUsage, fill: "hsl(var(--chart-1))" },
+                        { name: "free", value: 100 - performance.cpuUsage, fill: "hsl(var(--muted))" },
                       ]}
                       dataKey="value"
                       nameKey="name"
@@ -147,7 +149,7 @@ const MonitoringCard: React.FC<{
                   </PieChart>
                 </ResponsiveContainer>
               </ChartContainer>
-               <p className="text-center font-bold text-lg">{device.performance.cpuUsage.toFixed(1)}%</p>
+               <p className="text-center font-bold text-lg">{performance.cpuUsage.toFixed(1)}%</p>
                </>
                 ) : (
                     <div className="flex items-center justify-center h-[124px] text-muted-foreground text-xs">No data</div>
@@ -179,7 +181,7 @@ const MonitoringCard: React.FC<{
               </ChartContainer>
                <p className="text-center font-bold text-lg">{memPercentage.toFixed(1)}%</p>
                <p className="text-center text-xs text-muted-foreground">
-                {device.performance.usedMemoryGB.toFixed(2)} / {device.performance.totalMemoryGB.toFixed(2)} GB
+                {performance.usedMemoryGB.toFixed(2)} / {performance.totalMemoryGB.toFixed(2)} GB
                </p>
                </>
                ) : (
@@ -188,9 +190,9 @@ const MonitoringCard: React.FC<{
             </div>
              <div className="col-span-2">
                 <h4 className="text-sm font-semibold mb-2 text-center">Disk Usage</h4>
-                 {device.performance.diskInfo && device.performance.diskInfo.length > 0 ? (
+                 {performance.diskInfo && performance.diskInfo.length > 0 ? (
                     <ChartContainer config={{}} className="h-40 w-full">
-                        <BarChart data={device.performance.diskInfo.map(d => ({...d, used: d.sizeGB - d.freeGB}))} layout="vertical" margin={{left: 10}}>
+                        <BarChart data={performance.diskInfo.map(d => ({...d, used: d.sizeGB - d.freeGB}))} layout="vertical" margin={{left: 10}}>
                             <CartesianGrid horizontal={false} />
                             <XAxis type="number" dataKey="sizeGB" hide/>
                             <YAxis type="category" dataKey="volume" width={40} tickLine={false} axisLine={false} />
@@ -298,14 +300,15 @@ export default function MonitoringPage() {
   };
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
-    setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true } : d));
+    // Don't set isFetching to true here to prevent loader from showing on refresh
+    // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true } : d));
 
     const maxRetries = 2;
     let attempt = 0;
 
     while (attempt <= maxRetries) {
         if (signal.aborted) {
-            setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false } : d));
+            // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false } : d));
             return;
         }
         try {
@@ -326,10 +329,10 @@ export default function MonitoringPage() {
             if (data.ok && data.structured_data?.psinfo) {
                 const perf = data.structured_data.psinfo;
                 const perfData: PerformanceData = {
-                    cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || '0'),
-                    totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || '0'),
-                    usedMemoryGB: parseFloat(perf.performance_info.find((p:any) => p.key === "Used Memory")?.value || '0'),
-                    diskInfo: perf.disk_info || []
+                    cpuUsage: perf.cpuUsage,
+                    totalMemoryGB: perf.totalMemoryGB,
+                    usedMemoryGB: perf.usedMemoryGB,
+                    diskInfo: perf.diskInfo ? JSON.parse(perf.diskInfo) : [],
                 };
                 setDevices(prev => prev.map(d => d.id === device.id ? { ...d, performance: perfData, isFetching: false, performanceError: null } : d));
                 return;
@@ -380,9 +383,9 @@ export default function MonitoringPage() {
                     const newDevice = newDeviceMap.get(oldDevice.id);
                     if (newDevice) {
                         newDeviceMap.delete(oldDevice.id); // Remove from map to handle new devices later
-                        return { ...oldDevice, status: newDevice.status };
+                        return { ...newDevice, performance: oldDevice.performance, isFetching: newDevice.status === 'online' };
                     }
-                    return oldDevice;
+                    return oldDevice; // This case is unlikely but handles devices that might disappear from AD
                 });
                  return updatedDevices.concat(Array.from(newDeviceMap.values()));
             });
@@ -396,15 +399,15 @@ export default function MonitoringPage() {
             }
 
             const onlineDevices = data.devices.filter((d: MonitoredDevice) => d.status === 'online');
-            onlineDevices.forEach((device: MonitoredDevice) => {
-                 setDevices(prev => prev.map(d => {
-                     if (d.id === device.id && d.status === 'online' && !d.isFetching) {
-                        fetchDevicePerformance(d, signal);
-                        return { ...d, isFetching: true };
-                     }
-                     return d;
-                 }))
-            });
+            
+            // This now runs after state is set
+            setTimeout(() => {
+                onlineDevices.forEach((device: MonitoredDevice) => {
+                    // Refetch performance for online devices
+                    fetchDevicePerformance(device, signal);
+                });
+            }, 0);
+
 
         } else {
             setError(data.message || "Failed to fetch monitoring data.");

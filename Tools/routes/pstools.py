@@ -10,11 +10,15 @@ from flask import Blueprint, request, jsonify, current_app, session
 from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_pslist_output, parse_psfile_output, parse_psservice_output, parse_psloglist_output, parse_psinfo_output, parse_query_user_output, run_winrm_command
 from Tools.utils.logger import logger
 import datetime
+import json
 
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
 LOG_RETENTION_HOURS = 24
+# IMPORTANT: Define the share path at the top level
+MONITOR_SHARE_PATH = "\\\\172.16.16.2\\monitoring_data"
+
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
     # Ensure stdout is serializable
@@ -208,127 +212,72 @@ def api_psloglist():
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
-    ip = data.get("ip")
-    device_id = data.get("id") # DN of the device
-    device_name = data.get("name") # Name of the device
+    device_name = data.get("name")
     
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    if not device_name:
+        return json_result(1, "", "Device name is required.", None)
 
-    logger.info(f"Executing hardware and OS info query (WinRM) on {ip}.")
+    logger.info(f"Reading performance data for '{device_name}' from shared file.")
+    
+    # Construct the file path using the shared folder path and the device name
+    file_path = os.path.join(MONITOR_SHARE_PATH, f"{device_name}.json")
 
-    ps_command = r"""
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem
-    $cs = Get-CimInstance -ClassName Win32_ComputerSystem
-    $proc = Get-CimInstance -ClassName Win32_Processor
-    $gpu = Get-CimInstance -ClassName Win32_VideoController
-    
-    # Performance Data
-    $cpuUsage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
-    $totalMemory = $cs.TotalPhysicalMemory
-    $freeMemory = $os.FreePhysicalMemory * 1024 # Convert from KB to Bytes
-    $usedMemory = $totalMemory - $freeMemory
-    
-    $uptime_span = (Get-Date) - $os.LastBootUpTime
-    $uptime_str = "$($uptime_span.Days) days, $($uptime_span.Hours) hours, $($uptime_span.Minutes) minutes"
-    
-    $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
-        [pscustomobject]@{
-            volume = $_.DriveLetter;
-            sizeGB = [math]::Round($_.Size / 1GB, 2);
-            freeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
-        }
-    }
+    if not os.path.exists(file_path):
+        logger.warning(f"Performance data file not found for {device_name} at {file_path}")
+        return json_result(404, "", f"Data file for '{device_name}' not found. The agent might not be running or the share is inaccessible.", None)
 
-    $system_info = @{
-        "OS" = $os.Caption;
-        "Kernel version" = $os.Version;
-        "Processor" = $proc.Name;
-        "Total Memory" = "{0:N2}" -f ($totalMemory / 1GB);
-        "Video Card" = if ($gpu) { $gpu.Name } else { "N/A" };
-        "Domain" = $cs.Domain;
-        "Uptime" = $uptime_str;
-        "Install date" = $os.InstallDate.ToString('yyyy-MM-dd');
-        "Logged on users" = if ($cs.NumberOfUsers) { $cs.NumberOfUsers } else { 0 };
-    }
-    
-    $performance_info = @{
-        "CPU Usage" = "{0:N2}" -f $cpuUsage;
-        "Used Memory" = "{0:N2}" -f ($usedMemory / 1GB);
-    }
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            perf_data = json.load(f)
 
-    @{
-        psinfo = @{
-            system_info = $system_info.GetEnumerator() | ForEach-Object { @{ key=$_.Name; value=$_.Value } };
-            performance_info = $performance_info.GetEnumerator() | ForEach-Object { @{ key=$_.Name; value=$_.Value } };
-            disk_info = $disks
-        }
-    } | ConvertTo-Json -Depth 4 -Compress
-    """
-    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
-    
-    structured_data = None
-    if rc == 0 and out:
+        # Structure the data similarly to how the old psinfo command did
+        structured_data = {"psinfo": perf_data}
+
+        # --- Historical Logging ---
+        # This logic is now greatly simplified as we just read the file.
+        # We can add historical logging here if needed, but it's now primarily handled by the agent.
+        # For now, we will focus on just serving the latest data.
+        
+        # Example of how you might log this read, though the agent itself is the source of truth
+        log_file = os.path.join(LOGS_DIR, f"{device_name}.json")
+        history = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r') as f:
+                    history = json.load(f)
+            except (IOError, json.JSONDecodeError):
+                history = []
+        
+        history.append({
+            "timestamp": perf_data["timestamp"],
+            "cpuUsage": perf_data["cpuUsage"],
+            "usedMemoryGB": perf_data["usedMemoryGB"]
+        })
+
+        retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+        now = datetime.datetime.utcnow()
+        history = [
+            entry for entry in history
+            if now - datetime.datetime.fromisoformat(entry["timestamp"].replace('Z','+00:00')) < retention_delta
+        ]
+        
         try:
-            parsed_json = json.loads(out)
-            structured_data = parsed_json
-            
-            # --- Historical Logging ---
-            if device_name and parsed_json.get("psinfo"):
-                perf_info = parsed_json["psinfo"].get("performance_info", [])
-                
-                # Helper to find value from key-value pair list
-                def find_value(key_to_find):
-                    item = next((item for item in perf_info if item["key"] == key_to_find), None)
-                    return item['value'] if item else None
+            with open(log_file, 'w') as f:
+                json.dump(history, f)
+        except IOError as e:
+            logger.error(f"Failed to write history log for {device_name}: {e}")
 
-                cpu_usage_str = find_value("CPU Usage")
-                used_memory_gb_str = find_value("Used Memory")
+        return json_result(0, json.dumps(perf_data), "", structured_data)
 
-                if cpu_usage_str is not None and used_memory_gb_str is not None:
-                    cpu_usage = float(cpu_usage_str)
-                    used_memory_gb = float(used_memory_gb_str)
-                    
-                    # Sanitize the device name to create a safe filename
-                    safe_filename = "".join([c for c in device_name if c.isalnum() or c in (' ', '_')]).rstrip()
-                    log_file = os.path.join(LOGS_DIR, f"{safe_filename}.json")
+    except FileNotFoundError:
+        return json_result(404, "", f"Data file not found for device {device_name}. Ensure the monitoring agent is running and the share path is correct.", None)
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON for {device_name}: {e}")
+        return json_result(500, "", f"Failed to parse data file for {device_name}. The file may be corrupted.", None)
+    except Exception as e:
+        logger.error(f"Unexpected error reading data for {device_name}: {e}", exc_info=True)
+        return json_result(500, "", f"An unexpected error occurred while reading data for {device_name}.", None)
 
-                    history = []
-                    if os.path.exists(log_file):
-                        try:
-                            with open(log_file, 'r') as f:
-                                history = json.load(f)
-                        except (IOError, json.JSONDecodeError):
-                            history = []
-                    
-                    # Add new entry
-                    history.append({
-                        "timestamp": datetime.datetime.utcnow().isoformat(),
-                        "cpuUsage": cpu_usage,
-                        "usedMemoryGB": used_memory_gb
-                    })
-
-                    # Prune old entries
-                    retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
-                    now = datetime.datetime.utcnow()
-                    history = [
-                        entry for entry in history
-                        if now - datetime.datetime.fromisoformat(entry["timestamp"]) < retention_delta
-                    ]
-                    
-                    # Save updated history
-                    try:
-                        with open(log_file, 'w') as f:
-                            json.dump(history, f)
-                    except IOError as e:
-                        logger.error(f"Failed to write history log for {device_name}: {e}")
-                else:
-                    logger.warning(f"Could not find CPU or Memory info for {device_name} in psinfo output.")
-
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-            err = f"Failed to parse or process JSON from WinRM psinfo. Error: {str(e)}. Raw output: {out}"
-            rc = 1
-
-    return json_result(rc, out, err, structured_data)
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
 def api_psloggedon():
