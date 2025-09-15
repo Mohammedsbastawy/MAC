@@ -615,8 +615,7 @@ def api_set_network_private():
     logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
 
     # This command attempts to run PowerShell with elevated privileges to change the network profile.
-    # Note the escaping of quotes for the command line.
-    ps_command = 'Start-Process powershell -Verb RunAs -ArgumentList \\"-Command Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private\\"'
+    ps_command = 'Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private'
     cmd_args = ["powershell.exe", "-Command", ps_command]
     
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
@@ -645,3 +644,6 @@ def api_set_network_private():
 
 
 
+
+
+    
