@@ -191,46 +191,58 @@ export default function MonitoringPage() {
   const { toast } = useToast();
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice) => {
-    try {
-        const res = await fetch("/api/pstools/psinfo", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ip: device.ipAddress })
-        });
-        const data = await res.json();
+    const maxRetries = 2; // Try original + 2 retries
+    let attempt = 0;
+    
+    while (attempt <= maxRetries) {
+        try {
+            const res = await fetch("/api/pstools/psinfo", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ip: device.ipAddress })
+            });
+            const data = await res.json();
 
-        if (data.ok && data.structured_data?.psinfo) {
-             const perf = data.structured_data.psinfo;
-             let diskData = [];
-             try {
-                if (typeof perf.disk_info === 'string') {
-                    diskData = JSON.parse(perf.disk_info);
-                } else {
-                    diskData = perf.disk_info;
+            if (data.ok && data.structured_data?.psinfo) {
+                const perf = data.structured_data.psinfo;
+                let diskData = [];
+                try {
+                    if (typeof perf.disk_info === 'string') {
+                        diskData = JSON.parse(perf.disk_info);
+                    } else {
+                        diskData = perf.disk_info;
+                    }
+                } catch (e) {
+                    console.error("Failed to parse disk_info JSON", e);
+                    diskData = [];
                 }
-             } catch (e) {
-                console.error("Failed to parse disk_info JSON", e);
-                diskData = [];
-             }
 
-             const newPerfData = {
-                 cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || 0),
-                 totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || 0),
-                 usedMemoryGB: parseFloat(perf.performance_info.find((p:any) => p.key === "Used Memory")?.value || 0),
-                 diskInfo: Array.isArray(diskData) ? diskData.map((d: any) => ({
-                    volume: d.volume,
-                    sizeGB: parseFloat(d.sizeGB) || 0,
-                    freeGB: parseFloat(d.freeGB) || 0,
-                })) : []
-             }
-             setDevices(prev => prev.map(d => d.id === device.id ? {...d, performance: newPerfData, isFetching: false, performanceError: null} : d));
-        } else {
-             throw new Error(data.error || data.stderr || "Failed to parse performance data.");
+                const newPerfData = {
+                    cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || 0),
+                    totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || 0),
+                    usedMemoryGB: parseFloat(perf.performance_info.find((p:any) => p.key === "Used Memory")?.value || 0),
+                    diskInfo: Array.isArray(diskData) ? diskData.map((d: any) => ({
+                        volume: d.volume,
+                        sizeGB: parseFloat(d.sizeGB) || 0,
+                        freeGB: parseFloat(d.freeGB) || 0,
+                    })) : []
+                }
+                setDevices(prev => prev.map(d => d.id === device.id ? {...d, performance: newPerfData, isFetching: false, performanceError: null} : d));
+                return; // Success, exit the loop
+            } else {
+                throw new Error(data.error || data.stderr || "Failed to parse performance data.");
+            }
+        } catch (e: any) {
+            console.error(`Attempt ${attempt + 1} failed for ${device.name}:`, e);
+            if (attempt < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
+                attempt++;
+            } else {
+                const errorMessage = e.message || "An unknown error occurred.";
+                setDevices(prev => prev.map(d => d.id === device.id ? {...d, isFetching: false, performance: undefined, performanceError: errorMessage} : d));
+                return; // Max retries reached, exit
+            }
         }
-    } catch (e: any) {
-        console.error(`Failed to fetch performance for ${device.name}:`, e);
-        const errorMessage = e.message || "An unknown error occurred.";
-        setDevices(prev => prev.map(d => d.id === device.id ? {...d, isFetching: false, performance: undefined, performanceError: errorMessage} : d));
     }
   }, []);
 
@@ -365,3 +377,5 @@ export default function MonitoringPage() {
     </div>
   );
 }
+
+    
