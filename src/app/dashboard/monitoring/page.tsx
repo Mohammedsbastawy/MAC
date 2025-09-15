@@ -104,7 +104,7 @@ const MonitoringCard: React.FC<{
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isFetching && !performance ? (
+        {device.isFetching ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
@@ -113,10 +113,10 @@ const MonitoringCard: React.FC<{
                 <XCircle className="h-8 w-8 mb-2" />
                 <p className="font-semibold">{isAgentNotDeployedError ? "Agent Not Deployed" : "Failed to load data"}</p>
                 <p className="text-xs max-w-full truncate" title={performanceError}>
-                    {isAgentNotDeployedError ? "The monitoring agent script has not been run on this device." : performanceError}
+                    {isAgentNotDeployedError ? "The monitoring agent must be installed on this device." : performanceError}
                 </p>
                 {isAgentNotDeployedError ? (
-                     <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
+                    <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
                         <Zap className="mr-2 h-4 w-4" />
                         Deploy Agent
                     </Button>
@@ -321,10 +321,11 @@ export default function MonitoringPage() {
              if (data.ok) {
                 toast({ title: "Deployment Successful", description: data.message });
                 // Immediately try fetching data again for this device
+                setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
                 await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
                 fetchDevicePerformance(device, new AbortController().signal);
             } else {
-                toast({ variant: "destructive", title: "Deployment Failed", description: data.error, duration: 10000 });
+                toast({ variant: "destructive", title: "Deployment Failed", description: data.details || data.error, duration: 10000 });
             }
       } catch (e: any) {
           toast({ variant: "destructive", title: "Client Error", description: e.message });
@@ -332,14 +333,15 @@ export default function MonitoringPage() {
   }
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
-    setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
+    // Don't set fetching state here to avoid UI flicker
+    // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
 
     const maxRetries = 2;
     let attempt = 0;
 
     while (attempt <= maxRetries) {
         if (signal.aborted) {
-            setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false } : d));
+            // Don't update state if aborted
             return;
         }
         try {
@@ -349,6 +351,8 @@ export default function MonitoringPage() {
                 body: JSON.stringify({ ip: device.ipAddress, id: device.id, name: device.name }),
                 signal,
             });
+
+            if (signal.aborted) return;
 
             if (!res.ok) {
                 const errorData = await res.json().catch(() => ({error: 'Invalid response from server'}));
@@ -420,6 +424,9 @@ export default function MonitoringPage() {
 
             const onlineDevices = newDevices.filter((d: MonitoredDevice) => d.status === 'online');
             
+            // Set fetching state only for online devices that will be fetched
+            setDevices(prev => prev.map(d => onlineDevices.some(od => od.id === d.id) ? { ...d, isFetching: true, performance: d.performance, performanceError: null } : d));
+
             onlineDevices.forEach((device: MonitoredDevice) => {
                 fetchDevicePerformance(device, signal);
             });
@@ -433,8 +440,10 @@ export default function MonitoringPage() {
             setError("Failed to connect to the backend server.");
         }
       } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
+        if (!signal.aborted) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
       }
   }, [toast, fetchDevicePerformance]);
 
@@ -445,6 +454,8 @@ export default function MonitoringPage() {
     if (user) {
         fetchInitialDeviceList(false, signal);
     }
+
+    // Cleanup function to abort requests when the component unmounts
     return () => {
         controller.abort();
     };
@@ -454,9 +465,16 @@ export default function MonitoringPage() {
     let interval: NodeJS.Timeout | null = null;
     const controller = new AbortController();
     const signal = controller.signal;
+
     if (autoRefresh && user) {
-        interval = setInterval(() => fetchInitialDeviceList(true, signal), 30000);
+        interval = setInterval(() => {
+            if (!document.hidden) { // Only refresh if tab is visible
+                fetchInitialDeviceList(true, signal);
+            }
+        }, 30000);
     }
+    
+    // Cleanup function
     return () => {
       if (interval) clearInterval(interval);
       controller.abort();
