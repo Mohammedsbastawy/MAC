@@ -18,7 +18,7 @@ import datetime
 network_bp = Blueprint('network', __name__)
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'monitoring_cache.json')
-CACHE_EXPIRY_SECONDS = 60 # 1 minute
+CACHE_EXPIRY_SECONDS = 30 # 30 seconds
 
 @network_bp.before_request
 def require_login():
@@ -550,7 +550,7 @@ def get_monitoring_data():
             'name': c['name'],
             'ipAddress': c.get('dns_hostname'),
             'status': 'online' if is_online else 'offline',
-            'isFetching': is_online, 
+            'isFetching': False, 
             'performance': None,
             'performanceError': None,
         })
@@ -572,5 +572,3 @@ def get_monitoring_data():
         logger.error(f"Failed to write to cache file: {e}")
 
     return jsonify(response_data)
-
-    

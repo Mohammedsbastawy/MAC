@@ -93,7 +93,7 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
                 <p className="font-semibold">Failed to load data</p>
                 <p className="text-xs">{performanceError}</p>
             </div>
-        ) : performance ? (
+        ) : device.performance ? (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <h4 className="text-sm font-semibold mb-2 text-center">CPU Usage</h4>
@@ -109,8 +109,8 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
                     />
                     <Pie
                       data={[
-                        { name: "used", value: performance.cpuUsage, fill: "hsl(var(--chart-1))" },
-                        { name: "free", value: 100 - performance.cpuUsage, fill: "hsl(var(--muted))" },
+                        { name: "used", value: device.performance.cpuUsage, fill: "hsl(var(--chart-1))" },
+                        { name: "free", value: 100 - device.performance.cpuUsage, fill: "hsl(var(--muted))" },
                       ]}
                       dataKey="value"
                       nameKey="name"
@@ -123,7 +123,7 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
                   </PieChart>
                 </ResponsiveContainer>
               </ChartContainer>
-               <p className="text-center font-bold text-lg">{performance.cpuUsage.toFixed(1)}%</p>
+               <p className="text-center font-bold text-lg">{device.performance.cpuUsage.toFixed(1)}%</p>
             </div>
             <div>
               <h4 className="text-sm font-semibold mb-2 text-center">Memory Usage</h4>
@@ -149,14 +149,14 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
               </ChartContainer>
                <p className="text-center font-bold text-lg">{memPercentage.toFixed(1)}%</p>
                <p className="text-center text-xs text-muted-foreground">
-                {performance.usedMemoryGB.toFixed(2)} / {performance.totalMemoryGB.toFixed(2)} GB
+                {device.performance.usedMemoryGB.toFixed(2)} / {device.performance.totalMemoryGB.toFixed(2)} GB
                </p>
             </div>
              <div className="col-span-2">
                 <h4 className="text-sm font-semibold mb-2 text-center">Disk Usage</h4>
-                 {performance.diskInfo && performance.diskInfo.length > 0 ? (
+                 {device.performance.diskInfo && device.performance.diskInfo.length > 0 ? (
                     <ChartContainer config={{}} className="h-40 w-full">
-                        <BarChart data={performance.diskInfo.map(d => ({...d, used: d.sizeGB - d.freeGB}))} layout="vertical" margin={{left: 10}}>
+                        <BarChart data={device.performance.diskInfo.map(d => ({...d, used: d.sizeGB - d.freeGB}))} layout="vertical" margin={{left: 10}}>
                             <CartesianGrid horizontal={false} />
                             <XAxis type="number" dataKey="sizeGB" hide/>
                             <YAxis type="category" dataKey="volume" width={40} tickLine={false} axisLine={false} />
@@ -239,7 +239,6 @@ export default function MonitoringPage() {
         setIsLoading(true);
       } else {
         setIsRefreshing(true);
-        setDevices(prev => prev.map(d => ({...d, performance: undefined, performanceError: null, isFetching: d.status === 'online' })))
       }
       setError(null);
       
@@ -252,16 +251,19 @@ export default function MonitoringPage() {
         const data = await response.json();
         
         if (data.ok) {
-            setDevices(data.devices);
+            const initialDevices = data.devices.map((d: MonitoredDevice) => ({...d, isFetching: d.status === 'online', performanceError: null}));
+            setDevices(initialDevices);
             setLastUpdated(data.last_updated);
+
             if (forceRefresh) {
                 toast({ title: "Success", description: "Device status has been refreshed." });
             }
-            for (const device of data.devices) {
-                if (device.status === 'online') {
-                    fetchDevicePerformance(device);
-                }
-            }
+
+            const onlineDevices = initialDevices.filter((d: MonitoredDevice) => d.status === 'online');
+            onlineDevices.forEach((device: MonitoredDevice) => {
+                fetchDevicePerformance(device);
+            });
+
         } else {
             setError(data.message || "Failed to fetch monitoring data.");
         }
@@ -285,7 +287,7 @@ export default function MonitoringPage() {
   React.useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (autoRefresh && user) {
-        interval = setInterval(() => fetchInitialDeviceList(true), 60000); // Force refresh every 60 seconds
+        interval = setInterval(() => fetchInitialDeviceList(true), 30000); // Force refresh every 30 seconds
     }
     return () => {
       if (interval) clearInterval(interval);
@@ -346,7 +348,7 @@ export default function MonitoringPage() {
         <div className="flex items-center gap-4">
             <div className="flex items-center space-x-2">
                 <Switch id="auto-refresh" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-                <Label htmlFor="auto-refresh">Auto-Refresh (1 min)</Label>
+                <Label htmlFor="auto-refresh">Auto-Refresh (30s)</Label>
             </div>
             <Button onClick={() => fetchInitialDeviceList(true)} disabled={isRefreshing}>
                 {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
