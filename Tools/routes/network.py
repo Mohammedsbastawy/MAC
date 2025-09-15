@@ -528,21 +528,20 @@ def get_monitoring_data():
     
     if ips_to_check:
         logger.info(f"Checking online status for {len(ips_to_check)} AD hosts.")
-        # Use a combination of ping and TCP connect for robustness
         with ThreadPoolExecutor(max_workers=50) as executor:
-            future_to_ip = {executor.submit(check_host_status_ping, ip): ip for ip in ips_to_check}
-            future_to_ip.update({executor.submit(check_host_status_tcp_connect, ip): ip for ip in ips_to_check})
-
-            for future in as_completed(future_to_ip):
-                ip = future_to_ip[future]
+            future_to_ip_ping = {executor.submit(check_host_status_ping, ip): ip for ip in ips_to_check}
+            future_to_ip_tcp = {executor.submit(check_host_status_tcp_connect, ip): ip for ip in ips_to_check}
+            
+            for future in as_completed(future_to_ip_ping.keys() | future_to_ip_tcp.keys()):
+                ip = future_to_ip_ping.get(future) or future_to_ip_tcp.get(future)
                 try:
                     if future.result():
                         online_ips.add(ip)
                 except Exception:
-                    pass # Ignore errors in status checking
+                    pass 
         logger.info(f"Found {len(online_ips)} AD hosts online.")
 
-    # Prepare final device list with status only
+    # Prepare final device list with status only. Performance data will be fetched by the frontend.
     final_devices = []
     for c in all_ad_computers:
         is_online = c.get('dns_hostname') in online_ips
@@ -551,8 +550,9 @@ def get_monitoring_data():
             'name': c['name'],
             'ipAddress': c.get('dns_hostname'),
             'status': 'online' if is_online else 'offline',
-            'isFetching': is_online, # Mark online devices for fetching on the frontend
-            'performance': None
+            'isFetching': is_online, 
+            'performance': None,
+            'performanceError': None,
         })
 
     # Sort the final list for consistent display

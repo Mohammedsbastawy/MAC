@@ -5,7 +5,7 @@ import * as React from "react";
 import type { Device, MonitoredDevice } from "@/lib/types";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw } from "lucide-react";
+import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw, XCircle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -50,9 +50,9 @@ const memChartConfig = {
 
 const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
 
-  const { performance, status } = device;
+  const { performance, status, performanceError } = device;
 
-  const memData = performance
+  const memData = (performance && performance.totalMemoryGB > 0)
     ? [
         {
           name: "Used",
@@ -86,6 +86,12 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
         {device.isFetching ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+        ) : performanceError ? (
+           <div className="flex flex-col items-center justify-center h-48 text-destructive text-center">
+                <XCircle className="h-6 w-6 mb-2" />
+                <p className="font-semibold">Failed to load data</p>
+                <p className="text-xs">{performanceError}</p>
             </div>
         ) : performance ? (
           <div className="grid grid-cols-2 gap-4">
@@ -165,7 +171,7 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
             </div>
           </div>
         ) : (
-           <div className="flex items-center justify-center h-48 text-muted-foreground">
+           <div className="flex items-center justify-center h-48 text-muted-foreground text-center">
                 <p>{status === 'online' ? "Awaiting performance data..." : "Device is offline."}</p>
             </div>
         )}
@@ -192,25 +198,40 @@ export default function MonitoringPage() {
             body: JSON.stringify({ ip: device.ipAddress })
         });
         const data = await res.json();
+
         if (data.ok && data.structured_data?.psinfo) {
              const perf = data.structured_data.psinfo;
+             let diskData = [];
+             // The disk_info might be a JSON string, so we need to parse it
+             try {
+                if (typeof perf.disk_info === 'string') {
+                    diskData = JSON.parse(perf.disk_info);
+                } else {
+                    diskData = perf.disk_info;
+                }
+             } catch (e) {
+                console.error("Failed to parse disk_info JSON", e);
+                diskData = [];
+             }
+
              const newPerfData = {
                  cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || 0),
                  totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || 0),
                  usedMemoryGB: parseFloat(perf.performance_info.find((p:any) => p.key === "Used Memory")?.value || 0),
-                 diskInfo: perf.disk_info.map((d: any) => ({
+                 diskInfo: diskData.map((d: any) => ({
                     volume: d.volume,
-                    sizeGB: parseFloat(d.size_gb) || 0,
-                    freeGB: parseFloat(d.free_gb) || 0,
+                    sizeGB: parseFloat(d.sizeGB) || 0,
+                    freeGB: parseFloat(d.freeGB) || 0,
                 }))
              }
-             setDevices(prev => prev.map(d => d.id === device.id ? {...d, performance: newPerfData, isFetching: false} : d));
+             setDevices(prev => prev.map(d => d.id === device.id ? {...d, performance: newPerfData, isFetching: false, performanceError: null} : d));
         } else {
-             throw new Error(data.error || "Failed to parse performance data.");
+             throw new Error(data.error || data.stderr || "Failed to parse performance data.");
         }
     } catch (e: any) {
         console.error(`Failed to fetch performance for ${device.name}:`, e);
-        setDevices(prev => prev.map(d => d.id === device.id ? {...d, isFetching: false, performance: undefined} : d));
+        const errorMessage = e.message || "An unknown error occurred.";
+        setDevices(prev => prev.map(d => d.id === device.id ? {...d, isFetching: false, performance: undefined, performanceError: errorMessage} : d));
     }
   }, []);
 
@@ -219,7 +240,8 @@ export default function MonitoringPage() {
         setIsLoading(true);
       } else {
         setIsRefreshing(true);
-        setDevices(prev => prev.map(d => ({...d, performance: undefined, isFetching: d.status === 'online' })))
+        // Reset performance data for a new refresh
+        setDevices(prev => prev.map(d => ({...d, performance: undefined, performanceError: null, isFetching: d.status === 'online' })))
       }
       setError(null);
       
@@ -266,12 +288,15 @@ export default function MonitoringPage() {
   React.useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (autoRefresh && user) {
+        // Rerun the whole process, which will start by hitting the cache
+        // or getting new data if the cache is stale.
         interval = setInterval(() => fetchInitialDeviceList(true), 60000); // Force refresh every 60 seconds
     }
     return () => {
       if (interval) clearInterval(interval);
     };
   }, [autoRefresh, user, fetchInitialDeviceList]);
+
 
   if (!user) {
     return (

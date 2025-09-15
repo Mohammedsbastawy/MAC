@@ -31,6 +31,7 @@ export type MonitoredDevice = {
     status: 'online' | 'offline' | 'unknown';
     isFetching: boolean;
     performance?: PerformanceData;
+    performanceError?: string | null;
 };
 
 
