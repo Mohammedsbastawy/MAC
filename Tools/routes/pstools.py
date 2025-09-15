@@ -612,22 +612,24 @@ def api_set_network_private():
     ip = data.get("ip")
     user, domain, pwd, _ = get_auth_from_request(data)
     
-    logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
+    logger.info(f"Attempting to set network profile to Private on {ip} using PsExec with elevation.")
 
-    # The command to execute via PowerShell
-    ps_command = 'Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private'
+    # This command uses Start-Process with the -Verb RunAs to ensure the command is elevated.
+    # The inner command is the one we want to run: Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private
+    # We must properly quote it for PowerShell's -ArgumentList.
+    ps_command = "Start-Process powershell -Verb RunAs -ArgumentList '-Command \"Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private\"'"
     
     # We need to wrap the powershell command correctly for psexec
-    # The -Command parameter of powershell.exe takes the command string
     cmd_args = ["powershell.exe", "-Command", ps_command]
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     
+    # For this command, psexec might return immediately without waiting, so a 0 return code is a good sign.
     if rc == 0:
-        logger.info(f"Successfully set network profile to Private on {ip}.")
+        logger.info(f"Successfully sent elevated command to set network profile to Private on {ip}.")
         return jsonify({
             "ok": True,
-            "message": "Successfully sent command to set network profile to Private.",
+            "message": "Successfully sent elevated command to set network profile to Private. The change should apply momentarily.",
             "details": out
         })
     else:
@@ -641,6 +643,7 @@ def api_set_network_private():
     
 
     
+
 
 
 

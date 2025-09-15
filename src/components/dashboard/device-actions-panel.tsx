@@ -1532,7 +1532,7 @@ export default function DeviceActionsPanel({
                 
                 <Button variant={"outline"} className="justify-start w-full" onClick={handleFixNetworkProfile} disabled={device.status !== 'online' || isFixingNetwork}>
                     {isFixingNetwork ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wrench className="mr-2 h-4 w-4" />}
-                    <span>Fix Network Profile (Public to Private)</span>
+                    <span>Fix Network Profile (Run as Admin)</span>
                     <ChevronRight className="ml-auto h-4 w-4" />
                 </Button>
                 
@@ -1652,6 +1652,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 
