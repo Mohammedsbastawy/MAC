@@ -67,7 +67,7 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
       ]
     : [];
 
-  const memPercentage = performance
+  const memPercentage = (performance && performance.totalMemoryGB > 0)
     ? (performance.usedMemoryGB / performance.totalMemoryGB) * 100
     : 0;
 
@@ -166,7 +166,7 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
           </div>
         ) : (
            <div className="flex items-center justify-center h-48 text-muted-foreground">
-                <p>{status === 'online' ? "Click 'Refresh Data' to load." : "Device is offline."}</p>
+                <p>{status === 'online' ? "Awaiting performance data..." : "Device is offline."}</p>
             </div>
         )}
       </CardContent>
@@ -184,11 +184,42 @@ export default function MonitoringPage() {
   const [lastUpdated, setLastUpdated] = React.useState<string | null>(null);
   const { toast } = useToast();
 
-  const fetchMonitoringData = React.useCallback(async (forceRefresh = false) => {
+  const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice) => {
+    try {
+        const res = await fetch("/api/pstools/psinfo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ip: device.ipAddress })
+        });
+        const data = await res.json();
+        if (data.ok && data.structured_data?.psinfo) {
+             const perf = data.structured_data.psinfo;
+             const newPerfData = {
+                 cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || 0),
+                 totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || 0),
+                 usedMemoryGB: parseFloat(perf.performance_info.find((p:any) => p.key === "Used Memory")?.value || 0),
+                 diskInfo: perf.disk_info.map((d: any) => ({
+                    volume: d.volume,
+                    sizeGB: parseFloat(d.size_gb) || 0,
+                    freeGB: parseFloat(d.free_gb) || 0,
+                }))
+             }
+             setDevices(prev => prev.map(d => d.id === device.id ? {...d, performance: newPerfData, isFetching: false} : d));
+        } else {
+             throw new Error(data.error || "Failed to parse performance data.");
+        }
+    } catch (e: any) {
+        console.error(`Failed to fetch performance for ${device.name}:`, e);
+        setDevices(prev => prev.map(d => d.id === device.id ? {...d, isFetching: false, performance: undefined} : d));
+    }
+  }, []);
+
+  const fetchInitialDeviceList = React.useCallback(async (forceRefresh = false) => {
       if (!forceRefresh) {
         setIsLoading(true);
       } else {
         setIsRefreshing(true);
+        setDevices(prev => prev.map(d => ({...d, performance: undefined, isFetching: d.status === 'online' })))
       }
       setError(null);
       
@@ -204,7 +235,13 @@ export default function MonitoringPage() {
             setDevices(data.devices);
             setLastUpdated(new Date(data.last_updated).toLocaleTimeString());
             if (forceRefresh) {
-                toast({ title: "Success", description: "Monitoring data has been refreshed." });
+                toast({ title: "Success", description: "Device status has been refreshed." });
+            }
+            // After setting the initial list, fetch performance for online devices
+            for (const device of data.devices) {
+                if (device.status === 'online') {
+                    fetchDevicePerformance(device);
+                }
             }
         } else {
             setError(data.message || "Failed to fetch monitoring data.");
@@ -215,27 +252,26 @@ export default function MonitoringPage() {
         setIsLoading(false);
         setIsRefreshing(false);
       }
-  }, [toast]);
+  }, [toast, fetchDevicePerformance]);
 
 
   // Initial fetch
   React.useEffect(() => {
     if (user) {
-        fetchMonitoringData(false);
+        fetchInitialDeviceList(false);
     }
-  }, [user, fetchMonitoringData]);
+  }, [user, fetchInitialDeviceList]);
 
   // Auto-refresh logic
   React.useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (autoRefresh && user) {
-        // Fetch non-forced data every 15 seconds to get latest cache
-        interval = setInterval(() => fetchMonitoringData(false), 15000);
+        interval = setInterval(() => fetchInitialDeviceList(true), 60000); // Force refresh every 60 seconds
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [autoRefresh, user, fetchMonitoringData]);
+  }, [autoRefresh, user, fetchInitialDeviceList]);
 
   if (!user) {
     return (
@@ -272,7 +308,7 @@ export default function MonitoringPage() {
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>Error Loading Data</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
-           <Button onClick={() => fetchMonitoringData(false)} className="mt-4">Retry</Button>
+           <Button onClick={() => fetchInitialDeviceList(false)} className="mt-4">Retry</Button>
         </Alert>
       </div>
     );
@@ -290,9 +326,9 @@ export default function MonitoringPage() {
         <div className="flex items-center gap-4">
             <div className="flex items-center space-x-2">
                 <Switch id="auto-refresh" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-                <Label htmlFor="auto-refresh">Auto-Refresh</Label>
+                <Label htmlFor="auto-refresh">Auto-Refresh (1 min)</Label>
             </div>
-            <Button onClick={() => fetchMonitoringData(true)} disabled={isRefreshing}>
+            <Button onClick={() => fetchInitialDeviceList(true)} disabled={isRefreshing}>
                 {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Force Refresh
             </Button>
@@ -308,3 +344,4 @@ export default function MonitoringPage() {
   );
 }
 
+    

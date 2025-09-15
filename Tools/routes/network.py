@@ -492,63 +492,6 @@ def api_check_winrm():
     return jsonify({"ok": True, "results": results})
 
 
-# This function runs in a background thread and needs all auth data passed to it.
-def fetch_perf_for_device(computer, auth_user, auth_domain, auth_pwd):
-    winrm_user = f"{auth_user}@{auth_domain}" if '@' not in auth_user else auth_user
-    
-    ip = computer.get('dns_hostname')
-    if not ip:
-        return {**computer, 'status': 'offline', 'performance': None, 'isFetching': False}
-    
-    # PowerShell script to gather all data in one go
-    ps_script = r"""
-        $os = Get-CimInstance -ClassName Win32_OperatingSystem
-        $cs = Get-CimInstance -ClassName Win32_ComputerSystem
-        $cpu_usage_counter = Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1
-        $cpu_usage = $cpu_usage_counter.CounterSamples.CookedValue
-        $used_memory = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-        $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
-            [pscustomobject]@{
-                volume = $_.DriveLetter;
-                sizeGB = [math]::Round($_.Size / 1GB, 2);
-                freeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
-            }
-        }
-        @{
-            cpuUsage = $cpu_usage;
-            totalMemoryGB = [math]::Round($os.TotalVisibleMemorySize / 1KB / 1MB, 2);
-            usedMemoryGB = [math]::Round($used_memory / 1KB / 1MB, 2);
-            diskInfo = $disks | ConvertTo-Json -Compress
-        } | ConvertTo-Json -Compress
-    """
-    rc, out, err = run_winrm_command(ip, winrm_user, auth_pwd, ps_script)
-
-    performance_data = None
-    if rc == 0 and out:
-        try:
-            raw_data = json.loads(out)
-            # diskInfo is a JSON string itself, so we parse it again
-            disk_info_raw = raw_data.get('diskInfo')
-            if disk_info_raw:
-                raw_data['diskInfo'] = json.loads(disk_info_raw)
-                # Ensure diskInfo is always a list
-                if isinstance(raw_data['diskInfo'], dict):
-                    raw_data['diskInfo'] = [raw_data['diskInfo']]
-            else:
-                raw_data['diskInfo'] = []
-            performance_data = raw_data
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Failed to parse performance JSON for {ip}: {e}. Raw: {out}")
-
-    return {
-        'id': computer['dn'],
-        'name': computer['name'],
-        'ipAddress': ip,
-        'status': 'online',
-        'isFetching': False,
-        'performance': performance_data
-    }
-    
 @network_bp.route('/api/network/get-monitoring-data', methods=['POST'])
 def get_monitoring_data():
     data = request.get_json() or {}
@@ -576,57 +519,39 @@ def get_monitoring_data():
     
     all_ad_computers = ad_data_result.get("computers", [])
     if not all_ad_computers:
-        return jsonify({"ok": True, "devices": [], "last_updated": datetime.datetime.utcnow().isoformat()})
+        response_data = {"ok": True, "devices": [], "last_updated": datetime.datetime.utcnow().isoformat()}
+        return jsonify(response_data)
 
     # Check online status for all of them
     ips_to_check = [c['dns_hostname'] for c in all_ad_computers if c.get('dns_hostname')]
     online_ips = set()
     
-    logger.info(f"Checking online status for {len(ips_to_check)} AD hosts.")
-    with ThreadPoolExecutor(max_workers=50) as executor:
+    if ips_to_check:
+        logger.info(f"Checking online status for {len(ips_to_check)} AD hosts.")
         # Use a combination of ping and TCP connect for robustness
-        future_to_ip = {executor.submit(check_host_status_ping, ip): ip for ip in ips_to_check}
-        future_to_ip.update({executor.submit(check_host_status_tcp_connect, ip): ip for ip in ips_to_check})
+        with ThreadPoolExecutor(max_workers=50) as executor:
+            future_to_ip = {executor.submit(check_host_status_ping, ip): ip for ip in ips_to_check}
+            future_to_ip.update({executor.submit(check_host_status_tcp_connect, ip): ip for ip in ips_to_check})
 
-        for future in as_completed(future_to_ip):
-            ip = future_to_ip[future]
-            try:
-                if future.result():
-                    online_ips.add(ip)
-            except Exception:
-                pass # Ignore errors in status checking
-    logger.info(f"Found {len(online_ips)} AD hosts online.")
+            for future in as_completed(future_to_ip):
+                ip = future_to_ip[future]
+                try:
+                    if future.result():
+                        online_ips.add(ip)
+                except Exception:
+                    pass # Ignore errors in status checking
+        logger.info(f"Found {len(online_ips)} AD hosts online.")
 
-    online_devices_to_poll = [c for c in all_ad_computers if c.get('dns_hostname') in online_ips]
-
-    # Get auth details from session ONCE in the main thread
-    auth_user = session.get("user")
-    auth_domain = session.get("domain")
-    auth_pwd = session.get("password")
-
-    # Concurrently fetch performance data for online devices
+    # Prepare final device list with status only
     final_devices = []
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        # Pass auth details explicitly to the thread worker
-        future_to_computer = {
-            executor.submit(fetch_perf_for_device, c, auth_user, auth_domain, auth_pwd): c 
-            for c in online_devices_to_poll
-        }
-        for future in as_completed(future_to_computer):
-            try:
-                final_devices.append(future.result())
-            except Exception as e:
-                 logger.error(f"Error fetching performance data in thread: {e}")
-
-    # Add offline devices to the final list
-    offline_computers = [c for c in all_ad_computers if c.get('dns_hostname') not in online_ips]
-    for c in offline_computers:
+    for c in all_ad_computers:
+        is_online = c.get('dns_hostname') in online_ips
         final_devices.append({
             'id': c['dn'],
             'name': c['name'],
             'ipAddress': c.get('dns_hostname'),
-            'status': 'offline',
-            'isFetching': False,
+            'status': 'online' if is_online else 'offline',
+            'isFetching': is_online, # Mark online devices for fetching on the frontend
             'performance': None
         })
 
@@ -647,10 +572,5 @@ def get_monitoring_data():
         logger.error(f"Failed to write to cache file: {e}")
 
     return jsonify(response_data)
-    
-    
-
-
-
 
     
