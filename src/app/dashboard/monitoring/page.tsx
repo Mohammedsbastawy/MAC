@@ -2,10 +2,10 @@
 "use client";
 
 import * as React from "react";
-import type { ADComputer, Device } from "@/lib/types";
+import type { Device, MonitoredDevice } from "@/lib/types";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Server, ServerCrash, SlidersHorizontal } from "lucide-react";
+import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -38,36 +38,6 @@ import type { ChartConfig } from "@/components/ui/chart";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-const determineDeviceType = (hostname: string): Device["type"] => {
-  if (!hostname) return "unknown";
-  const lowerHostname = hostname.toLowerCase();
-  if (lowerHostname.includes("laptop")) return "laptop";
-  if (lowerHostname.includes("server")) return "server";
-  if (lowerHostname.includes("router") || lowerHostname.includes("gateway"))
-    return "router";
-  if (lowerHostname.includes("phone") || lowerHostname.includes("mobile"))
-    return "mobile";
-  if (lowerHostname.includes("desktop") || lowerHostname.includes("pc"))
-    return "desktop";
-  if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light"))
-    return "iot";
-  return "unknown";
-};
-
-const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
-  id: adComputer.dn,
-  name: adComputer.name,
-  ipAddress: adComputer.dns_hostname,
-  macAddress: "-",
-  status: "unknown",
-  type: determineDeviceType(adComputer.name),
-  os: adComputer.os,
-  lastSeen: adComputer.last_logon,
-  domain: adComputer.domain || "Domain",
-  isDomainMember: true,
-  isLoadingDetails: false,
-  source: "ad",
-});
 
 const cpuChartConfig = {
   cpu: { label: "CPU", color: "hsl(var(--chart-1))" },
@@ -77,21 +47,10 @@ const memChartConfig = {
   memory: { label: "Memory", color: "hsl(var(--chart-2))" },
 } satisfies ChartConfig;
 
-type PerformanceData = {
-  cpuUsage: number;
-  totalMemoryGB: number;
-  usedMemoryGB: number;
-  diskInfo: {
-    volume: string;
-    sizeGB: number;
-    freeGB: number;
-  }[];
-};
 
-const MonitoringCard: React.FC<{
-  device: Device & { performance?: PerformanceData };
-}> = ({ device }) => {
-  const { performance } = device;
+const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
+
+  const { performance, status } = device;
 
   const memData = performance
     ? [
@@ -113,18 +72,18 @@ const MonitoringCard: React.FC<{
     : 0;
 
   return (
-    <Card className={cn(device.status !== 'online' && "opacity-50")}>
+    <Card className={cn(status !== 'online' && "opacity-50")}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">{device.name}</CardTitle>
-          <Badge variant={device.status === 'online' ? 'default' : 'secondary'} className={cn(device.status === 'online' && 'bg-green-600')}>
-            {device.status}
+          <Badge variant={status === 'online' ? 'default' : 'secondary'} className={cn(status === 'online' && 'bg-green-600')}>
+            {status}
           </Badge>
         </div>
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isLoadingDetails ? (
+        {device.isFetching ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
@@ -189,21 +148,25 @@ const MonitoringCard: React.FC<{
             </div>
              <div className="col-span-2">
                 <h4 className="text-sm font-semibold mb-2 text-center">Disk Usage</h4>
-                 <ChartContainer config={{}} className="h-40 w-full">
-                     <BarChart data={performance.diskInfo.map(d => ({...d, used: d.sizeGB - d.freeGB}))} layout="vertical" margin={{left: 10}}>
-                        <CartesianGrid horizontal={false} />
-                        <XAxis type="number" dataKey="sizeGB" hide/>
-                        <YAxis type="category" dataKey="volume" width={40} tickLine={false} axisLine={false} />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <Bar dataKey="used" fill="hsl(var(--chart-5))" stackId="a" radius={[4, 4, 4, 4]} />
-                        <Bar dataKey="freeGB" fill="hsl(var(--muted))" stackId="a" radius={[4, 4, 4, 4]} />
-                     </BarChart>
-                 </ChartContainer>
+                 {performance.diskInfo.length > 0 ? (
+                    <ChartContainer config={{}} className="h-40 w-full">
+                        <BarChart data={performance.diskInfo.map(d => ({...d, used: d.sizeGB - d.freeGB}))} layout="vertical" margin={{left: 10}}>
+                            <CartesianGrid horizontal={false} />
+                            <XAxis type="number" dataKey="sizeGB" hide/>
+                            <YAxis type="category" dataKey="volume" width={40} tickLine={false} axisLine={false} />
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <Bar dataKey="used" fill="hsl(var(--chart-5))" stackId="a" radius={[4, 4, 4, 4]} />
+                            <Bar dataKey="freeGB" fill="hsl(var(--muted))" stackId="a" radius={[4, 4, 4, 4]} />
+                        </BarChart>
+                    </ChartContainer>
+                 ): (
+                    <p className="text-center text-xs text-muted-foreground">No disk data available.</p>
+                 )}
             </div>
           </div>
         ) : (
            <div className="flex items-center justify-center h-48 text-muted-foreground">
-                <p>{device.status === 'online' ? "Click 'Refresh Data' to load." : "Device is offline."}</p>
+                <p>{status === 'online' ? "Click 'Refresh Data' to load." : "Device is offline."}</p>
             </div>
         )}
       </CardContent>
@@ -213,131 +176,66 @@ const MonitoringCard: React.FC<{
 
 export default function MonitoringPage() {
   const { user } = useAuth();
-  const [devices, setDevices] = React.useState<Device[]>([]);
+  const [devices, setDevices] = React.useState<MonitoredDevice[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [autoRefresh, setAutoRefresh] = React.useState(false);
+  const [lastUpdated, setLastUpdated] = React.useState<string | null>(null);
   const { toast } = useToast();
 
-  const fetchInitialDevices = React.useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/ad/get-computers", { method: "POST" });
-      const data = await response.json();
-      if (data.ok) {
-        setDevices(data.computers.map(mapAdComputerToDevice));
+  const fetchMonitoringData = React.useCallback(async (forceRefresh = false) => {
+      if (!forceRefresh) {
+        setIsLoading(true);
       } else {
-        setError(data.message || "Failed to fetch devices from Active Directory.");
+        setIsRefreshing(true);
       }
-    } catch (err) {
-      setError("Failed to connect to the server to get devices.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const refreshAllDeviceStatus = React.useCallback(async () => {
-    if (isRefreshing) return;
-    
-    const ipsToCheck = devices.map((d) => d.ipAddress).filter(Boolean);
-    if (ipsToCheck.length === 0) return;
-
-    setIsRefreshing(true);
-
-    try {
-        const res = await fetch("/api/network/check-status", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ips: ipsToCheck }),
+      setError(null);
+      
+      try {
+        const response = await fetch("/api/network/get-monitoring-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force_refresh: forceRefresh })
         });
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error || "Status check failed");
-
-        const onlineIps = new Set(data.online_ips);
+        const data = await response.json();
         
-        // Update status for all devices first
-        setDevices(prev => 
-            prev.map(d => ({
-                ...d,
-                status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-                isLoadingDetails: onlineIps.has(d.ipAddress), // Set loading only for online devices
-                performance: undefined, // Clear old performance data
-            }))
-        );
-
-        const onlineDevices = devices.filter(d => onlineIps.has(d.ipAddress));
-
-        // Sequentially fetch performance data for online devices
-        for (const device of onlineDevices) {
-            try {
-                const perfRes = await fetch("/api/pstools/psinfo", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ip: device.ipAddress }),
-                });
-                const result = await perfRes.json();
-                
-                let performanceData: PerformanceData | undefined = undefined;
-                if(result.ok && result.structured_data?.psinfo) {
-                     const info = result.structured_data.psinfo;
-                     performanceData = {
-                        cpuUsage: parseFloat(info.performance_info.find((p:any) => p.key === 'CPU Usage')?.value) || 0,
-                        totalMemoryGB: parseFloat(info.system_info.find((p:any) => p.key === 'Total Memory')?.value) || 0,
-                        usedMemoryGB: parseFloat(info.performance_info.find((p:any) => p.key === 'Used Memory')?.value) || 0,
-                        diskInfo: info.disk_info.map((disk:any) => ({
-                            volume: disk.volume,
-                            sizeGB: parseFloat(disk.size_gb) || 0,
-                            freeGB: parseFloat(disk.free_gb) || 0
-                        }))
-                    };
-                }
-
-                // Update state for this specific device
-                setDevices(prev => 
-                    prev.map(d => 
-                        d.id === device.id 
-                            ? { ...d, performance: performanceData, isLoadingDetails: false } 
-                            : d
-                    )
-                );
-            } catch (e) {
-                 // If a single device fails, mark it as not loading and continue
-                 setDevices(prev => 
-                    prev.map(d => 
-                        d.id === device.id 
-                            ? { ...d, isLoadingDetails: false } 
-                            : d
-                    )
-                );
-                 console.error(`Failed to fetch performance data for ${device.name}:`, e);
+        if (data.ok) {
+            setDevices(data.devices);
+            setLastUpdated(new Date(data.last_updated).toLocaleTimeString());
+            if (forceRefresh) {
+                toast({ title: "Success", description: "Monitoring data has been refreshed." });
             }
+        } else {
+            setError(data.message || "Failed to fetch monitoring data.");
         }
+      } catch (err) {
+        setError("Failed to connect to the backend server.");
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+  }, [toast]);
 
-    } catch (err: any) {
-      toast({ variant: "destructive", title: "Error Refreshing Data", description: err.message });
-       // Ensure loading state is turned off for all devices on global failure
-       setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false })));
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [devices, toast, isRefreshing]);
 
+  // Initial fetch
   React.useEffect(() => {
-    fetchInitialDevices();
-  }, [fetchInitialDevices]);
+    if (user) {
+        fetchMonitoringData(false);
+    }
+  }, [user, fetchMonitoringData]);
 
+  // Auto-refresh logic
   React.useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
-    if (autoRefresh) {
-        refreshAllDeviceStatus();
-        interval = setInterval(refreshAllDeviceStatus, 30000); // Refresh every 30 seconds
+    if (autoRefresh && user) {
+        // Fetch non-forced data every 15 seconds to get latest cache
+        interval = setInterval(() => fetchMonitoringData(false), 15000);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [autoRefresh, refreshAllDeviceStatus]);
+  }, [autoRefresh, user, fetchMonitoringData]);
 
   if (!user) {
     return (
@@ -372,8 +270,9 @@ export default function MonitoringPage() {
       <div className="flex items-center justify-center h-full">
         <Alert variant="destructive" className="max-w-lg">
           <ServerCrash className="h-4 w-4" />
-          <AlertTitle>Error Loading Devices</AlertTitle>
+          <AlertTitle>Error Loading Data</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
+           <Button onClick={() => fetchMonitoringData(false)} className="mt-4">Retry</Button>
         </Alert>
       </div>
     );
@@ -384,16 +283,18 @@ export default function MonitoringPage() {
       <div className="flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Device Monitoring</h1>
-          <p className="text-muted-foreground">Real-time performance metrics for domain computers.</p>
+          <p className="text-muted-foreground">
+            {lastUpdated ? `Real-time performance metrics. Last cache update: ${lastUpdated}`: 'Loading data...'}
+          </p>
         </div>
         <div className="flex items-center gap-4">
             <div className="flex items-center space-x-2">
                 <Switch id="auto-refresh" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
                 <Label htmlFor="auto-refresh">Auto-Refresh</Label>
             </div>
-            <Button onClick={refreshAllDeviceStatus} disabled={isRefreshing}>
-                {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SlidersHorizontal className="mr-2 h-4 w-4" />}
-                Refresh Data
+            <Button onClick={() => fetchMonitoringData(true)} disabled={isRefreshing}>
+                {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                Force Refresh
             </Button>
         </div>
       </div>
@@ -403,9 +304,3 @@ export default function MonitoringPage() {
           <MonitoringCard key={device.id} device={device} />
         ))}
       </div>
-    </div>
-  );
-}
-
-
-    

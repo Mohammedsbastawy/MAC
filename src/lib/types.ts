@@ -13,6 +13,27 @@ export type Device = {
   source: 'ad' | 'scan';
 };
 
+export type PerformanceData = {
+  cpuUsage: number;
+  totalMemoryGB: number;
+  usedMemoryGB: number;
+  diskInfo: {
+    volume: string;
+    sizeGB: number;
+    freeGB: number;
+  }[];
+};
+
+export type MonitoredDevice = {
+    id: string;
+    name: string;
+    ipAddress: string;
+    status: 'online' | 'offline' | 'unknown';
+    isFetching: boolean;
+    performance?: PerformanceData;
+};
+
+
 export type NetworkInterface = {
   id: string;
   name: string;

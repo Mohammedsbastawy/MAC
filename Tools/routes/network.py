@@ -1,3 +1,4 @@
+
 # كود فحص الشبكة (ARP Scan, Ping Sweep, ...)
 import os
 import ipaddress
@@ -12,8 +13,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, parse_psinfo_output, get_hostname_from_ip, get_mac_address, run_winrm_command
 from .activedirectory import _get_ad_computers_data
 from Tools.utils.logger import logger
+import datetime
 
 network_bp = Blueprint('network', __name__)
+
+CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'monitoring_cache.json')
+CACHE_EXPIRY_SECONDS = 60 # 1 minute
 
 @network_bp.before_request
 def require_login():
@@ -486,4 +491,140 @@ def api_check_winrm():
 
     return jsonify({"ok": True, "results": results})
     
+@network_bp.route('/api/network/get-monitoring-data', methods=['POST'])
+def get_monitoring_data():
+    data = request.get_json() or {}
+    force_refresh = data.get('force_refresh', False)
+
+    # 1. Check for cached data
+    if not force_refresh and os.path.exists(CACHE_FILE):
+        try:
+            last_modified_time = os.path.getmtime(CACHE_FILE)
+            if (time.time() - last_modified_time) < CACHE_EXPIRY_SECONDS:
+                logger.info("Serving monitoring data from fresh cache.")
+                with open(CACHE_FILE, 'r') as f:
+                    cached_data = json.load(f)
+                return jsonify(cached_data)
+        except (IOError, json.JSONDecodeError) as e:
+            logger.warning(f"Could not read cache file, forcing refresh. Error: {e}")
+
+    # 2. If no fresh cache, fetch new data
+    logger.info("Cache is old or missing, fetching new monitoring data.")
     
+    # Get all domain computers
+    ad_data_result = _get_ad_computers_data()
+    if not ad_data_result.get("ok"):
+        return jsonify(ad_data_result), 500
+    
+    all_ad_computers = ad_data_result.get("computers", [])
+    if not all_ad_computers:
+        return jsonify({"ok": True, "devices": [], "last_updated": datetime.datetime.utcnow().isoformat()})
+
+    # Check online status for all of them
+    ips_to_check = [c['dns_hostname'] for c in all_ad_computers if c.get('dns_hostname')]
+    online_ips = set()
+    if ips_to_check:
+        try:
+            status_res = api_check_status().get_json()
+            online_ips = set(status_res.get("online_ips", []))
+        except Exception as e:
+            logger.error(f"Failed to check host statuses during monitoring refresh: {e}")
+
+    # Prepare list of devices for performance data fetching
+    online_devices_to_poll = [c for c in all_ad_computers if c.get('dns_hostname') in online_ips]
+
+    # Function to fetch performance for a single device
+    def fetch_perf_for_device(computer):
+        user = session.get("user")
+        domain = session.get("domain")
+        pwd = session.get("password")
+        winrm_user = f"{user}@{domain}" if '@' not in user else user
+        
+        ip = computer.get('dns_hostname')
+        if not ip:
+            return {**computer, 'status': 'offline', 'performance': None, 'isFetching': False}
+        
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, """
+            $os = Get-CimInstance -ClassName Win32_OperatingSystem
+            $cs = Get-CimInstance -ClassName Win32_ComputerSystem
+            $cpu_usage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
+            $used_memory = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+            $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
+                [pscustomobject]@{
+                    volume = $_.DriveLetter;
+                    sizeGB = [math]::Round($_.Size / 1GB, 2);
+                    freeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
+                }
+            }
+            @{
+                cpuUsage = $cpu_usage;
+                totalMemoryGB = [math]::Round($os.TotalVisibleMemorySize / 1KB / 1MB, 2);
+                usedMemoryGB = [math]::Round($used_memory / 1KB / 1MB, 2);
+                diskInfo = $disks | ConvertTo-Json -Compress
+            } | ConvertTo-Json -Compress
+        """)
+
+        performance_data = None
+        if rc == 0 and out:
+            try:
+                raw_data = json.loads(out)
+                raw_data['diskInfo'] = json.loads(raw_data['diskInfo'])
+                # Ensure diskInfo is a list
+                if isinstance(raw_data['diskInfo'], dict):
+                    raw_data['diskInfo'] = [raw_data['diskInfo']]
+                performance_data = raw_data
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Failed to parse performance JSON for {ip}: {e}. Raw: {out}")
+
+        return {
+            'id': computer['dn'],
+            'name': computer['name'],
+            'ipAddress': ip,
+            'status': 'online',
+            'isFetching': False,
+            'performance': performance_data
+        }
+
+    # Concurrently fetch performance data
+    final_devices = []
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        future_to_computer = {executor.submit(fetch_perf_for_device, c): c for c in online_devices_to_poll}
+        for future in as_completed(future_to_computer):
+            try:
+                final_devices.append(future.result())
+            except Exception as e:
+                 logger.error(f"Error fetching performance data in thread: {e}")
+
+    # Add offline devices to the final list
+    offline_computers = [c for c in all_ad_computers if c.get('dns_hostname') not in online_ips]
+    for c in offline_computers:
+        final_devices.append({
+            'id': c['dn'],
+            'name': c['name'],
+            'ipAddress': c.get('dns_hostname'),
+            'status': 'offline',
+            'isFetching': False,
+            'performance': None
+        })
+
+    # Sort the final list
+    final_devices.sort(key=lambda x: (x['status'] != 'online', x['name']))
+
+    # 3. Write new data to cache
+    response_data = {
+        "ok": True,
+        "devices": final_devices,
+        "last_updated": datetime.datetime.utcnow().isoformat()
+    }
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(response_data, f)
+        logger.info("Successfully updated monitoring cache file.")
+    except IOError as e:
+        logger.error(f"Failed to write to cache file: {e}")
+
+    return jsonify(response_data)
+    
+    
+
+```
