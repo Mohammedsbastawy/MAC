@@ -676,32 +676,32 @@ def api_deploy_agent():
 
     # --- Step 1: Create C:\Atlas folder ---
     logger.info(f"Step 1/3: Creating C:\\Atlas directory on {ip}.")
-    mkdir_rc, mkdir_out, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
+    mkdir_rc, _, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
     # Gracefully handle the error if the directory already exists
     if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
         logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
-        return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err or mkdir_out}), 500
+        return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err}), 500
 
-    # --- Step 2: Read script content and copy it by creating a new file on the remote machine ---
+    # --- Step 2: Read script content, encode it, and create it on the remote machine ---
     logger.info(f"Step 2/3: Copying agent script to {ip} via remote file creation.")
     try:
         with open(agent_script_path, 'r', encoding='utf-8') as f:
             script_content = f.read()
         
         # Base64 encode the script to avoid issues with special characters in PowerShell
+        # The script must be encoded in UTF-16LE for PowerShell's -EncodedCommand
         encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
         
         # This PowerShell command decodes the Base64 string and writes it to a file.
-        # This is much more reliable than trying to copy files over network shares with psexec.
-        ps_command = f"[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('{encoded_script}')) | Out-File -FilePath C:\\Atlas\\AtlasMonitorAgent.ps1 -Encoding utf8 -Force"
+        ps_command_to_create_file = f"[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('{encoded_script}')) | Out-File -FilePath C:\\Atlas\\AtlasMonitorAgent.ps1 -Encoding utf8 -Force"
         
-        # Use powershell -encodedcommand to handle complex commands
-        encoded_ps_command = base64.b64encode(ps_command.encode('utf-16-le')).decode('ascii')
+        # We need to encode the command itself to pass it to powershell.exe -EncodedCommand
+        encoded_ps_command = base64.b64encode(ps_command_to_create_file.encode('utf-16-le')).decode('ascii')
 
         copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["powershell.exe", "-EncodedCommand", encoded_ps_command], timeout=120)
 
         if copy_rc != 0:
-            logger.error(f"Failed to create script file on {ip}: {copy_err}")
+            logger.error(f"Failed to create script file on {ip}: {copy_err} {copy_out}")
             return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
 
     except Exception as e:
@@ -711,15 +711,14 @@ def api_deploy_agent():
     # --- Step 3: Create the scheduled task ---
     logger.info(f"Step 3/3: Creating scheduled task on {ip}.")
     
-    # Correctly quoted command for schtasks
-    task_command_to_run = 'powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1'
+    # This is the command that the task scheduler will run. It must be properly quoted.
+    # The outer quotes are for cmd.exe, the inner quotes are for the /tr argument.
+    task_command_to_run = f"\"powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1\""
     
-    # The /tr argument's content must be properly escaped for cmd.exe
-    # Wrapping the whole command in double quotes is the standard way.
     schtasks_command = [
         "schtasks", "/create", 
         "/tn", "AtlasAgent", 
-        "/tr", f'"{task_command_to_run}"',
+        "/tr", task_command_to_run,
         "/sc", "minute", 
         "/mo", "1", 
         "/f", 
@@ -729,11 +728,13 @@ def api_deploy_agent():
     task_rc, task_out, task_err = run_ps_command("psexec", ip, user, domain, pwd, schtasks_command, timeout=120)
     
     if task_rc != 0:
-        logger.error(f"Failed to create scheduled task on {ip}: {task_err}")
-        return jsonify({"ok": False, "error": "Failed to create scheduled task.", "details": task_err}), 500
+        logger.error(f"Failed to create scheduled task on {ip}: {task_err} {task_out}")
+        return jsonify({"ok": False, "error": "Failed to create scheduled task.", "details": f"{task_err} {task_out}"}), 500
         
     logger.info(f"Agent deployment successful on {ip}.")
     return jsonify({
         "ok": True,
         "message": f"Agent deployed successfully on {ip}. It will start sending data within a minute."
     })
+
+    
