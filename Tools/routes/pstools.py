@@ -60,7 +60,7 @@ def get_auth_from_request(data):
 @pstools_bp.before_request
 def require_login_hook():
     # Allow access to psinfo from the monitoring page which may not have a body
-    if request.endpoint == 'pstools.api_psinfo':
+    if request.endpoint == 'pstools.api_psinfo' or request.endpoint == 'pstools.api_deploy_agent':
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -657,3 +657,61 @@ def api_set_network_private():
             "error": "Failed to execute remote command to set network profile.",
             "details": err or out
         }), 500
+
+@pstools_bp.route('/deploy-agent', methods=['POST'])
+def api_deploy_agent():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, _ = get_auth_from_request(data)
+    
+    if not ip:
+        return jsonify({"ok": False, "error": "IP address is required."}), 400
+
+    logger.info(f"Starting agent deployment on {ip}.")
+
+    # --- Step 1: Create C:\Atlas folder ---
+    logger.info(f"Step 1/3: Creating C:\\Atlas directory on {ip}.")
+    mkdir_rc, mkdir_out, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
+    # We don't fail if the directory already exists (which is a common error)
+    if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
+        logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
+        return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err}), 500
+
+    # --- Step 2: Copy the agent script ---
+    # The script is located in Tools/scripts/AtlasMonitorAgent.ps1
+    agent_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'AtlasMonitorAgent.ps1'))
+    if not os.path.exists(agent_script_path):
+        logger.error(f"Agent script not found at {agent_script_path}")
+        return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
+
+    logger.info(f"Step 2/3: Copying agent script to {ip}.")
+    # PsExec's -c switch copies the file and runs it. Let's use it to just copy.
+    # A more reliable way is to copy it to a share, but let's try psexec's capability.
+    # The command `psexec -c <local_file> <remote_command>` copies and runs.
+    # We will copy it to a specific location on C$
+    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["-c", agent_script_path, "cmd", "/c", "move", f"C:\\Windows\\{os.path.basename(agent_script_path)}", "C:\\Atlas\\AtlasMonitorAgent.ps1"], timeout=120)
+    if copy_rc != 0:
+        # Retry with xcopy just in case
+        copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", f'xcopy /Y "{agent_script_path}" \\\\{ip}\\C$\\Atlas\\'], timeout=120)
+        if copy_rc != 0:
+            logger.error(f"Failed to copy script to {ip}: {copy_err}")
+            return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
+
+
+    # --- Step 3: Create the scheduled task ---
+    logger.info(f"Step 3/3: Creating scheduled task on {ip}.")
+    task_command = (
+        'schtasks /create /tn "AtlasAgent" '
+        '/tr "powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1" '
+        '/sc minute /mo 1 /f /ru "SYSTEM"'
+    )
+    task_rc, task_out, task_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", task_command], timeout=120)
+    if task_rc != 0:
+        logger.error(f"Failed to create scheduled task on {ip}: {task_err}")
+        return jsonify({"ok": False, "error": "Failed to create scheduled task.", "details": task_err}), 500
+        
+    logger.info(f"Agent deployment successful on {ip}.")
+    return jsonify({
+        "ok": True,
+        "message": f"Agent deployed successfully on {ip}. It will start sending data within a minute."
+    })

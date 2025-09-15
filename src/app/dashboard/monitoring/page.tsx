@@ -61,8 +61,9 @@ const memChartConfig = {
 
 const MonitoringCard: React.FC<{ 
     device: MonitoredDevice, 
-    onRunDiagnostics: (device: MonitoredDevice) => void 
-}> = ({ device, onRunDiagnostics }) => {
+    onRunDiagnostics: (device: MonitoredDevice) => void,
+    onDeployAgent: (device: MonitoredDevice) => void,
+}> = ({ device, onRunDiagnostics, onDeployAgent }) => {
 
   const { performance, status, performanceError } = device;
 
@@ -103,7 +104,7 @@ const MonitoringCard: React.FC<{
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isFetching && !performance ? ( // Show loader only if no previous data is available
+        {device.isFetching && !performance ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
@@ -115,13 +116,11 @@ const MonitoringCard: React.FC<{
                     {isAgentNotDeployedError ? "The monitoring agent script has not been run on this device." : performanceError}
                 </p>
                 {isAgentNotDeployedError ? (
-                     <Button variant="secondary" size="sm" className="mt-4" asChild>
-                        <Link href="/dashboard/help/agent">
-                            <HelpCircle className="mr-2 h-4 w-4" />
-                            View Deployment Guide
-                        </Link>
+                     <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
+                        <Zap className="mr-2 h-4 w-4" />
+                        Deploy Agent
                     </Button>
-                ) : ( // For other errors like WinRM connection issues
+                ) : (
                     <Button variant="secondary" size="sm" className="mt-4" onClick={() => onRunDiagnostics(device)}>
                         <ShieldCheck className="mr-2 h-4 w-4" />
                         Run Diagnostics
@@ -310,6 +309,28 @@ export default function MonitoringPage() {
     setIsFixing(false);
   };
 
+  const handleDeployAgent = async (device: MonitoredDevice) => {
+      toast({ title: "Deploying Agent...", description: `Attempting to install monitoring agent on ${device.name}. This may take a moment.` });
+      try {
+           const res = await fetch("/api/pstools/deploy-agent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ip: device.ipAddress }),
+            });
+            const data = await res.json();
+             if (data.ok) {
+                toast({ title: "Deployment Successful", description: data.message });
+                // Immediately try fetching data again for this device
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+                fetchDevicePerformance(device, new AbortController().signal);
+            } else {
+                toast({ variant: "destructive", title: "Deployment Failed", description: data.error, duration: 10000 });
+            }
+      } catch (e: any) {
+          toast({ variant: "destructive", title: "Client Error", description: e.message });
+      }
+  }
+
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
     setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
 
@@ -357,7 +378,7 @@ export default function MonitoringPage() {
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 attempt++;
             } else {
-                setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false, performance: undefined, performanceError: e.message || "An unknown error occurred." } : d));
+                setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false, performanceError: e.message || "An unknown error occurred." } : d));
                 return;
             }
         }
@@ -516,7 +537,7 @@ export default function MonitoringPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {devices.map((device) => (
-          <MonitoringCard key={device.id} device={device} onRunDiagnostics={handleRunDiagnostics} />
+          <MonitoringCard key={device.id} device={device} onRunDiagnostics={handleRunDiagnostics} onDeployAgent={handleDeployAgent} />
         ))}
       </div>
     </div>
@@ -542,4 +563,3 @@ export default function MonitoringPage() {
     </>
   );
 }
-
