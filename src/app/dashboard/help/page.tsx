@@ -70,7 +70,7 @@ export default function HelpPage() {
                                     <Lightbulb className="h-4 w-4" />
                                     <AlertTitle>How to Run Remotely</AlertTitle>
                                     <AlertDescription>
-                                        If you can't access the machine's desktop, you can use the **Execute Command** feature in the Device Actions Panel to run this. The command to use would be:
+                                        If you can't access the machine's desktop, you can use the **Fix Network Profile (Public to Private)** button in the Device Actions Panel to run this command remotely. The command to use would be:
                                          <CodeBlock>{'powershell -command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"'}</CodeBlock>
                                     </AlertDescription>
                                 </Alert>

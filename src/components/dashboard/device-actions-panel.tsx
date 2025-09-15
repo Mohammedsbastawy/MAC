@@ -1161,6 +1161,7 @@ export default function DeviceActionsPanel({
   const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
   const [isEnablingPrereqs, setIsEnablingPrereqs] = React.useState(false);
+  const [isFixingNetwork, setIsFixingNetwork] = React.useState(false);
   
   const initialDiagnosticsState: WinRMDiagnosticsState = {
         service: { status: 'checking', message: '' },
@@ -1425,6 +1426,21 @@ export default function DeviceActionsPanel({
         setIsEnablingPrereqs(false);
     };
     
+    const handleFixNetworkProfile = async () => {
+        if (!device) return;
+        setIsFixingNetwork(true);
+        toast({ title: "Attempting to Fix Network Profile...", description: `Sending command to ${device.name} to change network profile to 'Private'.`});
+        
+        const result = await runApiAction('set-network-private', {}, false);
+        
+        if (result?.ok) {
+            toast({ title: "Command Sent Successfully", description: "Network profile command sent. It may take a moment to apply. Please try the WinRM action again shortly." });
+        } else {
+            toast({ variant: "destructive", title: "Failed to Fix Network Profile", description: result?.details || result?.error });
+        }
+        setIsFixingNetwork(false);
+    }
+    
     const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
 
     // This is the correct place for early returns in a component.
@@ -1511,6 +1527,12 @@ export default function DeviceActionsPanel({
                 <Button variant={"outline"} className="justify-start w-full" onClick={() => handleBrowseAction('navigate', { path: 'drives'})} disabled={device.status !== 'online'}>
                     <Folder className="mr-2 h-4 w-4" />
                     <span>Browse Files (WinRM)</span>
+                    <ChevronRight className="ml-auto h-4 w-4" />
+                </Button>
+                
+                <Button variant={"outline"} className="justify-start w-full" onClick={handleFixNetworkProfile} disabled={device.status !== 'online' || isFixingNetwork}>
+                    {isFixingNetwork ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wrench className="mr-2 h-4 w-4" />}
+                    <span>Fix Network Profile (Public to Private)</span>
                     <ChevronRight className="ml-auto h-4 w-4" />
                 </Button>
                 
@@ -1630,6 +1652,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 

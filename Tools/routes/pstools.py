@@ -606,8 +606,42 @@ def api_enable_prereqs():
             "details": err or out
         }), 500
     
+@pstools_bp.route('/set-network-private', methods=['POST'])
+def api_set_network_private():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, _ = get_auth_from_request(data)
+    
+    logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
+
+    # The command to execute via PowerShell
+    ps_command = 'Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private'
+    
+    # We need to wrap the powershell command correctly for psexec
+    # The -Command parameter of powershell.exe takes the command string
+    cmd_args = ["powershell.exe", "-Command", ps_command]
+
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
+    
+    if rc == 0:
+        logger.info(f"Successfully set network profile to Private on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": "Successfully sent command to set network profile to Private.",
+            "details": out
+        })
+    else:
+        logger.error(f"Failed to set network profile on {ip}. RC={rc}. Stderr: {err}. Stdout: {out}")
+        return jsonify({
+            "ok": False,
+            "error": "Failed to execute remote command to set network profile.",
+            "details": err or out
+        }), 500
 
     
+
+    
+
 
 
 
