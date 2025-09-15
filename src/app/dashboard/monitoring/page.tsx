@@ -304,3 +304,6 @@ export default function MonitoringPage() {
           <MonitoringCard key={device.id} device={device} />
         ))}
       </div>
+    </div>
+  );
+}
