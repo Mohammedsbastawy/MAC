@@ -124,7 +124,7 @@ def api_pslist():
 
     logger.info(f"Executing Get-Process (WinRM) on {ip}.")
     
-    ps_command = """
+    ps_command = r"""
     $processes = Get-Process
     $total_cpu_seconds = (Get-Counter '\Processor(_Total)\% Processor Time').CounterSamples[0].CookedValue
     $output = @()
@@ -274,45 +274,57 @@ def api_psinfo():
             
             # --- Historical Logging ---
             if device_name and parsed_json.get("psinfo"):
-                perf = parsed_json["psinfo"]["performance_info"]
-                cpu_usage = float(perf.find(lambda p: p['key'] == "CPU Usage")['value'])
-                used_memory_gb = float(perf.find(lambda p: p['key'] == "Used Memory")['value'])
+                perf_info = parsed_json["psinfo"].get("performance_info", [])
                 
-                # Sanitize the device name to create a safe filename
-                safe_filename = "".join([c for c in device_name if c.isalnum() or c in (' ', '_')]).rstrip()
-                log_file = os.path.join(LOGS_DIR, f"{safe_filename}.json")
+                # Helper to find value from key-value pair list
+                def find_value(key_to_find):
+                    item = next((item for item in perf_info if item["key"] == key_to_find), None)
+                    return item['value'] if item else None
 
-                history = []
-                if os.path.exists(log_file):
+                cpu_usage_str = find_value("CPU Usage")
+                used_memory_gb_str = find_value("Used Memory")
+
+                if cpu_usage_str is not None and used_memory_gb_str is not None:
+                    cpu_usage = float(cpu_usage_str)
+                    used_memory_gb = float(used_memory_gb_str)
+                    
+                    # Sanitize the device name to create a safe filename
+                    safe_filename = "".join([c for c in device_name if c.isalnum() or c in (' ', '_')]).rstrip()
+                    log_file = os.path.join(LOGS_DIR, f"{safe_filename}.json")
+
+                    history = []
+                    if os.path.exists(log_file):
+                        try:
+                            with open(log_file, 'r') as f:
+                                history = json.load(f)
+                        except (IOError, json.JSONDecodeError):
+                            history = []
+                    
+                    # Add new entry
+                    history.append({
+                        "timestamp": datetime.datetime.utcnow().isoformat(),
+                        "cpuUsage": cpu_usage,
+                        "usedMemoryGB": used_memory_gb
+                    })
+
+                    # Prune old entries
+                    retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+                    now = datetime.datetime.utcnow()
+                    history = [
+                        entry for entry in history
+                        if now - datetime.datetime.fromisoformat(entry["timestamp"]) < retention_delta
+                    ]
+                    
+                    # Save updated history
                     try:
-                        with open(log_file, 'r') as f:
-                            history = json.load(f)
-                    except (IOError, json.JSONDecodeError):
-                        history = []
-                
-                # Add new entry
-                history.append({
-                    "timestamp": datetime.datetime.utcnow().isoformat(),
-                    "cpuUsage": cpu_usage,
-                    "usedMemoryGB": used_memory_gb
-                })
+                        with open(log_file, 'w') as f:
+                            json.dump(history, f)
+                    except IOError as e:
+                        logger.error(f"Failed to write history log for {device_name}: {e}")
+                else:
+                    logger.warning(f"Could not find CPU or Memory info for {device_name} in psinfo output.")
 
-                # Prune old entries
-                retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
-                now = datetime.datetime.utcnow()
-                history = [
-                    entry for entry in history
-                    if now - datetime.datetime.fromisoformat(entry["timestamp"]) < retention_delta
-                ]
-                
-                # Save updated history
-                try:
-                    with open(log_file, 'w') as f:
-                        json.dump(history, f)
-                except IOError as e:
-                    logger.error(f"Failed to write history log for {device_name}: {e}")
-
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             err = f"Failed to parse or process JSON from WinRM psinfo. Error: {str(e)}. Raw output: {out}"
             rc = 1
 
@@ -692,17 +704,3 @@ def api_set_network_private():
             "details": err or out
         }), 500
     
-
-    
-
-
-
-
-
-
-
-
-
-    
-
-```
