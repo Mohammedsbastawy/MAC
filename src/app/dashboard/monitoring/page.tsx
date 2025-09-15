@@ -113,7 +113,7 @@ const MonitoringCard: React.FC<{
                 <XCircle className="h-8 w-8 mb-2" />
                 <p className="font-semibold">{isAgentNotDeployedError ? "Agent Not Deployed" : "Failed to load data"}</p>
                 <p className="text-xs max-w-full truncate" title={performanceError}>
-                    {isAgentNotDeployedError ? "The monitoring agent must be installed on this device." : performanceError}
+                    {isAgentNotDeployedError ? "Click below to install the monitoring agent on this device." : performanceError}
                 </p>
                 {isAgentNotDeployedError ? (
                     <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
@@ -315,16 +315,15 @@ export default function MonitoringPage() {
            const res = await fetch("/api/pstools/deploy-agent", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ip: device.ipAddress }),
+                body: JSON.stringify({ ip: device.ipAddress, name: device.name }),
             });
             const data = await res.json();
              if (data.ok) {
                 toast({ title: "Deployment Successful", description: data.message });
-                // Immediately try fetching data again for this device after a short delay
                 setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
-                // Wait for the task to run once
+                // Wait for the agent to run and create the file before fetching.
                 await new Promise(resolve => setTimeout(resolve, 5000)); 
-                fetchDevicePerformance(device, new AbortController().signal);
+                await fetchDevicePerformance(device, new AbortController().signal);
             } else {
                 toast({ variant: "destructive", title: "Deployment Failed", description: data.details || data.error, duration: 10000 });
             }

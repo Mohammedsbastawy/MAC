@@ -662,10 +662,12 @@ def api_set_network_private():
 def api_deploy_agent():
     data = request.get_json() or {}
     ip = data.get("ip")
+    # The device name is needed to construct the final JSON file path
+    device_name = data.get("name")
     user, domain, pwd, _ = get_auth_from_request(data)
     
-    if not ip:
-        return jsonify({"ok": False, "error": "IP address is required."}), 400
+    if not ip or not device_name:
+        return jsonify({"ok": False, "error": "IP address and device name are required."}), 400
 
     logger.info(f"Starting agent deployment on {ip}.")
     agent_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'AtlasMonitorAgent.ps1'))
@@ -712,8 +714,7 @@ def api_deploy_agent():
     logger.info(f"Step 3/3: Creating scheduled task on {ip}.")
     
     # This is the command that the task scheduler will run. It must be properly quoted.
-    # The outer quotes are for cmd.exe, the inner quotes are for the /tr argument.
-    task_command_to_run = f"\"powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1\""
+    task_command_to_run = f"powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1"
     
     schtasks_command = [
         "schtasks", "/create", 
