@@ -676,33 +676,34 @@ def api_deploy_agent():
     # --- Step 1: Create C:\Atlas folder ---
     logger.info(f"Step 1/3: Creating C:\\Atlas directory on {ip}.")
     mkdir_rc, mkdir_out, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
-    # We don't fail if the directory already exists (which is a common error)
     if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
         logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
         return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err or mkdir_out}), 500
 
-    # --- Step 2: Copy the agent script using psexec's built-in copy ---
-    # The -c flag copies the specified program to the remote system for execution.
+    # --- Step 2: Copy the agent script using PsExec to run a copy command. ---
     logger.info(f"Step 2/3: Copying agent script to {ip}.")
-    # We copy it to a known, writable location like C:\Atlas.
-    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["-c", "-f", agent_script_path, "C:\\Atlas\\AtlasMonitorAgent.ps1"], timeout=120)
+    # This command uses the administrative share C$ to copy the file.
+    remote_path = f"\\\\{ip}\\C$\\Atlas\\AtlasMonitorAgent.ps1"
+    copy_command = f'copy "{agent_script_path}" "{remote_path}"'
+    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", copy_command], timeout=120)
     
-    # PsExec returns 0 on successful copy and execution, but we're just copying.
-    # The command we give it (the destination path) isn't executable, so it will error, but it copies first.
-    # This is a known workaround. We check for the error message. A bit ugly, but reliable.
-    if "PsExec could not start" not in copy_err and copy_rc != 0:
+    if copy_rc != 0:
         logger.error(f"Failed to copy script to {ip}: {copy_err}")
         return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
 
-
     # --- Step 3: Create the scheduled task ---
     logger.info(f"Step 3/3: Creating scheduled task on {ip}.")
+    # The command for /tr needs to be properly quoted for schtasks.
+    # The outer quotes are for Python, the inner quotes are for cmd.exe on the remote machine.
+    task_command_to_run = (
+        'powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1'
+    )
     task_command = (
-        'schtasks /create /tn "AtlasAgent" '
-        '/tr "powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1" '
-        '/sc minute /mo 1 /f /ru "SYSTEM"'
+        f'schtasks /create /tn "AtlasAgent" /tr "{task_command_to_run}" '
+        f'/sc minute /mo 1 /f /ru "SYSTEM"'
     )
     task_rc, task_out, task_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", task_command], timeout=120)
+    
     if task_rc != 0:
         logger.error(f"Failed to create scheduled task on {ip}: {task_err}")
         return jsonify({"ok": False, "error": "Failed to create scheduled task.", "details": task_err}), 500
@@ -712,3 +713,5 @@ def api_deploy_agent():
         "ok": True,
         "message": f"Agent deployed successfully on {ip}. It will start sending data within a minute."
     })
+
+    
