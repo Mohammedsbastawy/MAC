@@ -300,15 +300,14 @@ export default function MonitoringPage() {
   };
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
-    // Don't set isFetching to true here to prevent loader from showing on refresh
-    // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true } : d));
+    setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
 
     const maxRetries = 2;
     let attempt = 0;
 
     while (attempt <= maxRetries) {
         if (signal.aborted) {
-            // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false } : d));
+            setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false } : d));
             return;
         }
         try {
@@ -332,7 +331,7 @@ export default function MonitoringPage() {
                     cpuUsage: perf.cpuUsage,
                     totalMemoryGB: perf.totalMemoryGB,
                     usedMemoryGB: perf.usedMemoryGB,
-                    diskInfo: perf.diskInfo ? JSON.parse(perf.diskInfo) : [],
+                    diskInfo: perf.diskInfo,
                 };
                 setDevices(prev => prev.map(d => d.id === device.id ? { ...d, performance: perfData, isFetching: false, performanceError: null } : d));
                 return;
@@ -341,7 +340,7 @@ export default function MonitoringPage() {
             }
         } catch (e: any) {
              if (e.name === 'AbortError') {
-                return; // Stop if the operation was aborted
+                return;
             }
             if (attempt < maxRetries) {
                 await new Promise(resolve => setTimeout(resolve, 5000));
@@ -376,19 +375,8 @@ export default function MonitoringPage() {
         const data = await response.json();
         
         if (data.ok) {
-            setDevices(prevDevices => {
-                const newDeviceMap = new Map(data.devices.map((d: MonitoredDevice) => [d.id, d]));
-                // Preserve existing performance data during status-only refresh
-                const updatedDevices = prevDevices.map(oldDevice => {
-                    const newDevice = newDeviceMap.get(oldDevice.id);
-                    if (newDevice) {
-                        newDeviceMap.delete(oldDevice.id); // Remove from map to handle new devices later
-                        return { ...newDevice, performance: oldDevice.performance, isFetching: newDevice.status === 'online' };
-                    }
-                    return oldDevice; // This case is unlikely but handles devices that might disappear from AD
-                });
-                 return updatedDevices.concat(Array.from(newDeviceMap.values()));
-            });
+            const newDevices = data.devices as MonitoredDevice[];
+            setDevices(newDevices);
             
             if (data.last_updated) {
               setLastUpdated(data.last_updated);
@@ -398,15 +386,11 @@ export default function MonitoringPage() {
                 toast({ title: "Success", description: "Device status has been refreshed." });
             }
 
-            const onlineDevices = data.devices.filter((d: MonitoredDevice) => d.status === 'online');
+            const onlineDevices = newDevices.filter((d: MonitoredDevice) => d.status === 'online');
             
-            // This now runs after state is set
-            setTimeout(() => {
-                onlineDevices.forEach((device: MonitoredDevice) => {
-                    // Refetch performance for online devices
-                    fetchDevicePerformance(device, signal);
-                });
-            }, 0);
+            onlineDevices.forEach((device: MonitoredDevice) => {
+                fetchDevicePerformance(device, signal);
+            });
 
 
         } else {
@@ -429,7 +413,6 @@ export default function MonitoringPage() {
     if (user) {
         fetchInitialDeviceList(false, signal);
     }
-    // Cleanup function to abort fetch on unmount
     return () => {
         controller.abort();
     };
@@ -442,7 +425,6 @@ export default function MonitoringPage() {
     if (autoRefresh && user) {
         interval = setInterval(() => fetchInitialDeviceList(true, signal), 30000);
     }
-    // Cleanup function
     return () => {
       if (interval) clearInterval(interval);
       controller.abort();
