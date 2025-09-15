@@ -677,35 +677,56 @@ def api_deploy_agent():
     # --- Step 1: Create C:\Atlas folder ---
     logger.info(f"Step 1/3: Creating C:\\Atlas directory on {ip}.")
     mkdir_rc, mkdir_out, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
+    # Gracefully handle the error if the directory already exists
     if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
         logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
         return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err or mkdir_out}), 500
 
-    # --- Step 2: Copy the agent script using PsExec to run a copy command. ---
-    logger.info(f"Step 2/3: Copying agent script to {ip}.")
-    # This command uses the administrative share C$ to copy the file.
-    # The source path must be a network-accessible path from the perspective of the target machine,
-    # OR we can use psexec's built-in copy. The latter is more reliable.
-    remote_path = f"C:\\Atlas\\AtlasMonitorAgent.ps1"
-    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["-c", agent_script_path, remote_path], timeout=120)
-    
-    if copy_rc != 0:
-        logger.error(f"Failed to copy script to {ip}: {copy_err}")
-        return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
+    # --- Step 2: Read script content and copy it by creating a new file on the remote machine ---
+    logger.info(f"Step 2/3: Copying agent script to {ip} via remote file creation.")
+    try:
+        with open(agent_script_path, 'r', encoding='utf-8') as f:
+            script_content = f.read()
+        
+        # Base64 encode the script to avoid issues with special characters in PowerShell
+        encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
+        
+        # This PowerShell command decodes the Base64 string and writes it to a file.
+        # This is much more reliable than trying to copy files over network shares with psexec.
+        ps_command = f"[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('{encoded_script}')) | Out-File -FilePath C:\\Atlas\\AtlasMonitorAgent.ps1 -Encoding utf8 -Force"
+        
+        # Use powershell -encodedcommand to handle complex commands
+        encoded_ps_command = base64.b64encode(ps_command.encode('utf-16-le')).decode('ascii')
+
+        copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["powershell.exe", "-EncodedCommand", encoded_ps_command], timeout=120)
+
+        if copy_rc != 0:
+            logger.error(f"Failed to create script file on {ip}: {copy_err}")
+            return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
+
+    except Exception as e:
+        logger.error(f"Error reading or encoding agent script: {e}")
+        return jsonify({"ok": False, "error": "Server-side error reading the agent script."}), 500
 
     # --- Step 3: Create the scheduled task ---
     logger.info(f"Step 3/3: Creating scheduled task on {ip}.")
-    # The command for /tr needs to be properly quoted for schtasks.
-    # The outer quotes are for Python, the inner quotes are for cmd.exe on the remote machine.
-    task_command_to_run = (
-        'powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1'
-    )
-    # Correctly quoting the command for schtasks
-    task_command = (
-        f'schtasks /create /tn "AtlasAgent" /tr "{task_command_to_run}" '
-        f'/sc minute /mo 1 /f /ru "SYSTEM"'
-    )
-    task_rc, task_out, task_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", task_command], timeout=120)
+    
+    # Correctly quoted command for schtasks
+    task_command_to_run = 'powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1'
+    
+    # The /tr argument's content must be properly escaped for cmd.exe
+    # Wrapping the whole command in double quotes is the standard way.
+    schtasks_command = [
+        "schtasks", "/create", 
+        "/tn", "AtlasAgent", 
+        "/tr", f'"{task_command_to_run}"',
+        "/sc", "minute", 
+        "/mo", "1", 
+        "/f", 
+        "/ru", "SYSTEM"
+    ]
+    
+    task_rc, task_out, task_err = run_ps_command("psexec", ip, user, domain, pwd, schtasks_command, timeout=120)
     
     if task_rc != 0:
         logger.error(f"Failed to create scheduled task on {ip}: {task_err}")
