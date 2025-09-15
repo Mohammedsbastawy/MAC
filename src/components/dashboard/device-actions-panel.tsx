@@ -200,8 +200,8 @@ type DialogState = {
     } | null;
 }
 
-type WinRMCheckStatus = 'checking' | 'success' | 'failure';
-type WinRMDiagnosticsState = {
+export type WinRMCheckStatus = 'checking' | 'success' | 'failure';
+export type WinRMDiagnosticsState = {
     service: { status: WinRMCheckStatus, message: string };
     listener: { status: WinRMCheckStatus, message: string };
     firewall: { status: WinRMCheckStatus, message: string };
@@ -1079,7 +1079,7 @@ const ServiceInfoDialog: React.FC<{
 };
 
 
-const WinRMDiagnosticsDialog: React.FC<{
+export const WinRMDiagnosticsDialog: React.FC<{
     state: WinRMDiagnosticsState;
     onOpenLog: (log: string) => void;
     onFix: () => void;
@@ -1630,6 +1630,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 
