@@ -1,3 +1,4 @@
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -205,6 +206,12 @@ def api_psinfo():
     $proc = Get-CimInstance -ClassName Win32_Processor
     $gpu = Get-CimInstance -ClassName Win32_VideoController
     
+    # Performance Data
+    $cpuUsage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
+    $totalMemory = $cs.TotalPhysicalMemory
+    $freeMemory = (Get-Counter -Counter "\Memory\Available Bytes").CounterSamples.CookedValue
+    $usedMemory = $totalMemory - $freeMemory
+    
     $uptime_span = (Get-Date) - $os.LastBootUpTime
     $uptime_str = "$($uptime_span.Days) days, $($uptime_span.Hours) hours, $($uptime_span.Minutes) minutes"
     
@@ -213,7 +220,6 @@ def api_psinfo():
             Volume = $_.DriveLetter;
             SizeGB = [math]::Round($_.Size / 1GB, 2);
             FreeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
-            FreePercent = "{0}%" -f [math]::Round(($_.SizeRemaining / $_.Size) * 100);
         }
     }
 
@@ -221,20 +227,26 @@ def api_psinfo():
         "OS" = $os.Caption;
         "Kernel version" = $os.Version;
         "Processor" = $proc.Name;
-        "Total Memory" = "{0:N2} GB" -f ($cs.TotalPhysicalMemory / 1GB);
+        "Total Memory" = "{0:N2}" -f ($totalMemory / 1GB);
         "Video Card" = $gpu.Name;
         "Domain" = $cs.Domain;
         "Uptime" = $uptime_str;
         "Install date" = $os.InstallDate.ToString('yyyy-MM-dd');
         "Logged on users" = $cs.NumberOfUsers;
     }
+    
+    $performance_info = @{
+        "CPU Usage" = "{0:N2}" -f $cpuUsage;
+        "Used Memory" = "{0:N2}" -f ($usedMemory / 1GB);
+    }
 
     @{
         psinfo = @{
             system_info = $system_info.GetEnumerator() | ForEach-Object { @{ key=$_.Name; value=$_.Value } };
+            performance_info = $performance_info.GetEnumerator() | ForEach-Object { @{ key=$_.Name; value=$_.Value } };
             disk_info = $disks
         }
-    } | ConvertTo-Json -Depth 3 -Compress
+    } | ConvertTo-Json -Depth 4 -Compress
     """
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
     
@@ -252,26 +264,21 @@ def api_psinfo():
 @pstools_bp.route('/psloggedon', methods=['POST'])
 def api_psloggedon():
     data = request.get_json() or {}
-    ip = data.get("ip","")
+    ip = data.get("ip", "")
     _, _, pwd, winrm_user = get_auth_from_request(data)
     
     logger.info(f"Executing quser.exe (WinRM) on {ip}.")
     
-    # This PowerShell script is more robust. It uses quser.exe and converts the output
-    # directly to PSCustomObject, which is then converted to JSON. This avoids
-    # fragile regex parsing in Python.
     ps_command = r"""
     $output = quser.exe
     $results = $output | Select-Object -Skip 1 | ForEach-Object {
         $line = $_.Trim() -replace '\s{2,}', ','
         $parts = $line.Split(',')
         if ($parts.Length -ge 5) {
-            # The first part is the username, sometimes preceded by '>'
             $username = $parts[0].Replace('>', '').Trim()
             $session_name = $parts[1].Trim()
             $id = $parts[2].Trim()
             $state = $parts[3].Trim()
-            # The rest of the parts form the logon time
             $logon_time = $parts[4..($parts.Length-1)] -join ' '
             
             [PSCustomObject]@{
@@ -291,27 +298,21 @@ def api_psloggedon():
     
     if rc != 0:
         logger.error(f"quser.exe command via WinRM failed on {ip} with RC={rc}. Stderr: {err}")
-        # Even if the command fails, return a properly structured empty list
         return json_result(rc, out, err, structured_data={"psloggedon": []})
     
     parsed_users = []
     if out and out.strip() and out.strip() != "null":
         try:
-            # The output from PS is now guaranteed to be JSON
             parsed_json = json.loads(out)
-            # If a single user is found, PS returns a single object. We must wrap it in a list.
             if isinstance(parsed_json, dict):
                 parsed_users = [parsed_json]
             else:
                 parsed_users = parsed_json
         except json.JSONDecodeError:
             logger.error(f"Failed to parse JSON from WinRM on {ip}. Raw output: {out}")
-            # If JSON parsing fails for some reason, return an empty list but log the error
             err = f"Failed to parse user data from remote host: {out}"
-            rc = 1 # Indicate a non-fatal error
+            rc = 1
     
-    # If we are here, 'out' was either empty or we parsed it successfully.
-    # In any case, we return a well-formed structure.
     return json_result(rc, out, err, structured_data={"psloggedon": parsed_users})
 
 
@@ -577,7 +578,6 @@ def api_enable_prereqs():
 
     logger.info(f"Attempting to enable prerequisites (RPC/WMI) on {ip} using PsExec.")
 
-    # Commands to enable RemoteRegistry and configure the firewall for WMI/RPC and SMB
     chained_command = (
         'sc config "RemoteRegistry" start= auto && '
         'net start "RemoteRegistry" && '
@@ -605,10 +605,40 @@ def api_enable_prereqs():
             "error": "Failed to execute remote prerequisite commands via PsExec.",
             "details": err or out
         }), 500
+
+@pstools_bp.route('/set-network-private', methods=['POST'])
+def api_set_network_private():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, _ = get_auth_from_request(data)
+
+    logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
+
+    # This command attempts to run PowerShell with elevated privileges to change the network profile.
+    # Note the escaping of quotes for the command line.
+    ps_command = 'Start-Process powershell -Verb RunAs -ArgumentList \\"-Command Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private\\"'
+    cmd_args = ["powershell.exe", "-Command", ps_command]
     
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
+
+    if rc == 0:
+        logger.info(f"Successfully sent command to set network profile to Private on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": "Command to set network profile to 'Private' was sent successfully. It may take a moment for the change to apply.",
+            "details": out
+        })
+    else:
+        logger.error(f"Failed to set network profile on {ip}. RC={rc}. Stderr: {err}. Stdout: {out}")
+        return jsonify({
+            "ok": False,
+            "error": "Failed to execute remote command to set network profile.",
+            "details": err or out
+        }), 500
     
 
     
+
 
 
 
