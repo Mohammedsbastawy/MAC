@@ -83,7 +83,7 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isFetching ? (
+        {device.isFetching && !device.performance ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
@@ -191,6 +191,9 @@ export default function MonitoringPage() {
   const { toast } = useToast();
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice) => {
+    // Set isFetching to true for the specific device
+    setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true } : d));
+
     const maxRetries = 2; // Try original + 2 retries
     let attempt = 0;
     
@@ -207,6 +210,7 @@ export default function MonitoringPage() {
                 const perf = data.structured_data.psinfo;
                 let diskData = [];
                 try {
+                    // disk_info can be a JSON string or an object, handle both
                     if (typeof perf.disk_info === 'string') {
                         diskData = JSON.parse(perf.disk_info);
                     } else {
@@ -214,9 +218,9 @@ export default function MonitoringPage() {
                     }
                 } catch (e) {
                     console.error("Failed to parse disk_info JSON", e);
-                    diskData = [];
+                    diskData = []; // Default to empty array on parsing error
                 }
-
+                
                 const newPerfData = {
                     cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || 0),
                     totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || 0),
@@ -263,15 +267,27 @@ export default function MonitoringPage() {
         const data = await response.json();
         
         if (data.ok) {
-            const initialDevices = data.devices.map((d: MonitoredDevice) => ({...d, isFetching: d.status === 'online', performanceError: null}));
-            setDevices(initialDevices);
+            // When refreshing, we merge new status with existing data to prevent UI flicker
+            setDevices(prevDevices => {
+                const existingDeviceMap = new Map(prevDevices.map(d => [d.id, d]));
+                const newDevices = data.devices.map((newDevice: MonitoredDevice) => {
+                    const existingDevice = existingDeviceMap.get(newDevice.id);
+                    return {
+                        ...existingDevice, // Keep old data (like performance)
+                        ...newDevice,      // Overwrite with new data (like status)
+                        isFetching: existingDevice ? existingDevice.isFetching : newDevice.status === 'online',
+                    };
+                });
+                return newDevices;
+            });
+            
             setLastUpdated(data.last_updated);
 
             if (forceRefresh) {
                 toast({ title: "Success", description: "Device status has been refreshed." });
             }
 
-            const onlineDevices = initialDevices.filter((d: MonitoredDevice) => d.status === 'online');
+            const onlineDevices = data.devices.filter((d: MonitoredDevice) => d.status === 'online');
             onlineDevices.forEach((device: MonitoredDevice) => {
                 fetchDevicePerformance(device);
             });
