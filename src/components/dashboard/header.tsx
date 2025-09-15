@@ -114,7 +114,7 @@ const UserMenu: React.FC = () => {
             <Button variant="ghost" className="relative h-8 w-8 rounded-full">
               <Avatar className="h-9 w-9">
                 <AvatarImage src="https://i.pravatar.cc/150?u=admin" alt="Admin" />
-                <AvatarFallback>{user?.email.substring(0, 2).toUpperCase() || 'AD'}</AvatarFallback>
+                <AvatarFallback>{user?.email?.substring(0, 2).toUpperCase() || 'AD'}</AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
