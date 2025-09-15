@@ -43,7 +43,8 @@ $ErrorActionPreference = "Stop"
 $AgentPath = "C:\\Atlas"
 
 try {
-    if (-not (Test-Path -Path $AgentPath)) {
+    # This command ensures the C:\\Atlas directory exists. If it does, nothing happens. If it doesn't, it is created.
+    if (-not (Test-Path -Path $AgentPath -PathType Container)) {
         New-Item -ItemType Directory -Path $AgentPath -Force
     }
 

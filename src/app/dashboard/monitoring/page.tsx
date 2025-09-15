@@ -6,7 +6,7 @@ import * as React from "react";
 import type { Device, MonitoredDevice, PerformanceData } from "@/lib/types";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw, XCircle, ShieldCheck, Zap } from "lucide-react";
+import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw, XCircle, ShieldCheck, Zap, HelpCircle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -84,6 +84,8 @@ const MonitoringCard: React.FC<{
   const memPercentage = (performance && performance.totalMemoryGB > 0)
     ? (performance.usedMemoryGB / performance.totalMemoryGB) * 100
     : 0;
+    
+  const isAgentNotDeployedError = performanceError && (performanceError.includes("Cannot find path") || performanceError.includes("PathNotFound"));
 
   return (
     <Card className={cn(status !== 'online' && "opacity-50")}>
@@ -101,21 +103,30 @@ const MonitoringCard: React.FC<{
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isFetching ? (
+        {device.isFetching && !performance ? ( // Show loader only if no previous data is available
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
         ) : performanceError ? (
            <div className="flex flex-col items-center justify-center h-48 text-destructive text-center p-4">
                 <XCircle className="h-8 w-8 mb-2" />
-                <p className="font-semibold">Failed to load data</p>
-                <p className="text-xs max-w-full truncate" title={performanceError}>{performanceError}</p>
-                 {performanceError.includes("5985") && // Only show diagnostics for WinRM-related errors
+                <p className="font-semibold">{isAgentNotDeployedError ? "Agent Not Deployed" : "Failed to load data"}</p>
+                <p className="text-xs max-w-full truncate" title={performanceError}>
+                    {isAgentNotDeployedError ? "The monitoring agent script has not been run on this device." : performanceError}
+                </p>
+                {isAgentNotDeployedError ? (
+                     <Button variant="secondary" size="sm" className="mt-4" asChild>
+                        <Link href="/dashboard/help/agent">
+                            <HelpCircle className="mr-2 h-4 w-4" />
+                            View Deployment Guide
+                        </Link>
+                    </Button>
+                ) : ( // For other errors like WinRM connection issues
                     <Button variant="secondary" size="sm" className="mt-4" onClick={() => onRunDiagnostics(device)}>
                         <ShieldCheck className="mr-2 h-4 w-4" />
                         Run Diagnostics
                     </Button>
-                }
+                )}
             </div>
         ) : performance ? (
           <div className="grid grid-cols-2 gap-4">
@@ -531,3 +542,4 @@ export default function MonitoringPage() {
     </>
   );
 }
+
