@@ -59,7 +59,7 @@ export default function HelpPage() {
                                     **Symptom:** WinRM commands (like File Browser, Process List) fail, and the error log mentions that the "network connection type is Public".
                                 </p>
                                 <p className="text-muted-foreground">
-                                    **Cause:** For security reasons, Windows blocks remote management features like WinRM when a computer's active network connection is classified as "Public".
+                                    **Cause:** For security reasons, Windows blocks remote management features like WinRM when a computer's active network connection is classified as "Public". This often happens on wireless networks or new ethernet connections.
                                 </p>
                                 <h5 className="font-semibold pt-2">Solution: Change Network Profile to Private</h5>
                                 <p className="text-muted-foreground">You must run the following PowerShell command **on the target machine** with Administrator privileges to re-classify the network as "Private".</p>
@@ -70,8 +70,7 @@ export default function HelpPage() {
                                     <Lightbulb className="h-4 w-4" />
                                     <AlertTitle>How to Run Remotely</AlertTitle>
                                     <AlertDescription>
-                                        If you can't access the machine's desktop, you can use the **Fix Network Profile (Public to Private)** button in the Device Actions Panel to run this command remotely. The command to use would be:
-                                         <CodeBlock>{'powershell -command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"'}</CodeBlock>
+                                        This app does not currently provide a remote button for this specific action because it often requires elevated privileges that can be blocked by UAC in a remote session. The most reliable method is to run the command directly on the target machine or via a startup script.
                                     </AlertDescription>
                                 </Alert>
                             </AccordionContent>
@@ -335,7 +334,7 @@ export default function HelpPage() {
 
             <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-2xl">
+                     <CardTitle className="flex items-center gap-2 text-2xl">
                         <Wrench /> Prerequisite 6: Ensure Core Services (WMI & RPC) are Running
                     </CardTitle>
                     <CardDescription>
