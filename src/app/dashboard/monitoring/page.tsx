@@ -101,7 +101,7 @@ const MonitoringCard: React.FC<{
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isFetching && !device.performance ? (
+        {device.isFetching ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
@@ -297,19 +297,30 @@ export default function MonitoringPage() {
     setIsFixing(false);
   };
 
-  const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice) => {
-    setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
+  const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
+    // Don't set isFetching to true here to avoid the loading spinner on refresh
+    // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
 
     const maxRetries = 2;
     let attempt = 0;
 
     while (attempt <= maxRetries) {
+        if (signal.aborted) {
+            return;
+        }
         try {
             const res = await fetch("/api/pstools/psinfo", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ip: device.ipAddress, id: device.id, name: device.name })
+                body: JSON.stringify({ ip: device.ipAddress, id: device.id, name: device.name }),
+                signal,
             });
+
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({error: 'Invalid response from server'}));
+                throw new Error(errorData.error || errorData.message || "An unknown error occurred");
+            }
+            
             const data = await res.json();
 
             if (data.ok && data.structured_data?.psinfo) {
@@ -326,6 +337,9 @@ export default function MonitoringPage() {
                  throw new Error(data.error || data.stderr || "Failed to parse performance data.");
             }
         } catch (e: any) {
+             if (e.name === 'AbortError') {
+                return; // Stop if the operation was aborted
+            }
             if (attempt < maxRetries) {
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 attempt++;
@@ -338,7 +352,7 @@ export default function MonitoringPage() {
 }, []);
 
 
-  const fetchInitialDeviceList = React.useCallback(async (forceRefresh = false) => {
+  const fetchInitialDeviceList = React.useCallback(async (forceRefresh = false, signal: AbortSignal) => {
       if (!forceRefresh) {
         setIsLoading(true);
       } else {
@@ -350,24 +364,26 @@ export default function MonitoringPage() {
         const response = await fetch("/api/network/get-monitoring-data", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ force_refresh: forceRefresh })
+          body: JSON.stringify({ force_refresh: forceRefresh }),
+          signal,
         });
+
+        if (signal.aborted) return;
+
         const data = await response.json();
         
         if (data.ok) {
             setDevices(prevDevices => {
-                const existingDeviceMap = new Map(prevDevices.map(d => [d.id, d]));
-                const newDevices = data.devices.map((newDevice: MonitoredDevice) => {
-                    const existingDevice = existingDeviceMap.get(newDevice.id);
-                    // Keep old performance data while fetching new status
-                    return {
-                        ...existingDevice,
-                        ...newDevice,
-                        isFetching: newDevice.status === 'online', // Only fetch for online devices
-                        performance: existingDevice?.performance,
-                    };
-                });
-                return newDevices;
+                const newDeviceMap = new Map(data.devices.map((d: MonitoredDevice) => [d.id, d]));
+                // Preserve existing performance data during status-only refresh
+                return prevDevices.map(oldDevice => {
+                    const newDevice = newDeviceMap.get(oldDevice.id);
+                    if (newDevice) {
+                        newDeviceMap.delete(oldDevice.id); // Remove from map to handle new devices later
+                        return { ...oldDevice, status: newDevice.status, isFetching: newDevice.status === 'online' && !oldDevice.performance };
+                    }
+                    return oldDevice;
+                }).concat(Array.from(newDeviceMap.values())); // Add any completely new devices
             });
             
             if (data.last_updated) {
@@ -380,14 +396,16 @@ export default function MonitoringPage() {
 
             const onlineDevices = data.devices.filter((d: MonitoredDevice) => d.status === 'online');
             onlineDevices.forEach((device: MonitoredDevice) => {
-                fetchDevicePerformance(device);
+                fetchDevicePerformance(device, signal);
             });
 
         } else {
             setError(data.message || "Failed to fetch monitoring data.");
         }
-      } catch (err) {
-        setError("Failed to connect to the backend server.");
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+            setError("Failed to connect to the backend server.");
+        }
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
@@ -396,18 +414,28 @@ export default function MonitoringPage() {
 
 
   React.useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
     if (user) {
-        fetchInitialDeviceList(false);
+        fetchInitialDeviceList(false, signal);
     }
+    // Cleanup function to abort fetch on unmount
+    return () => {
+        controller.abort();
+    };
   }, [user, fetchInitialDeviceList]);
 
   React.useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
+    const controller = new AbortController();
+    const signal = controller.signal;
     if (autoRefresh && user) {
-        interval = setInterval(() => fetchInitialDeviceList(true), 30000);
+        interval = setInterval(() => fetchInitialDeviceList(true, signal), 30000);
     }
+    // Cleanup function
     return () => {
       if (interval) clearInterval(interval);
+      controller.abort();
     };
   }, [autoRefresh, user, fetchInitialDeviceList]);
 
@@ -447,7 +475,10 @@ export default function MonitoringPage() {
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>Error Loading Data</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
-           <Button onClick={() => fetchInitialDeviceList(false)} className="mt-4">Retry</Button>
+           <Button onClick={() => {
+               const controller = new AbortController();
+               fetchInitialDeviceList(false, controller.signal);
+           }} className="mt-4">Retry</Button>
         </Alert>
       </div>
     );
@@ -470,7 +501,10 @@ export default function MonitoringPage() {
                 <Switch id="auto-refresh" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
                 <Label htmlFor="auto-refresh">Auto-Refresh (30s)</Label>
             </div>
-            <Button onClick={() => fetchInitialDeviceList(true)} disabled={isRefreshing}>
+            <Button onClick={() => {
+                const controller = new AbortController();
+                fetchInitialDeviceList(true, controller.signal);
+            }} disabled={isRefreshing}>
                 {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Force Refresh
             </Button>
