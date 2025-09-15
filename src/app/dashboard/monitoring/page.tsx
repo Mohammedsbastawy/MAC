@@ -148,7 +148,7 @@ const MonitoringCard: React.FC<{ device: MonitoredDevice }> = ({ device }) => {
             </div>
              <div className="col-span-2">
                 <h4 className="text-sm font-semibold mb-2 text-center">Disk Usage</h4>
-                 {performance.diskInfo.length > 0 ? (
+                 {performance.diskInfo && performance.diskInfo.length > 0 ? (
                     <ChartContainer config={{}} className="h-40 w-full">
                         <BarChart data={performance.diskInfo.map(d => ({...d, used: d.sizeGB - d.freeGB}))} layout="vertical" margin={{left: 10}}>
                             <CartesianGrid horizontal={false} />
@@ -307,3 +307,4 @@ export default function MonitoringPage() {
     </div>
   );
 }
+
