@@ -675,27 +675,22 @@ def api_deploy_agent():
     # We don't fail if the directory already exists (which is a common error)
     if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
         logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
-        return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err}), 500
+        return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err or mkdir_out}), 500
 
     # --- Step 2: Copy the agent script ---
-    # The script is located in Tools/scripts/AtlasMonitorAgent.ps1
     agent_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'AtlasMonitorAgent.ps1'))
     if not os.path.exists(agent_script_path):
         logger.error(f"Agent script not found at {agent_script_path}")
         return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
 
     logger.info(f"Step 2/3: Copying agent script to {ip}.")
-    # PsExec's -c switch copies the file and runs it. Let's use it to just copy.
-    # A more reliable way is to copy it to a share, but let's try psexec's capability.
-    # The command `psexec -c <local_file> <remote_command>` copies and runs.
-    # We will copy it to a specific location on C$
-    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["-c", agent_script_path, "cmd", "/c", "move", f"C:\\Windows\\{os.path.basename(agent_script_path)}", "C:\\Atlas\\AtlasMonitorAgent.ps1"], timeout=120)
+    # Use a standard `copy` command via psexec, targeting the admin share C$. This is more reliable.
+    copy_command = f'copy "{agent_script_path}" \\\\{ip}\\C$\\Atlas\\'
+    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", copy_command], timeout=120)
+    
     if copy_rc != 0:
-        # Retry with xcopy just in case
-        copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", f'xcopy /Y "{agent_script_path}" \\\\{ip}\\C$\\Atlas\\'], timeout=120)
-        if copy_rc != 0:
-            logger.error(f"Failed to copy script to {ip}: {copy_err}")
-            return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
+        logger.error(f"Failed to copy script to {ip}: {copy_err}")
+        return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
 
 
     # --- Step 3: Create the scheduled task ---
