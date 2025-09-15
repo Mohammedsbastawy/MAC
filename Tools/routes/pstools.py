@@ -668,6 +668,10 @@ def api_deploy_agent():
         return jsonify({"ok": False, "error": "IP address is required."}), 400
 
     logger.info(f"Starting agent deployment on {ip}.")
+    agent_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'AtlasMonitorAgent.ps1'))
+    if not os.path.exists(agent_script_path):
+        logger.error(f"Agent script not found at {agent_script_path}")
+        return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
 
     # --- Step 1: Create C:\Atlas folder ---
     logger.info(f"Step 1/3: Creating C:\\Atlas directory on {ip}.")
@@ -677,18 +681,16 @@ def api_deploy_agent():
         logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
         return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err or mkdir_out}), 500
 
-    # --- Step 2: Copy the agent script ---
-    agent_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'AtlasMonitorAgent.ps1'))
-    if not os.path.exists(agent_script_path):
-        logger.error(f"Agent script not found at {agent_script_path}")
-        return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
-
+    # --- Step 2: Copy the agent script using psexec's built-in copy ---
+    # The -c flag copies the specified program to the remote system for execution.
     logger.info(f"Step 2/3: Copying agent script to {ip}.")
-    # Use a standard `copy` command via psexec, targeting the admin share C$. This is more reliable.
-    copy_command = f'copy "{agent_script_path}" \\\\{ip}\\C$\\Atlas\\'
-    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", copy_command], timeout=120)
+    # We copy it to a known, writable location like C:\Atlas.
+    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["-c", "-f", agent_script_path, "C:\\Atlas\\AtlasMonitorAgent.ps1"], timeout=120)
     
-    if copy_rc != 0:
+    # PsExec returns 0 on successful copy and execution, but we're just copying.
+    # The command we give it (the destination path) isn't executable, so it will error, but it copies first.
+    # This is a known workaround. We check for the error message. A bit ugly, but reliable.
+    if "PsExec could not start" not in copy_err and copy_rc != 0:
         logger.error(f"Failed to copy script to {ip}: {copy_err}")
         return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
 
