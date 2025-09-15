@@ -490,6 +490,64 @@ def api_check_winrm():
         results["firewall"] = {"status": "failure", "message": "Cannot check firewall because the WinRM listener is not responding."}
 
     return jsonify({"ok": True, "results": results})
+
+
+# This function runs in a background thread and needs all auth data passed to it.
+def fetch_perf_for_device(computer, auth_user, auth_domain, auth_pwd):
+    winrm_user = f"{auth_user}@{auth_domain}" if '@' not in auth_user else auth_user
+    
+    ip = computer.get('dns_hostname')
+    if not ip:
+        return {**computer, 'status': 'offline', 'performance': None, 'isFetching': False}
+    
+    # PowerShell script to gather all data in one go
+    ps_script = r"""
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem
+        $cpu_usage_counter = Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1
+        $cpu_usage = $cpu_usage_counter.CounterSamples.CookedValue
+        $used_memory = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
+        $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
+            [pscustomobject]@{
+                volume = $_.DriveLetter;
+                sizeGB = [math]::Round($_.Size / 1GB, 2);
+                freeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
+            }
+        }
+        @{
+            cpuUsage = $cpu_usage;
+            totalMemoryGB = [math]::Round($os.TotalVisibleMemorySize / 1KB / 1MB, 2);
+            usedMemoryGB = [math]::Round($used_memory / 1KB / 1MB, 2);
+            diskInfo = $disks | ConvertTo-Json -Compress
+        } | ConvertTo-Json -Compress
+    """
+    rc, out, err = run_winrm_command(ip, winrm_user, auth_pwd, ps_script)
+
+    performance_data = None
+    if rc == 0 and out:
+        try:
+            raw_data = json.loads(out)
+            # diskInfo is a JSON string itself, so we parse it again
+            disk_info_raw = raw_data.get('diskInfo')
+            if disk_info_raw:
+                raw_data['diskInfo'] = json.loads(disk_info_raw)
+                # Ensure diskInfo is always a list
+                if isinstance(raw_data['diskInfo'], dict):
+                    raw_data['diskInfo'] = [raw_data['diskInfo']]
+            else:
+                raw_data['diskInfo'] = []
+            performance_data = raw_data
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse performance JSON for {ip}: {e}. Raw: {out}")
+
+    return {
+        'id': computer['dn'],
+        'name': computer['name'],
+        'ipAddress': ip,
+        'status': 'online',
+        'isFetching': False,
+        'performance': performance_data
+    }
     
 @network_bp.route('/api/network/get-monitoring-data', methods=['POST'])
 def get_monitoring_data():
@@ -539,72 +597,21 @@ def get_monitoring_data():
                 pass # Ignore errors in status checking
     logger.info(f"Found {len(online_ips)} AD hosts online.")
 
-    # Prepare list of devices for performance data fetching
     online_devices_to_poll = [c for c in all_ad_computers if c.get('dns_hostname') in online_ips]
 
-    # Function to fetch performance for a single device
-    def fetch_perf_for_device(computer):
-        user = session.get("user")
-        domain = session.get("domain")
-        pwd = session.get("password")
-        winrm_user = f"{user}@{domain}" if '@' not in user else user
-        
-        ip = computer.get('dns_hostname')
-        if not ip:
-            return {**computer, 'status': 'offline', 'performance': None, 'isFetching': False}
-        
-        # PowerShell script to gather all data in one go
-        ps_script = r"""
-            $os = Get-CimInstance -ClassName Win32_OperatingSystem
-            $cs = Get-CimInstance -ClassName Win32_ComputerSystem
-            $cpu_usage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
-            $used_memory = $os.TotalVisibleMemorySize - $os.FreePhysicalMemory
-            $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
-                [pscustomobject]@{
-                    volume = $_.DriveLetter;
-                    sizeGB = [math]::Round($_.Size / 1GB, 2);
-                    freeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
-                }
-            }
-            @{
-                cpuUsage = $cpu_usage;
-                totalMemoryGB = [math]::Round($os.TotalVisibleMemorySize / 1KB / 1MB, 2);
-                usedMemoryGB = [math]::Round($used_memory / 1KB / 1MB, 2);
-                diskInfo = $disks | ConvertTo-Json -Compress
-            } | ConvertTo-Json -Compress
-        """
-        rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_script)
-
-        performance_data = None
-        if rc == 0 and out:
-            try:
-                raw_data = json.loads(out)
-                # diskInfo is a JSON string itself, so we parse it again
-                disk_info_raw = raw_data.get('diskInfo')
-                if disk_info_raw:
-                    raw_data['diskInfo'] = json.loads(disk_info_raw)
-                    # Ensure diskInfo is always a list
-                    if isinstance(raw_data['diskInfo'], dict):
-                        raw_data['diskInfo'] = [raw_data['diskInfo']]
-                else:
-                    raw_data['diskInfo'] = []
-                performance_data = raw_data
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.error(f"Failed to parse performance JSON for {ip}: {e}. Raw: {out}")
-
-        return {
-            'id': computer['dn'],
-            'name': computer['name'],
-            'ipAddress': ip,
-            'status': 'online',
-            'isFetching': False,
-            'performance': performance_data
-        }
+    # Get auth details from session ONCE in the main thread
+    auth_user = session.get("user")
+    auth_domain = session.get("domain")
+    auth_pwd = session.get("password")
 
     # Concurrently fetch performance data for online devices
     final_devices = []
     with ThreadPoolExecutor(max_workers=20) as executor:
-        future_to_computer = {executor.submit(fetch_perf_for_device, c): c for c in online_devices_to_poll}
+        # Pass auth details explicitly to the thread worker
+        future_to_computer = {
+            executor.submit(fetch_perf_for_device, c, auth_user, auth_domain, auth_pwd): c 
+            for c in online_devices_to_poll
+        }
         for future in as_completed(future_to_computer):
             try:
                 final_devices.append(future.result())
@@ -644,3 +651,6 @@ def get_monitoring_data():
     
 
 
+
+
+    
