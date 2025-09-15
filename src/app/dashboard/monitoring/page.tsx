@@ -202,7 +202,6 @@ export default function MonitoringPage() {
         if (data.ok && data.structured_data?.psinfo) {
              const perf = data.structured_data.psinfo;
              let diskData = [];
-             // The disk_info might be a JSON string, so we need to parse it
              try {
                 if (typeof perf.disk_info === 'string') {
                     diskData = JSON.parse(perf.disk_info);
@@ -218,11 +217,11 @@ export default function MonitoringPage() {
                  cpuUsage: parseFloat(perf.performance_info.find((p:any) => p.key === "CPU Usage")?.value || 0),
                  totalMemoryGB: parseFloat(perf.system_info.find((p:any) => p.key === "Total Memory")?.value || 0),
                  usedMemoryGB: parseFloat(perf.performance_info.find((p:any) => p.key === "Used Memory")?.value || 0),
-                 diskInfo: diskData.map((d: any) => ({
+                 diskInfo: Array.isArray(diskData) ? diskData.map((d: any) => ({
                     volume: d.volume,
                     sizeGB: parseFloat(d.sizeGB) || 0,
                     freeGB: parseFloat(d.freeGB) || 0,
-                }))
+                })) : []
              }
              setDevices(prev => prev.map(d => d.id === device.id ? {...d, performance: newPerfData, isFetching: false, performanceError: null} : d));
         } else {
@@ -240,7 +239,6 @@ export default function MonitoringPage() {
         setIsLoading(true);
       } else {
         setIsRefreshing(true);
-        // Reset performance data for a new refresh
         setDevices(prev => prev.map(d => ({...d, performance: undefined, performanceError: null, isFetching: d.status === 'online' })))
       }
       setError(null);
@@ -255,11 +253,10 @@ export default function MonitoringPage() {
         
         if (data.ok) {
             setDevices(data.devices);
-            setLastUpdated(new Date(data.last_updated).toLocaleTimeString());
+            setLastUpdated(data.last_updated);
             if (forceRefresh) {
                 toast({ title: "Success", description: "Device status has been refreshed." });
             }
-            // After setting the initial list, fetch performance for online devices
             for (const device of data.devices) {
                 if (device.status === 'online') {
                     fetchDevicePerformance(device);
@@ -288,8 +285,6 @@ export default function MonitoringPage() {
   React.useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (autoRefresh && user) {
-        // Rerun the whole process, which will start by hitting the cache
-        // or getting new data if the cache is stale.
         interval = setInterval(() => fetchInitialDeviceList(true), 60000); // Force refresh every 60 seconds
     }
     return () => {
@@ -345,7 +340,7 @@ export default function MonitoringPage() {
         <div className="space-y-1">
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Device Monitoring</h1>
           <p className="text-muted-foreground">
-            {lastUpdated ? `Real-time performance metrics. Last cache update: ${lastUpdated}`: 'Loading data...'}
+             {lastUpdated ? `Real-time performance metrics. Last cache update: ${new Date(lastUpdated).toLocaleTimeString()}`: 'Loading data...'}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -368,5 +363,3 @@ export default function MonitoringPage() {
     </div>
   );
 }
-
-    

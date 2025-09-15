@@ -1,4 +1,5 @@
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -197,10 +198,10 @@ def api_psloglist():
 def api_psinfo():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_request(data)
     logger.info(f"Executing hardware and OS info query (WinRM) on {ip}.")
 
-    ps_command = """
+    ps_command = r"""
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
     $cs = Get-CimInstance -ClassName Win32_ComputerSystem
     $proc = Get-CimInstance -ClassName Win32_Processor
@@ -217,9 +218,9 @@ def api_psinfo():
     
     $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
         [pscustomobject]@{
-            Volume = $_.DriveLetter;
-            SizeGB = [math]::Round($_.Size / 1GB, 2);
-            FreeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
+            volume = $_.DriveLetter;
+            sizeGB = [math]::Round($_.Size / 1GB, 2);
+            freeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
         }
     }
 
