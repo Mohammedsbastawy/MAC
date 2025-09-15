@@ -669,6 +669,7 @@ def api_deploy_agent():
 
     logger.info(f"Starting agent deployment on {ip}.")
     agent_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'AtlasMonitorAgent.ps1'))
+    
     if not os.path.exists(agent_script_path):
         logger.error(f"Agent script not found at {agent_script_path}")
         return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
@@ -683,9 +684,10 @@ def api_deploy_agent():
     # --- Step 2: Copy the agent script using PsExec to run a copy command. ---
     logger.info(f"Step 2/3: Copying agent script to {ip}.")
     # This command uses the administrative share C$ to copy the file.
-    remote_path = f"\\\\{ip}\\C$\\Atlas\\AtlasMonitorAgent.ps1"
-    copy_command = f'copy "{agent_script_path}" "{remote_path}"'
-    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", copy_command], timeout=120)
+    # The source path must be a network-accessible path from the perspective of the target machine,
+    # OR we can use psexec's built-in copy. The latter is more reliable.
+    remote_path = f"C:\\Atlas\\AtlasMonitorAgent.ps1"
+    copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["-c", agent_script_path, remote_path], timeout=120)
     
     if copy_rc != 0:
         logger.error(f"Failed to copy script to {ip}: {copy_err}")
@@ -698,6 +700,7 @@ def api_deploy_agent():
     task_command_to_run = (
         'powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1'
     )
+    # Correctly quoting the command for schtasks
     task_command = (
         f'schtasks /create /tn "AtlasAgent" /tr "{task_command_to_run}" '
         f'/sc minute /mo 1 /f /ru "SYSTEM"'
@@ -713,5 +716,3 @@ def api_deploy_agent():
         "ok": True,
         "message": f"Agent deployed successfully on {ip}. It will start sending data within a minute."
     })
-
-    
