@@ -247,59 +247,78 @@ export default function MonitoringPage() {
     setIsRefreshing(true);
 
     try {
-      const res = await fetch("/api/network/check-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ips: ipsToCheck }),
-      });
-      const data = await res.json();
+        const res = await fetch("/api/network/check-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ips: ipsToCheck }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Status check failed");
 
-      if (!data.ok) throw new Error(data.error || "Status check failed");
-      
-      const onlineIps = new Set(data.online_ips);
-      const onlineDevices = devices.filter(d => onlineIps.has(d.ipAddress));
+        const onlineIps = new Set(data.online_ips);
+        
+        // Update status for all devices first
+        setDevices(prev => 
+            prev.map(d => ({
+                ...d,
+                status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
+                isLoadingDetails: onlineIps.has(d.ipAddress), // Set loading only for online devices
+                performance: undefined, // Clear old performance data
+            }))
+        );
 
-      setDevices(prev => prev.map(d => ({ ...d, status: onlineIps.has(d.ipAddress) ? 'online' : 'offline', isLoadingDetails: onlineIps.has(d.ipAddress) })));
+        const onlineDevices = devices.filter(d => onlineIps.has(d.ipAddress));
 
-      // Fetch performance data for online devices
-      const performancePromises = onlineDevices.map(device => 
-        fetch("/api/pstools/psinfo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ip: device.ipAddress }),
-        }).then(res => res.json())
-      );
+        // Sequentially fetch performance data for online devices
+        for (const device of onlineDevices) {
+            try {
+                const perfRes = await fetch("/api/pstools/psinfo", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ip: device.ipAddress }),
+                });
+                const result = await perfRes.json();
+                
+                let performanceData: PerformanceData | undefined = undefined;
+                if(result.ok && result.structured_data?.psinfo) {
+                     const info = result.structured_data.psinfo;
+                     performanceData = {
+                        cpuUsage: parseFloat(info.performance_info.find((p:any) => p.key === 'CPU Usage')?.value) || 0,
+                        totalMemoryGB: parseFloat(info.system_info.find((p:any) => p.key === 'Total Memory')?.value) || 0,
+                        usedMemoryGB: parseFloat(info.performance_info.find((p:any) => p.key === 'Used Memory')?.value) || 0,
+                        diskInfo: info.disk_info.map((disk:any) => ({
+                            volume: disk.volume,
+                            sizeGB: parseFloat(disk.size_gb) || 0,
+                            freeGB: parseFloat(disk.free_gb) || 0
+                        }))
+                    };
+                }
 
-      const results = await Promise.all(performancePromises);
-
-      setDevices(prev => 
-        prev.map((d, i) => {
-            const onlineDeviceIndex = onlineDevices.findIndex(od => od.id === d.id);
-            if (onlineDeviceIndex === -1) return { ...d, isLoadingDetails: false };
-
-            const result = results[onlineDeviceIndex];
-            let performanceData;
-            if(result.ok && result.structured_data?.psinfo) {
-                 const info = result.structured_data.psinfo;
-                 performanceData = {
-                    cpuUsage: parseFloat(info.performance_info.find((p:any) => p.key === 'CPU Usage')?.value) || 0,
-                    totalMemoryGB: parseFloat(info.system_info.find((p:any) => p.key === 'Total Memory')?.value) || 0,
-                    usedMemoryGB: parseFloat(info.performance_info.find((p:any) => p.key === 'Used Memory')?.value) || 0,
-                    diskInfo: info.disk_info.map((disk:any) => ({
-                        volume: disk.volume,
-                        sizeGB: parseFloat(disk.size_gb) || 0,
-                        freeGB: parseFloat(disk.free_gb) || 0
-                    }))
-                };
+                // Update state for this specific device
+                setDevices(prev => 
+                    prev.map(d => 
+                        d.id === device.id 
+                            ? { ...d, performance: performanceData, isLoadingDetails: false } 
+                            : d
+                    )
+                );
+            } catch (e) {
+                 // If a single device fails, mark it as not loading and continue
+                 setDevices(prev => 
+                    prev.map(d => 
+                        d.id === device.id 
+                            ? { ...d, isLoadingDetails: false } 
+                            : d
+                    )
+                );
+                 console.error(`Failed to fetch performance data for ${device.name}:`, e);
             }
-          
-            return { ...d, performance: performanceData, isLoadingDetails: false };
-        })
-      );
-
+        }
 
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error Refreshing Data", description: err.message });
+       // Ensure loading state is turned off for all devices on global failure
+       setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false })));
     } finally {
       setIsRefreshing(false);
     }
@@ -387,3 +406,6 @@ export default function MonitoringPage() {
     </div>
   );
 }
+
+
+    
