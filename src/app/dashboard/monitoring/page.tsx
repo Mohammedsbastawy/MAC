@@ -101,7 +101,7 @@ const MonitoringCard: React.FC<{
         <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {device.isFetching ? (
+        {device.isFetching && !device.performance ? (
             <div className="flex items-center justify-center h-48">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
@@ -298,14 +298,14 @@ export default function MonitoringPage() {
   };
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
-    // Don't set isFetching to true here to avoid the loading spinner on refresh
-    // setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
+    setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true } : d));
 
     const maxRetries = 2;
     let attempt = 0;
 
     while (attempt <= maxRetries) {
         if (signal.aborted) {
+            setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false } : d));
             return;
         }
         try {
@@ -376,14 +376,15 @@ export default function MonitoringPage() {
             setDevices(prevDevices => {
                 const newDeviceMap = new Map(data.devices.map((d: MonitoredDevice) => [d.id, d]));
                 // Preserve existing performance data during status-only refresh
-                return prevDevices.map(oldDevice => {
+                const updatedDevices = prevDevices.map(oldDevice => {
                     const newDevice = newDeviceMap.get(oldDevice.id);
                     if (newDevice) {
                         newDeviceMap.delete(oldDevice.id); // Remove from map to handle new devices later
-                        return { ...oldDevice, status: newDevice.status, isFetching: newDevice.status === 'online' && !oldDevice.performance };
+                        return { ...oldDevice, status: newDevice.status };
                     }
                     return oldDevice;
-                }).concat(Array.from(newDeviceMap.values())); // Add any completely new devices
+                });
+                 return updatedDevices.concat(Array.from(newDeviceMap.values()));
             });
             
             if (data.last_updated) {
@@ -396,7 +397,13 @@ export default function MonitoringPage() {
 
             const onlineDevices = data.devices.filter((d: MonitoredDevice) => d.status === 'online');
             onlineDevices.forEach((device: MonitoredDevice) => {
-                fetchDevicePerformance(device, signal);
+                 setDevices(prev => prev.map(d => {
+                     if (d.id === device.id && d.status === 'online' && !d.isFetching) {
+                        fetchDevicePerformance(d, signal);
+                        return { ...d, isFetching: true };
+                     }
+                     return d;
+                 }))
             });
 
         } else {
