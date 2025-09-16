@@ -106,7 +106,7 @@ export default function MonitoringPage() {
       const agentChecks = devicesToCheck.map(async (device) => {
         // We only check agent status for online devices
         if (device.status !== 'online') {
-            return null; // Return null to indicate no check was performed
+            return { id: device.id, isAgentDeployed: false };
         }
         try {
             const res = await fetch("/api/pstools/psinfo", {
@@ -121,13 +121,13 @@ export default function MonitoringPage() {
         }
       });
 
-      const results = await Promise.allSettled(agentChecks);
+      const results = await Promise.all(agentChecks);
       
       setDevices(prevDevices => {
           const newDevices = [...prevDevices];
           results.forEach(result => {
-              if (result.status === 'fulfilled' && result.value) {
-                  const { id, isAgentDeployed } = result.value;
+              if (result) {
+                  const { id, isAgentDeployed } = result;
                   const deviceIndex = newDevices.findIndex(d => d.id === id);
                   if (deviceIndex > -1) {
                       newDevices[deviceIndex].isAgentDeployed = isAgentDeployed;
@@ -157,26 +157,19 @@ export default function MonitoringPage() {
           if (!data.ok) throw new Error(data.error || "Status check failed on the server.");
           
           const onlineIps = new Set<string>(data.online_ips);
-          const onlineDevices: Device[] = [];
+          
+          const updatedDevices = deviceList.map(d => ({
+              ...d,
+              status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
+              isLoadingDetails: false
+          }));
 
-          setDevices(prev => {
-              const newDevices = prev.map(d => {
-                  const isOnline = onlineIps.has(d.ipAddress);
-                  const updatedDevice = {
-                    ...d,
-                    status: isOnline ? 'online' : 'offline',
-                    isLoadingDetails: false
-                  };
-                  if(isOnline) onlineDevices.push(updatedDevice);
-                  return updatedDevice;
-              });
-              
-              if(onlineDevices.length > 0) {
-                checkAgentStatus(onlineDevices);
-              }
-              
-              return newDevices;
-          });
+          setDevices(updatedDevices);
+          
+          const onlineDevices = updatedDevices.filter(d => d.status === 'online');
+          if(onlineDevices.length > 0) {
+            await checkAgentStatus(onlineDevices);
+          }
 
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
@@ -195,7 +188,7 @@ export default function MonitoringPage() {
         if (data.ok) {
             const adDevices = data.computers.map(mapAdComputerToDevice);
             setDevices(adDevices);
-            checkOnlineStatus(adDevices);
+            await checkOnlineStatus(adDevices);
         } else {
              setError({
                 title: data.error || "AD Error",
@@ -243,7 +236,7 @@ export default function MonitoringPage() {
   }
 
 
-  if (isLoading) {
+  if (isLoading && devices.length === 0) {
       return (
         <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -328,7 +321,7 @@ export default function MonitoringPage() {
                                      <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online'}>
                                         <ShieldCheck className="mr-2 h-4 w-4" /> Deploy Agent
                                     </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)}>
+                                    <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)} disabled={!device.isAgentDeployed}>
                                         View Dashboard <ChevronRight className="ml-2 h-4 w-4" />
                                     </Button>
                                 </TableCell>
