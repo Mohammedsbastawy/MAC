@@ -594,10 +594,3 @@ def fetch_live_data():
     except Exception as e:
         logger.error(f"Unexpected error in fetch_live_data for {device_id}: {e}", exc_info=True)
         return jsonify({"ok": False, "error": "An unexpected server error occurred."}), 500
-    
-
-    
-
-    
-
-```
