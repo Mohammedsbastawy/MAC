@@ -1,68 +1,84 @@
-# PowerShell Script to Install and Configure SNMP Service
-# Universal version for both Windows Client (10/11) and Server (2016+)
+# PowerShell Script to Configure (not install) SNMP Service
 # This script is intended to be run remotely via PsExec.
+# It assumes the SNMP Service Windows Feature/Capability is already installed.
 
-# --- Configuration ---
-$CommunityString = "public"
-# This placeholder will be replaced by the Python backend.
-$TrapDestination = "$env:ATLAS_SERVER_IP"
+param(
+    [string]$CommunityString = "public",
+    [string]$TrapDestination = "127.0.0.1"
+)
 
-# --- Script Body ---
 try {
-    # Step 1: Install SNMP Service using the modern, universal capability command
-    $snmpCapability = Get-WindowsCapability -Online -Name "SNMP.Client~~~~0.0.1.0"
-    if ($snmpCapability.State -ne 'Installed') {
-        Write-Host "SNMP feature not found. Installing..."
-        Add-WindowsCapability -Online -Name "SNMP.Client~~~~0.0.1.0"
-        Write-Host "SNMP feature installed via Add-WindowsCapability."
-    } else {
-        Write-Host "SNMP feature is already installed."
+    Write-Host "Starting SNMP configuration..."
+
+    # Step 1: Ensure SNMP Service is running and set to Automatic
+    try {
+        Set-Service -Name "SNMP" -StartupType Automatic -ErrorAction Stop
+        Start-Service -Name "SNMP" -ErrorAction SilentlyContinue # Start if not already running
+        Write-Host "SNMP service is running and set to automatic."
+    } catch {
+        Write-Error "Failed to set or start SNMP Service. Ensure the 'SNMP Service' feature is installed on the target machine. Error: $_"
+        exit 1
     }
 
-    # Step 2: Configure SNMP Service Registry Keys
-    Set-Service -Name "SNMP" -StartupType Automatic
+    # Step 2: Configure Registry for Community String and Trap Destination
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters"
     
-    # Set the community string with ReadOnly access (Value 4)
-    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\ValidCommunities"
-    if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force }
-    Set-ItemProperty -Path $regPath -Name $CommunityString -Value 4 -Type DWord -Force
+    # Community String (Value 4 means ReadOnly)
+    $validCommunitiesPath = Join-Path -Path $regPath -ChildPath "ValidCommunities"
+    if (!(Test-Path $validCommunitiesPath)) { New-Item -Path $validCommunitiesPath -Force }
+    Set-ItemProperty -Path $validCommunitiesPath -Name $CommunityString -Value 4 -Type DWord -Force
+    Write-Host "Set community string '$CommunityString'."
 
-    # Set the permitted managers (localhost and our server)
-    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\PermittedManagers"
-    if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force }
-    Set-ItemProperty -Path $regPath -Name "1" -Value "localhost" -Type String -Force
-    Set-ItemProperty -Path $regPath -Name "2" -Value $TrapDestination -Type String -Force
+    # Trap Destination
+    $trapConfigPath = Join-Path -Path $regPath -ChildPath "TrapConfiguration\$CommunityString"
+    if (!(Test-Path $trapConfigPath)) { New-Item -Path $trapConfigPath -Force }
+    Set-ItemProperty -Path $trapConfigPath -Name "1" -Value $TrapDestination -Type String -Force
+    Write-Host "Set trap destination to '$TrapDestination'."
 
-    # Step 3: Configure Trap Destination
-    $trapKey = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\TrapConfiguration\$CommunityString"
-    if (-not (Test-Path -Path $trapKey)) {
-        New-Item -Path $trapKey -Force
-    }
-    Set-ItemProperty -Path $trapKey -Name "1" -Value $TrapDestination -Type String -Force
-    
-    Write-Host "SNMP service configured to send traps to $TrapDestination with community '$CommunityString'."
-
-    # Step 4: Configure Windows Firewall
-    $ruleName = "SNMP Service (UDP-In)"
+    # Step 3: Ensure Firewall allows SNMP traffic
+    $ruleName = "SNMP"
     $firewallRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
     if (-not $firewallRule) {
         Write-Host "Firewall rule '$ruleName' not found. Creating..."
-        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol UDP -LocalPort 161, 162 -Action Allow -Profile Any
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol UDP -LocalPort 161 -Action Allow -Profile Any -ErrorAction Stop
     } else {
         Write-Host "Firewall rule '$ruleName' already exists. Ensuring it is enabled."
-        Enable-NetFirewallRule -DisplayName $ruleName
+        Enable-NetFirewallRule -DisplayName $ruleName -ErrorAction Stop
+    }
+    
+    # The Trap service rule
+    $trapRuleName = "SNMPTRAP"
+     $trapFirewallRule = Get-NetFirewallRule -DisplayName $trapRuleName -ErrorAction SilentlyContinue
+    if (-not $trapFirewallRule) {
+        Write-Host "Firewall rule '$trapRuleName' not found. Creating..."
+        New-NetFirewallRule -DisplayName $trapRuleName -Direction Inbound -Protocol UDP -LocalPort 162 -Action Allow -Profile Any -ErrorAction Stop
+    } else {
+        Write-Host "Firewall rule '$trapRuleName' already exists. Ensuring it is enabled."
+        Enable-NetFirewallRule -DisplayName $trapRuleName -ErrorAction Stop
     }
 
-    # Step 5: Restart the SNMP Service to apply changes
-    Write-Host "Restarting SNMP Service to apply all changes..."
+    # Step 4: Restart the SNMP Service to apply all registry changes
+    Write-Host "Restarting SNMP Service..."
     Restart-Service -Name "SNMP" -Force
 
+    # Step 5: Send a test trap to confirm connectivity
+    # This requires the 'trapgen.exe' utility, which should be available with SNMP.
+    try {
+        Write-Host "Sending a test trap to $TrapDestination..."
+        # Generic trap, enterprise OID, generic trap ID 6 (enterpriseSpecific), specific trap ID 1
+        trapgen -d $TrapDestination -c $CommunityString -g 6 -s 1 1.3.6.1.4.1.9999.1.0 ""
+        Write-Host "Test trap sent."
+    } catch {
+        Write-Warning "Could not send a test trap using 'trapgen.exe'. The utility might not be in the system's PATH. However, configuration may still be successful."
+    }
+
     Write-Host "SNMP configuration completed successfully."
-    exit 0
 
 } catch {
-    # Output error for debugging
-    $errorMessage = "An error occurred during SNMP configuration: $($_.Exception.Message)"
-    Write-Error $errorMessage
+    Write-Error "An error occurred during SNMP configuration: $_"
     exit 1
 }
+
+exit 0
+
+    

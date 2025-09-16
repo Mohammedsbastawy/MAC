@@ -3,6 +3,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -665,22 +666,29 @@ def api_enable_snmp():
     logger.info(f"Starting SNMP configuration on {ip} to send traps to {server_ip}.")
     
     try:
-        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'EnableSnmp.ps1'))
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
+        
         with open(script_path, 'r', encoding='utf-8') as f:
             script_content = f.read()
-    except FileNotFoundError:
-        logger.error(f"EnableSnmp.ps1 script not found at {script_path}")
-        return jsonify({"ok": False, "error": "EnableSnmp.ps1 script not found on the server."}), 500
+
+    except Exception as e:
+        logger.error(f"Error reading or finding SNMP script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
     
-    # Replace placeholder and encode
-    final_script = script_content.replace('$env:ATLAS_SERVER_IP', server_ip)
-    encoded_script = base64.b64encode(final_script.encode('utf-16-le')).decode('ascii')
+    # We will pass the server_ip as an argument to the script
+    # The script now uses param() block to accept it
+    ps_command_with_args = f"&{{ {script_content} -TrapDestination '{server_ip}' }}"
+    
+    encoded_script = base64.b64encode(ps_command_with_args.encode('utf-16-le')).decode('ascii')
     
     cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-    if rc == 0:
+    # PsExec often returns non-zero RC even on partial success or for verbose scripts.
+    # We check the output for a success message as a more reliable indicator.
+    if rc == 0 or "SNMP configuration completed successfully" in out:
         logger.info(f"SNMP configuration script executed successfully on {ip}.")
         return jsonify({
             "ok": True,
@@ -694,3 +702,5 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": err or out
         }), 500
+
+    
