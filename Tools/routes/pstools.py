@@ -5,6 +5,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -65,7 +66,7 @@ def get_auth_from_request(data):
 @pstools_bp.before_request
 def require_login_hook():
     # Allow access to psinfo from the monitoring page which may not have a body
-    if request.endpoint == 'pstools.api_psinfo' or request.endpoint == 'pstools.api_deploy_agent' or request.endpoint == 'pstools.api_enable_snmp':
+    if request.endpoint in ['pstools.api_psinfo', 'pstools.api_enable_snmp']:
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -671,7 +672,7 @@ def api_enable_snmp():
         script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
         
         with open(script_path, 'r', encoding='utf-8') as f:
-            script_content = f.read()
+            script_content_template = f.read()
 
     except Exception as e:
         logger.error(f"Error reading or finding SNMP script: {e}")
@@ -679,7 +680,7 @@ def api_enable_snmp():
     
     # We will pass the server_ip as a parameter to the script
     # This is a more robust way than replacing a placeholder.
-    ps_command_with_args = f"&{{ {script_content} -TrapDestination '{server_ip}' }}"
+    ps_command_with_args = f"&{{ {script_content_template} }} -TrapDestination '{server_ip}'"
     
     # Encode the entire command block for reliable execution via PsExec
     encoded_script = base64.b64encode(ps_command_with_args.encode('utf-16-le')).decode('ascii')
@@ -691,7 +692,7 @@ def api_enable_snmp():
     # Combine stdout and stderr for a complete log. PsExec often puts useful info in stderr.
     full_details = (out or "") + "\n" + (err or "")
 
-    if rc == 0 or "SNMP configuration completed successfully" in out:
+    if rc == 0:
         logger.info(f"SNMP configuration script executed successfully on {ip}.")
         return jsonify({
             "ok": True,
@@ -707,3 +708,4 @@ def api_enable_snmp():
         }), 500
 
     
+
