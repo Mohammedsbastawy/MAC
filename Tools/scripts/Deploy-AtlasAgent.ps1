@@ -1,89 +1,107 @@
-[CmdletBinding()]
-param (
-    [string]$DeviceName = (Get-CimInstance -ClassName Win32_ComputerSystem).Name
-)
+#Requires -RunAsAdministrator
+
+# This script deploys and configures the Atlas performance monitoring agent.
+# It creates a scheduled task that runs every minute to collect performance data.
+
+$ErrorActionPreference = 'Stop'
 
 try {
-    $TaskName = "AtlasPerfAgent"
-    $TaskDescription = "Collects performance data for the Atlas Control Panel."
+    # --- Configuration ---
+    $TaskName = "AtlasAgentPerfMonitor"
+    $TaskDescription = "Collects system performance data (CPU, Memory, Disk) for Atlas Control Panel."
     $AtlasDir = "C:\Atlas"
 
-    # Ensure the directory exists
-    if (-not (Test-Path -Path $AtlasDir)) {
-        New-Item -Path $AtlasDir -ItemType Directory -Force
-    }
-    
-    $OutputFile = Join-Path -Path $AtlasDir -ChildPath "$($DeviceName).json"
+    # Get the computer name to use in the output file
+    $DeviceName = $env:COMPUTERNAME
 
-    # Command to be run by the scheduled task. This entire block is converted to a string and encoded.
+    # --- Ensure Atlas Directory Exists ---
+    if (-not (Test-Path -Path $AtlasDir)) {
+        Write-Host "Creating directory: $AtlasDir"
+        New-Item -Path $AtlasDir -ItemType Directory -Force | Out-Null
+    }
+
+    # --- Define the command to be executed by the scheduled task ---
+    # This script block gathers performance data and writes it to a JSON file.
     $CommandToRun = {
+        # Suppress errors within the task itself to prevent it from failing silently
         $ErrorActionPreference = 'SilentlyContinue'
-        
-        # Get CPU Usage using a reliable method with retries
-        $CpuCounter = '\Processor(_Total)\% Processor Time'
-        $CpuSample = $null
-        $RetryCount = 0
-        while ($CpuSample -eq $null -and $RetryCount -lt 3) {
-            try {
-                $CpuSample = (Get-Counter -Counter $CpuCounter).CounterSamples.CookedValue
-            } catch {
-                Start-Sleep -Milliseconds 200
-            }
-            $RetryCount++
-        }
+
+        $DeviceName = $env:COMPUTERNAME
+        $OutputFile = "C:\Atlas\$($DeviceName).json"
+
+        # Get CPU Usage - More robust method
+        # This samples the processor usage over a brief period.
+        $CpuCounter = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -MaxSamples 2).CounterSamples | Select-Object -Last 1
+        $CpuUsage = if ($CpuCounter) { [math]::Round($CpuCounter.CookedValue, 2) } else { 0 }
 
         # Get Memory Info
-        $MemInfo = Get-CimInstance -ClassName Win32_OperatingSystem
-        $TotalMemoryGB = $MemInfo.TotalVisibleMemorySize / 1MB 
-        $UsedMemoryGB = ($MemInfo.TotalVisibleMemorySize - $MemInfo.FreePhysicalMemory) / 1MB
-
+        $MemoryInfo = Get-CimInstance -ClassName Win32_OperatingSystem
+        $TotalMemoryGB = [math]::Round($MemoryInfo.TotalVisibleMemorySize / 1MB, 2)
+        $UsedMemoryGB = [math]::Round(($MemoryInfo.TotalVisibleMemorySize - $MemoryInfo.FreePhysicalMemory) / 1MB, 2)
+        
         # Get Disk Info for all fixed disks
-        $Disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter } | ForEach-Object {
+        $DiskInfo = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and -not [string]::IsNullOrWhiteSpace($_.DriveLetter) } | ForEach-Object {
             @{
-                volume = $_.DriveLetter;
-                totalSizeGB = [math]::Round($_.Size / 1GB, 2);
-                freeSpaceGB = [math]::Round($_.SizeRemaining / 1GB, 2);
+                volume = "$($_.DriveLetter):";
+                sizeGB = [math]::Round($_.Size / 1GB, 2);
+                freeGB = [math]::Round($_.SizeRemaining / 1GB, 2)
             }
         }
 
-        # Create the final object
-        $PerfData = @{
-            timestamp = (Get-Date).ToUniversalTime().ToString('o');
-            cpuUsage = [math]::Round($CpuSample, 2);
-            totalMemoryGB = [math]::Round($TotalMemoryGB, 2);
-            usedMemoryGB = [math]::Round($UsedMemoryGB, 2);
-            diskInfo = $Disks;
+        # Create the final data object
+        $PerformanceData = @{
+            timestamp = [datetime]::UtcNow.ToString("o"); # ISO 8601 format
+            cpuUsage = $CpuUsage;
+            totalMemoryGB = $TotalMemoryGB;
+            usedMemoryGB = $UsedMemoryGB;
+            diskInfo = $DiskInfo;
         }
 
-        # Write to JSON file
-        $PerfData | ConvertTo-Json -Compress | Out-File -FilePath $using:OutputFile -Encoding utf8 -Force
+        # Convert to JSON and write to file
+        $PerformanceData | ConvertTo-Json -Compress | Out-File -FilePath $OutputFile -Encoding utf8 -Force
     }
 
-    # *** CRITICAL FIX: Convert the script block to a string before encoding ***
+    # --- Immediate Execution ---
+    # Run the command once immediately to create the file and confirm the script works.
+    Write-Host "Performing initial data collection..."
+    Invoke-Command -ScriptBlock $CommandToRun
+    Write-Host "Initial data file created successfully."
+
+
+    # --- Scheduled Task Creation ---
+
+    # Convert the script block to a string correctly and then encode it for the task argument
+    # We get the string content of the script block, not the block itself.
     $CommandString = $CommandToRun.ToString()
     $EncodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($CommandString))
 
     # Define the action for the scheduled task
-    $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $EncodedCommand"
-    
-    # Define the trigger (runs every minute)
+    # This runs PowerShell without a profile, in a hidden window, executing the encoded command.
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $EncodedCommand"
+
+    # Define the trigger: Run every 1 minute indefinitely
     $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration ([TimeSpan]::MaxValue)
-    
-    # Define the principal
+
+    # Define the principal (who runs the task) - SYSTEM for reliability
     $TaskPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    
-    # Define the settings
+
+    # Define task settings
     $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
 
-    # Register the task, overwriting if it exists
+    # Unregister any existing task with the same name to ensure a clean slate
+    Write-Host "Unregistering any existing task..."
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+
+    # Register the new scheduled task
+    Write-Host "Registering the new scheduled task..."
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $TaskPrincipal -Settings $TaskSettings -Description $TaskDescription -Force
-    
-    # Output success message
+
     Write-Host "Atlas Agent scheduled task has been created/updated successfully."
+    # Optional: Display task info for verification
+    Get-ScheduledTask -TaskName $TaskName
 
 } catch {
-    # If any unhandled error occurs, write it to stderr and exit with a non-zero code
-    $ErrorMessage = "An error occurred: $($_.Exception.Message)"
-    $PSCmdlet.WriteError($ErrorMessage)
+    Write-Error "Agent deployment failed: $_"
+    # Exit with a non-zero status code to indicate failure to PsExec
     exit 1
 }
