@@ -57,20 +57,20 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    # Allow body-less requests for specific endpoints by checking session auth
-    bodyless_endpoints = ['pstools.api_deploy_agent']
-    if request.endpoint in bodyless_endpoints:
+    # Special handling for endpoints that might not have a body and rely on session
+    endpoints_without_body = ['pstools.api_deploy_agent', 'pstools.api_enable_snmp']
+    if request.endpoint in endpoints_without_body:
         if 'user' not in session:
             return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return # Proceed
-        
+        return  # Proceed with session auth
+
+    # For all other endpoints, try to get JSON, but fall back to session if no JSON body exists
     data = request.get_json(silent=True)
     if data is None:
         if 'user' not in session:
             return jsonify({'ok': False, 'error': 'Request is missing a body, and no active session was found.'}), 401
         return # Proceed with session auth
-
-    # If body exists, validate credentials from it or session
+        
     user, _, _, _ = get_auth_from_request(data)
     if not user:
         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
@@ -660,7 +660,10 @@ def api_deploy_agent():
     ip = data.get("ip")
     device_name = data.get("name")
     
-    user, domain, pwd, _ = get_auth_from_request(data)
+    # Get auth from session, NOT from the request body for this endpoint
+    user = session.get("user")
+    domain = session.get("domain")
+    pwd = session.get("password")
 
     if not all([ip, device_name, user, domain, pwd]):
         return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
@@ -761,5 +764,6 @@ def api_enable_snmp():
     
 
     
+
 
 
