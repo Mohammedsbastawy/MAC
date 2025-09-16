@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -104,7 +105,86 @@ export default function MonitoringPage() {
   const [isConfiguringSnmp, setIsConfiguringSnmp] = React.useState(false);
   const [snmpLog, setSnmpLog] = React.useState("");
 
-  const fetchAllDevices = async () => {
+  const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]) => {
+      setDevices(prev => prev.map(d => ({ ...d, isAgentDeployed: false })));
+
+      const agentChecks = devicesToCheck.map(async (device) => {
+        if (device.status !== 'online') return { id: device.id, isAgentDeployed: false };
+        const res = await fetch("/api/pstools/psinfo", {
+          method: "POST",
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: device.ipAddress, name: device.name })
+        });
+        const data = await res.json();
+        return { id: device.id, isAgentDeployed: data.ok };
+      });
+
+      const results = await Promise.allSettled(agentChecks);
+      
+      setDevices(prevDevices => {
+          const updatedDevices = [...prevDevices];
+          results.forEach(result => {
+              if (result.status === 'fulfilled') {
+                  const { id, isAgentDeployed } = result.value;
+                  const deviceIndex = updatedDevices.findIndex(d => d.id === id);
+                  if (deviceIndex > -1) {
+                      updatedDevices[deviceIndex].isAgentDeployed = isAgentDeployed;
+                  }
+              }
+          });
+          return updatedDevices;
+      });
+  }, []);
+
+  const checkOnlineStatus = React.useCallback(async (deviceList: Device[]) => {
+      const ipsToCheck = deviceList.map(d => d.ipAddress).filter(Boolean);
+      if (ipsToCheck.length === 0) {
+        setIsLoading(false);
+        return;
+      };
+
+      setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true, status: 'unknown' })));
+
+      try {
+          const res = await fetch("/api/network/check-status", {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ips: ipsToCheck })
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Status check failed on the server.");
+          
+          const onlineIps = new Set<string>(data.online_ips);
+          const onlineDevices: Device[] = [];
+
+          setDevices(prev => {
+              const newDevices = prev.map(d => {
+                  const isOnline = onlineIps.has(d.ipAddress);
+                  if(isOnline) onlineDevices.push(d);
+                  return {
+                    ...d,
+                    status: isOnline ? 'online' : 'offline',
+                    isLoadingDetails: false
+                  }
+              });
+              
+              if(onlineDevices.length > 0) {
+                // Fire and forget agent status check
+                checkAgentStatus(onlineDevices);
+              }
+              
+              return newDevices;
+          });
+
+      } catch (err: any) {
+          toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
+           setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false, status: 'unknown' })));
+      } finally {
+        setIsLoading(false);
+      }
+  }, [toast, checkAgentStatus]);
+
+  const fetchAllDevices = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -120,46 +200,18 @@ export default function MonitoringPage() {
                 message: data.message || `Failed to fetch devices from Active Directory.`,
                 details: data.details,
             });
+             setIsLoading(false);
         }
     } catch (err) {
         setError({ title: "Server Error", message: "Failed to connect to the server to get devices." });
+        setIsLoading(false);
     }
-    setIsLoading(false);
-  };
+  }, [checkOnlineStatus]);
 
   React.useEffect(() => {
     fetchAllDevices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const checkOnlineStatus = async (deviceList: Device[]) => {
-      const ipsToCheck = deviceList.map(d => d.ipAddress).filter(Boolean);
-      if (ipsToCheck.length === 0) return;
-
-      setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true, status: 'unknown' })));
-
-      try {
-          const res = await fetch("/api/network/check-status", {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ips: ipsToCheck })
-          });
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error || "Status check failed on the server.");
-          
-          const onlineIps = new Set<string>(data.online_ips);
-
-           setDevices(prev => prev.map(d => ({
-              ...d,
-              status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-              isLoadingDetails: false
-          })));
-
-      } catch (err: any) {
-          toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
-           setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false, status: 'unknown' })));
-      }
-  };
 
   const handleDeployAgent = async () => {
     if (!deploymentState.device) return;

@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import * as React from "react";
@@ -55,9 +56,10 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         });
         const data = await res.json();
         if (data.ok) {
-          const formattedHistory = data.history.map((item: any) => ({
+          const sortedHistory = data.history.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          const formattedHistory = sortedHistory.map((item: any) => ({
              ...item,
-             timestamp: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+             displayTime: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
              cpuUsage: parseFloat(item.cpuUsage?.toFixed(2) || 0),
              usedMemoryGB: parseFloat(item.usedMemoryGB?.toFixed(2) || 0),
           }));
@@ -159,14 +161,19 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 <AreaChart data={history} margin={{ left: 12, right: 12 }}>
                   <CartesianGrid vertical={false} />
                   <XAxis
-                    dataKey="timestamp"
+                    dataKey="displayTime"
                     tickLine={false}
                     axisLine={false}
                     tickMargin={8}
-                    tickFormatter={(value) => value.slice(0, 5)}
                   />
                   <YAxis domain={yAxisDomain} tickLine={false} axisLine={false} />
-                  <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+                  <ChartTooltip
+                    cursor={false}
+                    content={<ChartTooltipContent labelFormatter={(value, payload) => {
+                      const data = payload[0]?.payload;
+                      return data ? new Date(data.timestamp).toLocaleString() : value;
+                    }} />}
+                  />
                   <defs>
                       <linearGradient id="fillCpu" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="var(--color-cpu)" stopOpacity={0.8} />
@@ -196,15 +203,20 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
               <ChartContainer config={chartConfig} className="h-[250px] w-full">
                 <AreaChart data={history} margin={{ left: 12, right: 12 }}>
                   <CartesianGrid vertical={false} />
-                  <XAxis
-                    dataKey="timestamp"
+                   <XAxis
+                    dataKey="displayTime"
                     tickLine={false}
                     axisLine={false}
                     tickMargin={8}
-                    tickFormatter={(value) => value.slice(0, 5)}
                   />
                   <YAxis tickLine={false} axisLine={false}/>
-                   <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+                   <ChartTooltip
+                    cursor={false}
+                    content={<ChartTooltipContent labelFormatter={(value, payload) => {
+                      const data = payload[0]?.payload;
+                      return data ? new Date(data.timestamp).toLocaleString() : value;
+                    }} />}
+                  />
                    <defs>
                       <linearGradient id="fillMemory" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="var(--color-memory)" stopOpacity={0.8} />
