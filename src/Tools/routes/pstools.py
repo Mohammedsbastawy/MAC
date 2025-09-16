@@ -6,6 +6,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -670,29 +671,30 @@ def api_enable_snmp():
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
-        
+
+        # Read the script content and pass it as a command
+        # This avoids issues with file paths and placeholders
         with open(script_path, 'r', encoding='utf-8') as f:
             script_content = f.read()
 
     except Exception as e:
         logger.error(f"Error reading or finding SNMP script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
+
+    # The script is now parameterized. We pass the server_ip as an argument.
+    # We use -File to execute the script and pass arguments to it.
+    # To do this remotely and reliably with PsExec, we encode the command.
+    command_block = f"& '{script_path}' -TrapDestination '{server_ip}'"
+    encoded_command = base64.b64encode(command_block.encode('utf-16-le')).decode('ascii')
     
-    # We will pass the server_ip as a parameter to the script
-    # This is a more robust way than replacing a placeholder.
-    final_script = script_content.replace('$SERVER_IP_PLACEHOLDER$', server_ip)
-    
-    # Encode the entire command block for reliable execution via PsExec
-    encoded_script = base64.b64encode(final_script.encode('utf-16-le')).decode('ascii')
-    
-    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_command]
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
     # Combine stdout and stderr for a complete log. PsExec often puts useful info in stderr.
     full_details = (out or "") + "\n" + (err or "")
 
-    if rc == 0 or "SNMP configuration completed successfully" in out:
+    if rc == 0:
         logger.info(f"SNMP configuration script executed successfully on {ip}.")
         return jsonify({
             "ok": True,

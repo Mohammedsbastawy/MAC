@@ -1,84 +1,78 @@
-# PowerShell Script to Configure SNMP Service
-# This script is intended to be run remotely via PsExec.
+# PowerShell Script to Install and Configure SNMP Service
+# This script is universal and works on both Windows Client and Server editions.
+# It accepts a mandatory parameter for the trap destination.
 
-# --- Configuration ---
 param(
-    [string]$TrapDestination = "127.0.0.1"
+    [Parameter(Mandatory=$true)]
+    [string]$TrapDestination
 )
-$CommunityString = "public"
 
-# --- Script Body ---
 try {
-    $ErrorActionPreference = "Stop"
+    Write-Host "Step 1: Checking/Installing SNMP Service..." -ForegroundColor Yellow
     
-    # Step 1: Ensure SNMP Service and Trap service are installed and running
-    Write-Host "Step 1: Checking for SNMP Service..."
-    $snmpService = Get-Service -Name "SNMP" -ErrorAction SilentlyContinue
-    if (!$snmpService) {
-        throw "SNMP Service is not installed. Please install it via 'Windows Features' on the target machine before running this script."
+    # Check if SNMP is installed using the modern capability model
+    $snmpCapability = Get-WindowsCapability -Online -Name "SNMP.Client*" | Where-Object { $_.Name -like "SNMP.Client*" }
+    
+    if ($snmpCapability.State -ne 'Installed') {
+        Write-Host " - SNMP is not installed. Attempting installation..."
+        Add-WindowsCapability -Online -Name $snmpCapability.Name
+        Write-Host " - SNMP feature installed successfully." -ForegroundColor Green
+    } else {
+        Write-Host " - SNMP Service is already installed."
     }
-    Write-Host "SNMP Service is installed."
-    
-    Write-Host "Ensuring SNMP Service is set to Automatic and started..."
+
+    # Step 2: Configure and Start Services
+    Write-Host "Step 2: Configuring and starting services..." -ForegroundColor Yellow
     Set-Service -Name "SNMP" -StartupType Automatic
     Start-Service -Name "SNMP"
-    
-    Write-Host "Ensuring SNMP Trap Service is set to Automatic and started..."
     Set-Service -Name "SNMPTrap" -StartupType Automatic
     Start-Service -Name "SNMPTrap"
-    Write-Host "Services are configured and running."
+    Write-Host " - SNMP and SNMPTrap services are running and set to Automatic." -ForegroundColor Green
+
+
+    # Step 3: Configure Registry for Traps
+    Write-Host "Step 3: Configuring SNMP registry settings..." -ForegroundColor Yellow
+    $CommunityString = "public"
     
-    # Step 2: Configure SNMP Service Registry
-    Write-Host "Step 2: Configuring SNMP registry settings..."
-    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters"
-    
-    # Set Community String
-    $communityPath = Join-Path -Path $regPath -ChildPath "ValidCommunities"
-    if (!(Test-Path $communityPath)) { New-Item -Path $communityPath -Force | Out-Null }
-    Set-ItemProperty -Path $communityPath -Name $CommunityString -Value 4 # 4 = ReadOnly
+    # Define registry paths
+    $validCommunitiesPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\ValidCommunities"
+    $trapConfigPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\TrapConfiguration\$CommunityString"
+
+    # Set ReadOnly community string
+    Set-ItemProperty -Path $validCommunitiesPath -Name $CommunityString -Value 4 -ErrorAction Stop
     Write-Host " - Community string '$CommunityString' set to ReadOnly."
 
-    # Set Trap Destination
-    $trapConfigPath = Join-Path -Path $regPath -ChildPath "TrapConfiguration\$CommunityString"
-    if (!(Test-Path $trapConfigPath)) { New-Item -Path $trapConfigPath -Force | Out-Null }
-    Set-ItemProperty -Path $trapConfigPath -Name "1" -Value $TrapDestination
-    Write-Host " - Trap destination set to '$TrapDestination'."
+    # Create TrapConfiguration key if it doesn't exist
+    if (-not (Test-Path -Path $trapConfigPath)) {
+        New-Item -Path $trapConfigPath -Force | Out-Null
+    }
+    
+    # Set the trap destination from the script parameter
+    Set-ItemProperty -Path $trapConfigPath -Name "1" -Value $TrapDestination -ErrorAction Stop
+    Write-Host " - Trap destination set to '$TrapDestination'." -ForegroundColor Green
 
-    # Step 3: Configure Windows Firewall
-    Write-Host "Step 3: Configuring Windows Firewall..."
+    # Step 4: Configure Firewall
+    Write-Host "Step 4: Configuring Windows Firewall..." -ForegroundColor Yellow
     $ruleName = "SNMP Traps (UDP-Out)"
     $firewallRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-    
-    if (!$firewallRule) {
+
+    if (-not $firewallRule) {
         Write-Host " - Firewall rule '$ruleName' not found. Creating..."
         New-NetFirewallRule -DisplayName $ruleName -Direction Outbound -Protocol UDP -RemotePort 162 -Action Allow
     } else {
-        Write-Host " - Firewall rule '$ruleName' already exists. Ensuring it is enabled."
+        Write-Host " - Firewall rule '$ruleName' already exists. Ensuring it's enabled."
         Enable-NetFirewallRule -DisplayName $ruleName
     }
-    Write-Host "Firewall configured."
-    
-    # Step 4: Send a test trap
-    Write-Host "Step 4: Sending a test trap to confirm configuration..."
-    try {
-        # Check for trapgen.exe
-        $trapgenPath = Join-Path -Path $env:SystemRoot -ChildPath "System32\trapgen.exe"
-        if (Test-Path $trapgenPath) {
-            trapgen -d $TrapDestination -c $CommunityString -g 6 -s 1 -o 1.3.6.1.4.1 -t 60
-            Write-Host " - Test trap sent successfully via trapgen.exe."
-        } else {
-            Write-Warning " - trapgen.exe not found. Cannot send a test trap. Configuration is likely complete, but cannot be verified automatically."
-        }
-    } catch {
-        Write-Warning " - Could not send a test trap: $($_.Exception.Message)"
-    }
+    Write-Host " - Firewall configured." -ForegroundColor Green
 
-    Write-Host "SNMP configuration completed successfully."
+    # Step 5: Restart Service to apply all changes and trigger an initial trap
+    Write-Host "Step 5: Restarting SNMP service to apply settings and send a test trap..." -ForegroundColor Yellow
+    Restart-Service -Name "SNMP" -Force
+    
+    Write-Host "SNMP configuration completed successfully." -ForegroundColor Green
     exit 0
 
 } catch {
-    # Output error for debugging
-    $errorMessage = "An error occurred during SNMP configuration: $($_.Exception.Message)"
-    Write-Error $errorMessage
+    Write-Error "An error occurred during SNMP configuration: $_"
     exit 1
 }
