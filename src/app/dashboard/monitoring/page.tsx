@@ -103,10 +103,12 @@ export default function MonitoringPage() {
   const [deploymentLog, setDeploymentLog] = React.useState("");
   
   const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]) => {
-      setDevices(prev => prev.map(d => ({ ...d, isAgentDeployed: false })));
-
+      // This function now only updates, it doesn't reset.
       const agentChecks = devicesToCheck.map(async (device) => {
-        if (device.status !== 'online') return { id: device.id, isAgentDeployed: false };
+        if (device.status !== 'online') {
+            // Return null if we don't need to check, so we can filter it out.
+            return null;
+        }
         const res = await fetch("/api/pstools/psinfo", {
           method: "POST",
           headers: { 'Content-Type': 'application/json' },
@@ -121,7 +123,7 @@ export default function MonitoringPage() {
       setDevices(prevDevices => {
           const updatedDevices = [...prevDevices];
           results.forEach(result => {
-              if (result.status === 'fulfilled') {
+              if (result.status === 'fulfilled' && result.value) {
                   const { id, isAgentDeployed } = result.value;
                   const deviceIndex = updatedDevices.findIndex(d => d.id === id);
                   if (deviceIndex > -1) {
@@ -378,8 +380,3 @@ export default function MonitoringPage() {
     </>
   );
 }
-
-    
-
-    
-
