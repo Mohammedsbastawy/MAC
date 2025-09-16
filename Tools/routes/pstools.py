@@ -65,6 +65,8 @@ def require_login_hook():
         
     data = request.get_json(silent=True)
     if data is None:
+        # If there's no JSON body, we allow it to proceed but auth must be checked in the route
+        # using session if needed. This is a failsafe.
         if 'user' not in session:
             return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -657,10 +659,14 @@ def api_deploy_agent():
     data = request.get_json() or {}
     ip = data.get("ip")
     device_name = data.get("name")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    
+    # Correctly get auth from session for body-less requests
+    user = session.get("user")
+    domain = session.get("domain")
+    pwd = session.get("password")
 
-    if not ip or not device_name:
-        return jsonify({"ok": False, "error": "Target IP and Device Name are required."}), 400
+    if not all([ip, device_name, user, domain, pwd]):
+        return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
 
     logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
     
@@ -678,7 +684,7 @@ def api_deploy_agent():
         logger.error(f"An unexpected error occurred while reading the agent script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
     
-    # Encode the modified script for -EncodedCommand
+    # Encode the script for -EncodedCommand
     encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
     
     # Correctly build the command to run PowerShell hidden
