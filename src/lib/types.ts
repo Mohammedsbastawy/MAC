@@ -13,7 +13,6 @@ export type Device = {
   source: 'ad' | 'scan';
 };
 
-// This type is deprecated as we move to SNMP. Kept for reference.
 export type PerformanceData = {
   cpuUsage: number;
   totalMemoryGB: number;
@@ -23,9 +22,9 @@ export type PerformanceData = {
     sizeGB: number;
     freeGB: number;
   }[];
+  timestamp: string;
 };
 
-// This type is deprecated as we move to SNMP. Kept for reference.
 export type MonitoredDevice = {
     id: string;
     name: string;
