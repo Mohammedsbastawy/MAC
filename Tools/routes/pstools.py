@@ -1,5 +1,6 @@
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -662,7 +663,6 @@ def api_set_network_private():
 def api_deploy_agent():
     data = request.get_json() or {}
     ip = data.get("ip")
-    # The device name is needed to construct the final JSON file path
     device_name = data.get("name")
     user, domain, pwd, _ = get_auth_from_request(data)
     
@@ -677,15 +677,15 @@ def api_deploy_agent():
         return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
 
     # --- Step 1: Create C:\Atlas folder ---
-    logger.info(f"Step 1/3: Creating C:\\Atlas directory on {ip}.")
+    logger.info(f"Step 1/2: Creating C:\\Atlas directory on {ip}.")
     mkdir_rc, _, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
-    # Gracefully handle the error if the directory already exists
+    # Gracefully handle the error if the directory already exists (error code 1 for mkdir)
     if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
         logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
         return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err}), 500
 
-    # --- Step 2: Read script content, encode it, and create it on the remote machine ---
-    logger.info(f"Step 2/3: Copying agent script to {ip} via remote file creation.")
+    # --- Step 2: Copy and Execute the self-installing script ---
+    logger.info(f"Step 2/2: Copying and executing the agent script on {ip}.")
     try:
         with open(agent_script_path, 'r', encoding='utf-8') as f:
             script_content = f.read()
@@ -694,53 +694,26 @@ def api_deploy_agent():
         # The script must be encoded in UTF-16LE for PowerShell's -EncodedCommand
         encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
         
-        # This PowerShell command decodes the Base64 string and writes it to a file.
-        ps_command_to_create_file = f"[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('{encoded_script}')) | Out-File -FilePath C:\\Atlas\\AtlasMonitorAgent.ps1 -Encoding utf8 -Force"
+        # The command to be executed remotely.
+        # It decodes the Base64 string and pipes it directly into PowerShell for execution.
+        # This single command copies AND runs the script.
+        ps_command_to_run = f"[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('{encoded_script}')) | powershell.exe -NoProfile -"
         
         # We need to encode the command itself to pass it to powershell.exe -EncodedCommand
-        encoded_ps_command = base64.b64encode(ps_command_to_create_file.encode('utf-16-le')).decode('ascii')
+        encoded_ps_command = base64.b64encode(ps_command_to_run.encode('utf-16-le')).decode('ascii')
 
-        copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["powershell.exe", "-EncodedCommand", encoded_ps_command], timeout=120)
+        copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["powershell.exe", "-EncodedCommand", encoded_ps_command], timeout=180)
 
         if copy_rc != 0:
-            logger.error(f"Failed to create script file on {ip}: {copy_err} {copy_out}")
-            return jsonify({"ok": False, "error": "Failed to copy agent script.", "details": f"{copy_err} {copy_out}"}), 500
+            logger.error(f"Failed to execute agent script on {ip}: {copy_err} {copy_out}")
+            return jsonify({"ok": False, "error": "Failed to execute agent script remotely.", "details": f"{copy_err} {copy_out}"}), 500
 
     except Exception as e:
         logger.error(f"Error reading or encoding agent script: {e}")
         return jsonify({"ok": False, "error": "Server-side error reading the agent script."}), 500
 
-    # --- Step 3: Create the scheduled task ---
-    logger.info(f"Step 3/3: Creating scheduled task on {ip}.")
-    
-    # This is the command that the task scheduler will run. It must be properly quoted.
-    task_command_to_run = f"powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\\Atlas\\AtlasMonitorAgent.ps1"
-    
-    schtasks_command = [
-        "schtasks", "/create", 
-        "/tn", "AtlasAgent", 
-        "/tr", task_command_to_run,
-        "/sc", "minute", 
-        "/mo", "1", 
-        "/f", 
-        "/ru", "SYSTEM"
-    ]
-    
-    task_rc, task_out, task_err = run_ps_command("psexec", ip, user, domain, pwd, schtasks_command, timeout=120)
-    
-    if task_rc != 0:
-        logger.error(f"Failed to create scheduled task on {ip}: {task_err} {task_out}")
-        return jsonify({"ok": False, "error": "Failed to create scheduled task.", "details": f"{task_err} {task_out}"}), 500
-        
-    # --- Step 4: Run the task for the first time ---
-    logger.info(f"Step 4/4: Running the task for the first time on {ip}.")
-    run_task_rc, _, run_task_err = run_ps_command("psexec", ip, user, domain, pwd, ["schtasks", "/run", "/tn", "AtlasAgent"], timeout=60)
-    if run_task_rc != 0:
-        # This is not a critical failure, so we just log a warning.
-        logger.warning(f"Could not run the scheduled task immediately on {ip}. It will run on its next scheduled interval. Error: {run_task_err}")
-
-    logger.info(f"Agent deployment successful on {ip}.")
+    logger.info(f"Agent deployment script executed successfully on {ip}.")
     return jsonify({
         "ok": True,
-        "message": f"Agent deployed successfully on {ip}. It will start sending data within a minute."
+        "message": f"Agent deployment initiated successfully on {ip}. The first data report should be available within a minute."
     })
