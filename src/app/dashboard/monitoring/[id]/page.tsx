@@ -21,6 +21,7 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import type { PerformanceData } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 
 
 const chartConfig = {
@@ -39,25 +40,12 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [deviceName, setDeviceName] = React.useState('');
+  const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
 
   const deviceId = decodeURIComponent(params.id);
 
-  React.useEffect(() => {
-    // Extract device name from DN for display
-    try {
-        const nameMatch = deviceId.match(/CN=([^,]+)/);
-        if(nameMatch && nameMatch[1]) {
-            setDeviceName(nameMatch[1]);
-        }
-    } catch(e) {
-        // fallback
-        setDeviceName(deviceId);
-    }
-  }, [deviceId]);
-
-  React.useEffect(() => {
-    const fetchHistory = async () => {
-      setIsLoading(true);
+  const fetchHistory = React.useCallback(async (isInitialLoad = false) => {
+      if (isInitialLoad) setIsLoading(true);
       setError(null);
       try {
         const res = await fetch("/api/network/get-historical-data", {
@@ -80,28 +68,63 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       } catch (err) {
         setError("An error occurred while fetching data from the server.");
       } finally {
-        setIsLoading(false);
+        if (isInitialLoad) setIsLoading(false);
       }
-    };
-
-    fetchHistory();
   }, [deviceId]);
+
+
+  React.useEffect(() => {
+    // Extract device name from DN for display
+    try {
+        const nameMatch = deviceId.match(/CN=([^,]+)/);
+        if(nameMatch && nameMatch[1]) {
+            setDeviceName(nameMatch[1]);
+        }
+    } catch(e) {
+        // fallback
+        setDeviceName(deviceId);
+    }
+  }, [deviceId]);
+
+  React.useEffect(() => {
+    fetchHistory(true);
+  }, [fetchHistory]);
+
+  React.useEffect(() => {
+    if (isAutoRefresh) {
+        const intervalId = setInterval(() => {
+            fetchHistory(false);
+        }, 5000); // Refresh every 5 seconds
+        return () => clearInterval(intervalId);
+    }
+  }, [isAutoRefresh, fetchHistory]);
 
   const yAxisDomain = [0, 100];
 
   return (
     <div className="space-y-6">
-        <div className="flex items-center gap-4">
-            <Button asChild variant="outline" size="icon">
-                <Link href="/dashboard/monitoring"><ArrowLeft /></Link>
-            </Button>
-            <div>
-                <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">
-                    Monitoring Dashboard
-                </h1>
-                <p className="text-muted-foreground">
-                    Live performance data for <span className="font-semibold text-primary">{deviceName}</span>
-                </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+                <Button asChild variant="outline" size="icon">
+                    <Link href="/dashboard/monitoring"><ArrowLeft /></Link>
+                </Button>
+                <div>
+                    <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">
+                        Monitoring Dashboard
+                    </h1>
+                    <p className="text-muted-foreground">
+                        Live performance data for <span className="font-semibold text-primary">{deviceName}</span>
+                    </p>
+                </div>
+            </div>
+             <div className="flex items-center gap-2">
+                <div className={cn("w-3 h-3 rounded-full animate-pulse", isAutoRefresh ? 'bg-green-500' : 'bg-yellow-500')} />
+                <span className="text-sm text-muted-foreground">
+                        {isAutoRefresh ? "Live" : "Paused"}
+                </span>
+                <Button variant="outline" size="sm" onClick={() => setIsAutoRefresh(!isAutoRefresh)} className="ml-4">
+                    {isAutoRefresh ? "Pause Refresh" : "Resume Refresh"}
+                </Button>
             </div>
         </div>
 
