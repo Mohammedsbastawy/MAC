@@ -216,7 +216,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                        return index % Math.ceil(history.length / 10) === 0 ? value : '';
                     }}
                   />
-                  <YAxis tickLine={false} axisLine={false} domain={['dataMin', 'dataMax']}/>
+                  <YAxis tickLine={false} axisLine={false} domain={['auto', 'auto']}/>
                    <ChartTooltip
                     cursor={false}
                     content={<ChartTooltipContent labelFormatter={(value, payload) => {
@@ -249,7 +249,3 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 };
 
 export default DeviceDashboardPage;
-
-    
-
-    
