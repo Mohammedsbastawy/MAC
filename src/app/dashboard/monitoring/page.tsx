@@ -142,7 +142,7 @@ export default function MonitoringPage() {
       const ipsToCheck = deviceList.map(d => d.ipAddress).filter(Boolean);
       if (ipsToCheck.length === 0) {
         setIsLoading(false);
-        return;
+        return deviceList; // Return original list if nothing to check
       };
 
       setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true, status: 'unknown' })));
@@ -165,19 +165,14 @@ export default function MonitoringPage() {
           }));
 
           setDevices(updatedDevices);
-          
-          const onlineDevices = updatedDevices.filter(d => d.status === 'online');
-          if(onlineDevices.length > 0) {
-            await checkAgentStatus(onlineDevices);
-          }
+          return updatedDevices; // Return the updated list
 
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
            setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false, status: 'unknown' })));
-      } finally {
-        setIsLoading(false);
+           return deviceList; // Return original list on error
       }
-  }, [toast, checkAgentStatus]);
+  }, [toast]);
 
   const fetchAllDevices = React.useCallback(async () => {
     setIsLoading(true);
@@ -187,21 +182,25 @@ export default function MonitoringPage() {
         const data = await response.json();
         if (data.ok) {
             const adDevices = data.computers.map(mapAdComputerToDevice);
-            setDevices(adDevices);
-            await checkOnlineStatus(adDevices);
+            setDevices(adDevices); // Set initial list
+            const devicesWithStatus = await checkOnlineStatus(adDevices);
+            const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
+            if (onlineDevices.length > 0) {
+                await checkAgentStatus(onlineDevices);
+            }
         } else {
              setError({
                 title: data.error || "AD Error",
                 message: data.message || `Failed to fetch devices from Active Directory.`,
                 details: data.details,
             });
-             setIsLoading(false);
         }
     } catch (err) {
         setError({ title: "Server Error", message: "Failed to connect to the server to get devices." });
+    } finally {
         setIsLoading(false);
     }
-  }, [checkOnlineStatus]);
+  }, [checkOnlineStatus, checkAgentStatus]);
 
   React.useEffect(() => {
     fetchAllDevices();
@@ -381,3 +380,4 @@ export default function MonitoringPage() {
     
 
     
+
