@@ -12,10 +12,6 @@ import json
 
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
-LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-LOG_RETENTION_HOURS = 24
-
-
 def json_result(rc, out, err, structured_data=None, extra_data={}):
     # Ensure stdout is serializable
     final_stdout = out
@@ -57,8 +53,7 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    # Allow access to psinfo from the monitoring page which may not have a body
-    if request.endpoint in ['pstools.api_psinfo', 'pstools.api_deploy_agent', 'pstools.api_enable_snmp']:
+    if request.endpoint in ['pstools.api_enable_snmp']:
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -215,68 +210,15 @@ def api_psloglist():
 def api_psinfo():
     data = request.get_json() or {}
     ip = data.get("ip")
-    device_name = data.get("name")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_request(data)
+    logger.info(f"Executing psinfo on {ip}.")
     
-    if not ip or not device_name:
-        return json_result(1, "", "IP address and device name are required.", None)
+    rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
+    structured_data = None
+    if rc == 0 and out:
+        structured_data = parse_psinfo_output(out)
 
-    logger.info(f"Reading performance data for '{device_name}' from agent file on {ip}.")
-    
-    remote_file_path = f"C:\\Atlas\\{device_name}.json"
-    ps_command = f"Get-Content -Path '{remote_file_path}' -Raw"
-
-    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=15)
-    
-    if rc != 0:
-        logger.warning(f"Failed to read agent file from {ip} for {device_name}. Error: {err}")
-        return json_result(rc, out, err)
-
-    try:
-        perf_data = json.loads(out)
-        structured_data = {"psinfo": perf_data}
-
-        log_file = os.path.join(LOGS_DIR, f"{device_name}.json")
-        history = []
-        if os.path.exists(log_file):
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    history = json.load(f)
-            except (IOError, json.JSONDecodeError):
-                history = []
-        
-        history.append({
-            "timestamp": perf_data.get("timestamp", datetime.datetime.utcnow().isoformat()),
-            "cpuUsage": perf_data.get("cpuUsage"),
-            "usedMemoryGB": perf_data.get("usedMemoryGB")
-        })
-
-        retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
-        now = datetime.datetime.utcnow()
-        try:
-            history = [
-                entry for entry in history
-                if now - datetime.datetime.fromisoformat(entry["timestamp"].replace('Z','+00:00')) < retention_delta
-            ]
-        except (TypeError, ValueError):
-             history = history[-500:]
-
-        
-        try:
-            os.makedirs(LOGS_DIR, exist_ok=True)
-            with open(log_file, 'w', encoding='utf-8') as f:
-                json.dump(history, f)
-        except IOError as e:
-            logger.error(f"Failed to write history log for {device_name}: {e}")
-
-        return json_result(0, json.dumps(perf_data), "", structured_data)
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Error decoding JSON from agent file for {device_name}: {e}. Raw data: {out}")
-        return json_result(500, out, f"Failed to parse data file from agent. The file may be corrupted or malformed.", None)
-    except Exception as e:
-        logger.error(f"Unexpected error processing agent data for {device_name}: {e}", exc_info=True)
-        return json_result(500, "", f"An unexpected error occurred while processing data for {device_name}.", None)
+    return json_result(rc, out, err, structured_data)
 
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
@@ -663,33 +605,38 @@ def api_enable_snmp():
         current_dir = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
         
-        # This is a parameterized script, we will pass the server_ip as an argument.
-        # This is more robust than replacing a placeholder.
-        ps_command_with_args = f"& '{script_path}' -TrapDestination '{server_ip}'"
-        
-        # Encode the entire command block for reliable execution via PsExec
-        encoded_script = base64.b64encode(ps_command_with_args.encode('utf-16-le')).decode('ascii')
-        
-        cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_content_template = f.read()
 
-        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
-
-        full_details = (out or "") + "\n" + (err or "")
-
-        if rc == 0:
-            logger.info(f"SNMP configuration script executed successfully on {ip}.")
-            return jsonify({
-                "ok": True,
-                "message": f"SNMP configuration finished on {ip}.",
-                "details": full_details.strip()
-            })
-        else:
-            logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Details: {full_details.strip()}")
-            return jsonify({
-                "ok": False,
-                "error": f"Failed to execute SNMP script on {ip}.",
-                "details": full_details.strip()
-            }), 500
     except Exception as e:
-        logger.error(f"Error during SNMP script preparation or execution: {e}")
-        return jsonify({"ok": False, "error": f"Server-side error preparing the SNMP script: {e}"}), 500
+        logger.error(f"Error reading or finding SNMP script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
+    
+    script_content = script_content_template.replace('$SERVER_IP_PLACEHOLDER$', server_ip)
+    
+    encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
+    
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
+
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
+
+    full_details = (out or "") + "\n" + (err or "")
+
+    if rc == 0:
+        logger.info(f"SNMP configuration script executed successfully on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": f"SNMP configuration finished on {ip}.",
+            "details": full_details.strip()
+        })
+    else:
+        logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Details: {full_details.strip()}")
+        return jsonify({
+            "ok": False,
+            "error": f"Failed to execute SNMP script on {ip}.",
+            "details": full_details.strip()
+        }), 500
+
+    
+
+

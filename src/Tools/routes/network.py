@@ -18,8 +18,6 @@ from Tools.snmp_listener import get_current_traps
 
 network_bp = Blueprint('network', __name__)
 
-LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-
 @network_bp.before_request
 def require_login():
     # حماية جميع مسارات الشبكة
@@ -500,36 +498,3 @@ def get_snmp_traps_data():
     logger.info("Received request for /api/network/get-snmp-traps.")
     traps = get_current_traps()
     return jsonify({"ok": True, "traps": traps}), 200
-
-@network_bp.route('/api/network/get-historical-data', methods=['POST'])
-def get_historical_data():
-    """
-    API endpoint to fetch historical performance data for a specific device.
-    """
-    data = request.get_json() or {}
-    device_dn = data.get("id")
-    if not device_dn:
-        return jsonify({"ok": False, "error": "Device ID (DN) is required."}), 400
-
-    # Extract CN from DN to get the device name
-    match = re.search(r'CN=([^,]+)', device_dn)
-    if not match:
-        return jsonify({"ok": False, "error": "Invalid Device ID format."}), 400
-    
-    device_name = match.group(1)
-    logger.info(f"Fetching historical data for device: {device_name}")
-
-    log_file = os.path.join(LOGS_DIR, f"{device_name}.json")
-    
-    if not os.path.exists(log_file):
-        logger.warning(f"No historical data file found for {device_name} at {log_file}")
-        return jsonify({"ok": True, "history": []})
-
-    try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            history = json.load(f)
-        logger.info(f"Successfully loaded {len(history)} records for {device_name}")
-        return jsonify({"ok": True, "history": history})
-    except (IOError, json.JSONDecodeError) as e:
-        logger.error(f"Error reading historical data for {device_name}: {e}")
-        return jsonify({"ok": False, "error": f"Could not read or parse history file for {device_name}."}), 500

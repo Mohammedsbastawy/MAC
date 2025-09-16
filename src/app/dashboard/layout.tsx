@@ -4,7 +4,7 @@
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar, SidebarHeader, SidebarSub, SidebarSubTrigger, SidebarSubContent } from "@/components/ui/sidebar";
-import { Globe, Users, NotebookText, HelpCircle, Settings, File, Briefcase, Server, Zap } from "lucide-react";
+import { Globe, Users, NotebookText, HelpCircle, Settings, File, Briefcase, Server, Zap, Siren } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -49,7 +49,7 @@ const AppSidebar = () => {
                          <SidebarMenuItem>
                             <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/monitoring')} onClick={closeSidebar}>
                                  <Link href="/dashboard/monitoring">
-                                    <Server />
+                                    <Siren />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Monitoring</span>
                                 </Link>
                             </SidebarMenuButton>
@@ -94,14 +94,6 @@ const AppSidebar = () => {
                                             <Link href="/dashboard/help/workgroup">
                                                  <Briefcase className="mr-2 h-4 w-4" />
                                                 Workgroup Setup
-                                            </Link>
-                                        </SidebarMenuButton>
-                                    </SidebarMenuItem>
-                                     <SidebarMenuItem>
-                                         <SidebarMenuButton asChild isActive={pathname === '/dashboard/help/agent'} onClick={closeSidebar}>
-                                            <Link href="/dashboard/help/agent">
-                                                 <Zap className="mr-2 h-4 w-4" />
-                                                Agent Deployment
                                             </Link>
                                         </SidebarMenuButton>
                                     </SidebarMenuItem>
