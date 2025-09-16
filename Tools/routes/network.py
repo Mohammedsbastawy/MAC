@@ -14,16 +14,9 @@ from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, par
 from .activedirectory import _get_ad_computers_data
 from Tools.utils.logger import logger
 import datetime
+from Tools.snmp_listener import get_current_traps
 
 network_bp = Blueprint('network', __name__)
-
-CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'monitoring_cache.json')
-LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-CACHE_EXPIRY_SECONDS = 30 # 30 seconds
-LOG_RETENTION_HOURS = 24
-
-if not os.path.exists(LOGS_DIR):
-    os.makedirs(LOGS_DIR)
 
 @network_bp.before_request
 def require_login():
@@ -497,117 +490,11 @@ def api_check_winrm():
     return jsonify({"ok": True, "results": results})
 
 
-@network_bp.route('/api/network/get-monitoring-data', methods=['POST'])
-def get_monitoring_data():
-    data = request.get_json() or {}
-    force_refresh = data.get('force_refresh', False)
-
-    # 1. Check for cached data
-    if not force_refresh and os.path.exists(CACHE_FILE):
-        try:
-            last_modified_time = os.path.getmtime(CACHE_FILE)
-            if (time.time() - last_modified_time) < CACHE_EXPIRY_SECONDS:
-                logger.info("Serving monitoring data from fresh cache.")
-                with open(CACHE_FILE, 'r') as f:
-                    cached_data = json.load(f)
-                return jsonify(cached_data)
-        except (IOError, json.JSONDecodeError) as e:
-            logger.warning(f"Could not read cache file, forcing refresh. Error: {e}")
-
-    # 2. If no fresh cache, fetch new data
-    logger.info("Cache is old or missing, fetching new monitoring data.")
-    
-    # Get all domain computers
-    ad_data_result = _get_ad_computers_data()
-    if not ad_data_result.get("ok"):
-        return jsonify(ad_data_result), 500
-    
-    all_ad_computers = ad_data_result.get("computers", [])
-    if not all_ad_computers:
-        response_data = {"ok": True, "devices": [], "last_updated": datetime.datetime.utcnow().isoformat()}
-        return jsonify(response_data)
-
-    # Check online status for all of them
-    ips_to_check = [c['dns_hostname'] for c in all_ad_computers if c.get('dns_hostname')]
-    online_ips = set()
-    
-    if ips_to_check:
-        logger.info(f"Checking online status for {len(ips_to_check)} AD hosts.")
-        with ThreadPoolExecutor(max_workers=50) as executor:
-            future_to_ip_ping = {executor.submit(check_host_status_ping, ip): ip for ip in ips_to_check}
-            future_to_ip_tcp = {executor.submit(check_host_status_tcp_connect, ip): ip for ip in ips_to_check}
-            
-            for future in as_completed(future_to_ip_ping.keys() | future_to_ip_tcp.keys()):
-                ip = future_to_ip_ping.get(future) or future_to_ip_tcp.get(future)
-                try:
-                    if future.result():
-                        online_ips.add(ip)
-                except Exception:
-                    pass 
-        logger.info(f"Found {len(online_ips)} AD hosts online.")
-
-    # Prepare final device list with status only. Performance data will be fetched by the frontend.
-    final_devices = []
-    for c in all_ad_computers:
-        is_online = c.get('dns_hostname') in online_ips
-        final_devices.append({
-            'id': c['dn'],
-            'name': c['name'],
-            'ipAddress': c.get('dns_hostname'),
-            'status': 'online' if is_online else 'offline',
-            'isFetching': is_online, # Set to true for online devices to trigger frontend fetch
-            'performance': None,
-            'performanceError': None,
-        })
-
-    # Sort the final list for consistent display
-    final_devices.sort(key=lambda x: (x['status'] != 'online', x['name']))
-
-    # 3. Write new data to cache
-    response_data = {
-        "ok": True,
-        "devices": final_devices,
-        "last_updated": datetime.datetime.utcnow().isoformat()
-    }
-    try:
-        with open(CACHE_FILE, 'w') as f:
-            json.dump(response_data, f)
-        logger.info("Successfully updated monitoring cache file.")
-    except IOError as e:
-        logger.error(f"Failed to write to cache file: {e}")
-
-    return jsonify(response_data)
-
-@network_bp.route('/api/network/get-historical-data', methods=['POST'])
-def get_historical_data():
-    data = request.get_json() or {}
-    device_id = data.get("id") # The device DN is used as ID
-    if not device_id:
-        return jsonify({"ok": False, "error": "Device ID is required."}), 400
-    
-    # Sanitize the device_id to create a safe filename from the CN part
-    # Example DN: CN=PROD01,OU=Production,DC=prismafoods,DC=co
-    try:
-        cn_part = next((part for part in device_id.split(',') if part.upper().startswith('CN=')), None)
-        if not cn_part:
-            raise ValueError("Could not find CN in distinguished name")
-        device_name = cn_part.split('=')[1]
-        safe_filename = "".join([c for c in device_name if c.isalnum() or c in (' ', '_')]).rstrip()
-    except Exception as e:
-        logger.error(f"Could not parse device name from DN '{device_id}': {e}")
-        # Fallback to a sanitized version of the full DN if parsing fails
-        safe_filename = "".join([c for c in device_id if c.isalnum() or c in (' ', '_')]).rstrip()
-
-
-    log_file = os.path.join(LOGS_DIR, f"{safe_filename}.json")
-
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, 'r') as f:
-                history = json.load(f)
-            return jsonify({"ok": True, "history": history})
-        except (IOError, json.JSONDecodeError) as e:
-            logger.error(f"Error reading history file for {device_id}: {e}")
-            return jsonify({"ok": False, "error": "Could not read history file."}), 500
-    else:
-        return jsonify({"ok": True, "history": []})
+@network_bp.route('/api/network/get-snmp-traps', methods=['GET'])
+def get_snmp_traps_data():
+    """
+    API endpoint to fetch the latest SNMP traps from the in-memory store.
+    """
+    logger.info("Received request for /api/network/get-snmp-traps.")
+    traps = get_current_traps()
+    return jsonify({"ok": True, "traps": traps}), 200

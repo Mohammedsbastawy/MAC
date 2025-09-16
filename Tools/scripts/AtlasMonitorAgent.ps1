@@ -1,11 +1,12 @@
-# Atlas Monitoring Agent - Runs Every 1 Minute via Task Scheduler
+# Atlas Monitoring Agent - Self-Installing & Self-Running
+# Runs Every 1 Minute via Task Scheduler
 $ErrorActionPreference = "Stop"
 $AgentPath = "C:\Atlas"
-$TaskName = "AtlasMonitorTask"
-$ScriptPath = $MyInvocation.MyCommand.Path # The full path to this script
+$TaskName = "AtlasMonitorAgent" # Changed name to be more specific
+$ScriptPath = $MyInvocation.MyCommand.Path
 
 function Collect-AtlasData {
-    # FASTER CPU USAGE COLLECTION - Switched to CIM for instant reading without delay
+    # Use CIM instance for a faster, non-blocking CPU read
     $cpuUsage = (Get-CimInstance -ClassName Win32_PerfFormattedData_PerfOS_Processor | Where-Object { $_.Name -eq '_Total' }).PercentProcessorTime
 
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
@@ -33,7 +34,6 @@ function Collect-AtlasData {
 }
 
 try {
-    # Ensure the destination directory exists
     if (-not (Test-Path -Path $AgentPath -PathType Container)) {
         New-Item -ItemType Directory -Path $AgentPath -Force
     }
@@ -41,25 +41,26 @@ try {
     $taskExists = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
     if (-not $taskExists) {
-        # FIRST RUN: Collect data immediately and create the scheduled task to run every 1 minute
+        # First-time run: Collect data and then create the scheduled task.
         Collect-AtlasData
 
         $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
         
-        # This trigger starts 1 minute from now and repeats every minute, indefinitely.
+        # This trigger runs once 1 minute from now, and then repeats every minute indefinitely.
         $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
 
         $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
 
-        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Force
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
     }
     else {
-        # SUBSEQUENT RUNS (by the scheduler): Just collect the data
+        # Subsequent runs: Just collect the data.
         Collect-AtlasData
     }
 
 } catch {
-    # Log any errors to a file for easier troubleshooting
     $logPath = Join-Path -Path $AgentPath -ChildPath "MonitorAgentErrors.log"
     $errorMessage = "[$((Get-Date).ToString('o'))] Error: $($_.Exception.Message)"
     Add-Content -Path $logPath -Value $errorMessage
