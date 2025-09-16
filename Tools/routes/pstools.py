@@ -58,7 +58,7 @@ def get_auth_from_request(data):
 @pstools_bp.before_request
 def require_login_hook():
     # Allow access to specific endpoints without a JSON body by checking session auth
-    if request.endpoint in ['pstools.api_deploy_agent', 'pstools.api_enable_prereqs', 'pstools.api_set_network_private', 'pstools.api_enable_winrm']:
+    if request.endpoint in ['pstools.api_deploy_agent', 'pstools.api_enable_prereqs', 'pstools.api_set_network_private', 'pstools.api_enable_winrm', 'pstools.api_enable_snmp']:
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -660,15 +660,20 @@ def api_deploy_agent():
     logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
     
     try:
+        # Corrected path calculation
         current_dir = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(current_dir, '..', 'scripts', 'Deploy-AtlasAgent.ps1')
         
         with open(script_path, 'r', encoding='utf-8') as f:
             script_content_template = f.read()
 
-    except Exception as e:
+    except FileNotFoundError as e:
         logger.error(f"Error reading or finding agent deployment script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error: The agent deployment script 'Deploy-AtlasAgent.ps1' was not found in the 'Tools/scripts' directory. Details: {e}"}), 500
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while reading the agent script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
+
     
     # Inject the device name into the script content
     script_content = script_content_template.replace('$ComputerNamePlaceholder$', device_name)
@@ -694,5 +699,58 @@ def api_deploy_agent():
         return jsonify({
             "ok": False,
             "error": f"Failed to execute agent script on {ip}.",
+            "details": full_details.strip()
+        }), 500
+        
+@pstools_bp.route('/enable-snmp', methods=['POST'])
+def api_enable_snmp():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    server_ip = data.get("server_ip")
+    user, domain, pwd, _ = get_auth_from_request(data)
+
+    if not ip or not server_ip:
+        return jsonify({"ok": False, "error": "Target IP and Server IP are required."}), 400
+
+    logger.info(f"Starting SNMP configuration on {ip} to send traps to {server_ip}.")
+    
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
+        
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_content_template = f.read()
+
+    except FileNotFoundError as e:
+        logger.error(f"Error reading or finding SNMP script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error: The SNMP script 'EnableSnmp.ps1' was not found. Details: {e}"}), 500
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while reading the SNMP script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
+    
+    # Inject the server IP directly into the script content
+    script_content = f"$TrapDestination = '{server_ip}'\n{script_content_template}"
+    
+    # Encode the modified script for -EncodedCommand
+    encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
+    
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
+
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
+
+    full_details = (out or "") + "\n" + (err or "")
+
+    if rc == 0:
+        logger.info(f"SNMP configuration script executed successfully on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": f"SNMP configuration finished on {ip}.",
+            "details": full_details.strip()
+        })
+    else:
+        logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Details: {full_details.strip()}")
+        return jsonify({
+            "ok": False,
+            "error": f"Failed to execute SNMP script on {ip}.",
             "details": full_details.strip()
         }), 500
