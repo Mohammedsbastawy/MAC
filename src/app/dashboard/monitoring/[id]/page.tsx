@@ -12,70 +12,48 @@ import {
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, ServerCrash, Cpu, MemoryStick, ArrowLeft } from "lucide-react";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  ChartConfig,
-} from "@/components/ui/chart";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import type { PerformanceData } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
+const GaugeCard: React.FC<{
+    icon: React.ElementType,
+    title: string,
+    value: string | number,
+    unit: string,
+    description: string,
+}> = ({ icon: Icon, title, value, unit, description }) => (
+    <Card>
+        <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-muted-foreground font-medium">
+                <Icon className="h-5 w-5" />
+                {title}
+            </CardTitle>
+        </CardHeader>
+        <CardContent>
+            <div className="flex items-baseline gap-2">
+                <p className="text-6xl font-bold tracking-tight">{value}</p>
+                <span className="text-2xl text-muted-foreground">{unit}</span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">{description}</p>
+        </CardContent>
+    </Card>
+);
 
-const chartConfig = {
-  cpu: {
-    label: "CPU",
-    color: "hsl(var(--chart-1))",
-  },
-  memory: {
-    label: "Memory",
-    color: "hsl(var(--chart-2))",
-  },
-} satisfies ChartConfig;
 
 const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
-  const [history, setHistory] = React.useState<PerformanceData[]>([]);
+  const [liveData, setLiveData] = React.useState<PerformanceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [deviceName, setDeviceName] = React.useState('');
   const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
-  const MAX_HISTORY_POINTS = 30; // Keep the last 30 data points on the chart
 
   const deviceId = decodeURIComponent(params.id);
 
-   const fetchInitialHistory = React.useCallback(async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/network/get-historical-data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: deviceId }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          const sortedHistory = data.history.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-          const formattedHistory = sortedHistory.map((item: any) => ({
-             ...item,
-             displayTime: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-             cpuUsage: parseFloat(item.cpuUsage?.toFixed(2) || 0),
-             usedMemoryGB: parseFloat(item.usedMemoryGB?.toFixed(2) || 0),
-          }));
-          setHistory(formattedHistory);
-        } else {
-          setError(data.error || "Failed to fetch historical data.");
-        }
-      } catch (err) {
-        setError("An error occurred while fetching data from the server.");
-      } finally {
-        setIsLoading(false);
-      }
-  }, [deviceId]);
-
-  const fetchLiveData = React.useCallback(async () => {
+  const fetchLiveData = React.useCallback(async (isInitialLoad = false) => {
+    if(isInitialLoad) setIsLoading(true);
+    setError(null);
     try {
         const res = await fetch("/api/network/fetch-live-data", {
             method: "POST",
@@ -85,31 +63,19 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         const data = await res.json();
 
         if(data.ok && data.liveData) {
-            const newPoint = {
+            setLiveData({
                 ...data.liveData,
-                displayTime: new Date(data.liveData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 cpuUsage: parseFloat(data.liveData.cpuUsage?.toFixed(2) || 0),
                 usedMemoryGB: parseFloat(data.liveData.usedMemoryGB?.toFixed(2) || 0),
-            };
-            
-            setHistory(prevHistory => {
-                // Avoid adding duplicate points
-                if(prevHistory.some(p => p.timestamp === newPoint.timestamp)) {
-                    return prevHistory;
-                }
-                const updatedHistory = [...prevHistory, newPoint].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-                // Limit the number of points on the chart
-                if(updatedHistory.length > MAX_HISTORY_POINTS) {
-                    return updatedHistory.slice(updatedHistory.length - MAX_HISTORY_POINTS);
-                }
-                return updatedHistory;
             });
              setError(null);
-        } else if (!data.ok) {
+        } else {
             setError(data.error || "Failed to fetch live update.");
         }
     } catch (err) {
         setError("An error occurred while fetching live data from the server.");
+    } finally {
+        if(isInitialLoad) setIsLoading(false);
     }
   }, [deviceId]);
 
@@ -125,20 +91,22 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     }
   }, [deviceId]);
 
+  // Initial data fetch
   React.useEffect(() => {
-    fetchInitialHistory();
-  }, [fetchInitialHistory]);
+    fetchLiveData(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Set up the interval for auto-refresh
   React.useEffect(() => {
     if (!isLoading && isAutoRefresh) {
         const intervalId = setInterval(() => {
-            fetchLiveData();
+            fetchLiveData(false); // Subsequent fetches are not "initial"
         }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
   }, [isAutoRefresh, isLoading, fetchLiveData]);
 
-  const yAxisDomain = [0, 100];
 
   return (
     <div className="space-y-6">
@@ -149,10 +117,10 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 </Button>
                 <div>
                     <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">
-                        Monitoring Dashboard
+                        Live Monitoring
                     </h1>
                     <p className="text-muted-foreground">
-                        Live performance data for <span className="font-semibold text-primary">{deviceName}</span>
+                        Real-time performance data for <span className="font-semibold text-primary">{deviceName}</span>
                     </p>
                 </div>
             </div>
@@ -170,7 +138,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       {isLoading ? (
         <div className="flex items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="ml-2">Loading performance data...</p>
+          <p className="ml-2">Fetching live performance data...</p>
         </div>
       ) : error ? (
         <Alert variant="destructive">
@@ -178,106 +146,54 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-      ) : history.length === 0 ? (
+      ) : !liveData ? (
          <Alert>
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>No Data Available</AlertTitle>
-          <AlertDescription>No performance history has been recorded for this device yet. Ensure the agent is deployed and has had time to run.</AlertDescription>
+          <AlertDescription>Could not retrieve performance data for this device. Ensure the agent is deployed and the device is online.</AlertDescription>
         </Alert>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2">
-            <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Cpu /> CPU Usage (%)</CardTitle>
-              <CardDescription>
-                CPU utilization over the last 24 hours.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ChartContainer config={chartConfig} className="h-[250px] w-full">
-                <AreaChart data={history} margin={{ left: 12, right: 12 }}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis
-                    dataKey="displayTime"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    tickFormatter={(value, index) => {
-                      return index % Math.ceil(history.length / 10) === 0 ? value : '';
-                    }}
-                  />
-                  <YAxis domain={yAxisDomain} tickLine={false} axisLine={false} />
-                  <ChartTooltip
-                    cursor={false}
-                    content={<ChartTooltipContent labelFormatter={(value, payload) => {
-                      const data = payload[0]?.payload;
-                      return data ? new Date(data.timestamp).toLocaleString() : value;
-                    }} />}
-                  />
-                  <defs>
-                      <linearGradient id="fillCpu" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="var(--color-cpu)" stopOpacity={0.8} />
-                          <stop offset="95%" stopColor="var(--color-cpu)" stopOpacity={0.1} />
-                      </linearGradient>
-                  </defs>
-                  <Area
-                    dataKey="cpuUsage"
-                    name="CPU"
-                    type="natural"
-                    fill="url(#fillCpu)"
-                    stroke="var(--color-cpu)"
-                    stackId="a"
-                  />
-                </AreaChart>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><MemoryStick/> Memory Usage (MB)</CardTitle>
-              <CardDescription>
-                Used memory over the last 24 hours.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ChartContainer config={chartConfig} className="h-[250px] w-full">
-                <AreaChart data={history} margin={{ left: 12, right: 12 }}>
-                  <CartesianGrid vertical={false} />
-                   <XAxis
-                    dataKey="displayTime"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    tickFormatter={(value, index) => {
-                       return index % Math.ceil(history.length / 10) === 0 ? value : '';
-                    }}
-                  />
-                  <YAxis tickLine={false} axisLine={false} domain={['auto', 'auto']}/>
-                   <ChartTooltip
-                    cursor={false}
-                    content={<ChartTooltipContent labelFormatter={(value, payload) => {
-                      const data = payload[0]?.payload;
-                      return data ? new Date(data.timestamp).toLocaleString() : value;
-                    }} />}
-                  />
-                   <defs>
-                      <linearGradient id="fillMemory" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="var(--color-memory)" stopOpacity={0.8} />
-                          <stop offset="95%" stopColor="var(--color-memory)" stopOpacity={0.1} />
-                      </linearGradient>
-                  </defs>
-                  <Area
-                    dataKey="usedMemoryGB"
-                    name="Memory (MB)"
-                    type="natural"
-                    fill="url(#fillMemory)"
-                    stroke="var(--color-memory)"
-                    stackId="b"
-                  />
-                </AreaChart>
-              </ChartContainer>
-            </CardContent>
-          </Card>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <GaugeCard
+                icon={Cpu}
+                title="CPU Usage"
+                value={liveData.cpuUsage}
+                unit="%"
+                description={`Last updated: ${new Date(liveData.timestamp).toLocaleTimeString()}`}
+            />
+            <GaugeCard
+                icon={MemoryStick}
+                title="Used Memory"
+                value={liveData.usedMemoryGB}
+                unit="MB"
+                description={`Total: ${liveData.totalMemoryGB} MB`}
+            />
+             <Card className="lg:col-span-1">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-muted-foreground font-medium">
+                        Disk Usage
+                    </CardTitle>
+                     <CardDescription>
+                        Free space on local drives.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {liveData.diskInfo.map(disk => (
+                        <div key={disk.volume}>
+                            <div className="flex justify-between items-center mb-1">
+                                <span className="text-sm font-medium">{disk.volume}</span>
+                                <span className="text-xs text-muted-foreground">{disk.freeGB} GB Free</span>
+                            </div>
+                             <div className="w-full bg-muted rounded-full h-2.5">
+                                <div 
+                                    className="bg-primary h-2.5 rounded-full" 
+                                    style={{ width: `${((disk.sizeGB - disk.freeGB) / disk.sizeGB) * 100}%` }}
+                                ></div>
+                            </div>
+                        </div>
+                    ))}
+                </CardContent>
+             </Card>
         </div>
       )}
     </div>
