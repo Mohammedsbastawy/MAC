@@ -98,3 +98,10 @@ export type SnmpTrap = {
         value: string;
     }[];
 };
+
+export type SnmpLogEntry = {
+    deviceId: string;
+    deviceName: string;
+    log: string;
+    status: 'pending' | 'success' | 'error';
+}

@@ -1,5 +1,3 @@
-
-
 "use client";
 
 import * as React from "react";
@@ -32,7 +30,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Device, NetworkInterface, ADComputer } from "@/lib/types";
+import type { Device, NetworkInterface, ADComputer, SnmpLogEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -157,13 +155,6 @@ const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device
         </Card>
     );
 };
-
-type SnmpLogEntry = {
-    deviceId: string;
-    deviceName: string;
-    log: string;
-    status: 'pending' | 'success' | 'error';
-}
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isAdLoading, setIsAdLoading] = React.useState(true);
@@ -695,4 +686,3 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
-
