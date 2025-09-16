@@ -217,17 +217,18 @@ def api_psloglist():
 def api_psinfo_internal(ip=None, name=None):
     """
     Internal function to fetch agent data by reading the performance JSON file from the remote host.
-    This function should be called with explicit ip and name, and it relies on session for auth.
+    This function must be called with an explicit ip and name, and it relies on the session for auth.
     """
     if not ip or not name:
         return jsonify({"ok": False, "error": "Internal Server Error: IP address and device name are required for api_psinfo_internal."}), 500
 
-    # Authentication must come from the session, not the request body
+    # Authentication must come from the session.
     user = session.get("user")
     domain = session.get("domain")
     pwd = session.get("password")
 
     if not all([user, domain, pwd]):
+        logger.error(f"Authentication missing in session for internal call to '{name}' on IP '{ip}'.")
         return jsonify({"ok": False, "error": "Authentication required to fetch agent data."}), 401
     
     winrm_user = f"{user}@{domain}" if '@' not in user else user
@@ -247,6 +248,7 @@ def api_psinfo_internal(ip=None, name=None):
     try:
         perf_data = json.loads(out)
         
+        # Save historical data
         log_file = os.path.join(LOGS_DIR, f"{name}.json")
         history = []
         if os.path.exists(log_file):
@@ -256,45 +258,46 @@ def api_psinfo_internal(ip=None, name=None):
             except (IOError, json.JSONDecodeError):
                 history = []
         
-        current_timestamp = datetime.datetime.fromisoformat(perf_data["timestamp"].replace('Z', '+00:00'))
-        
-        if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
-            history.append({
-                "timestamp": perf_data.get("timestamp"),
-                "cpuUsage": perf_data.get("cpuUsage"),
-                "usedMemoryGB": perf_data.get("usedMemoryGB")
-            })
+        current_timestamp_str = perf_data.get("timestamp")
+        if current_timestamp_str:
+            current_timestamp = datetime.datetime.fromisoformat(current_timestamp_str.replace('Z', '+00:00'))
 
-            retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
-            now_utc = datetime.datetime.now(datetime.timezone.utc)
-            
-            def parse_iso_with_timezone(ts_str):
-                dt = datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                if dt.tzinfo is None:
-                    return dt.replace(tzinfo=datetime.timezone.utc)
-                return dt
+            if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
+                history.append({
+                    "timestamp": perf_data.get("timestamp"),
+                    "cpuUsage": perf_data.get("cpuUsage"),
+                    "usedMemoryGB": perf_data.get("usedMemoryGB")
+                })
 
-            history = [
-                entry for entry in history
-                if "timestamp" in entry and (now_utc - parse_iso_with_timezone(entry["timestamp"])) < retention_delta
-            ]
-            
-            try:
-                os.makedirs(LOGS_DIR, exist_ok=True)
-                with open(log_file, 'w') as f:
-                    json.dump(history, f)
-            except IOError as e:
-                logger.error(f"Failed to write history log for {name}: {e}")
+                # Prune old data
+                retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+                now_utc = datetime.datetime.now(datetime.timezone.utc)
+                
+                def parse_iso_with_timezone(ts_str):
+                    dt = datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                    return dt.replace(tzinfo=datetime.timezone.utc) if dt.tzinfo is None else dt
+
+                history = [
+                    entry for entry in history
+                    if "timestamp" in entry and (now_utc - parse_iso_with_timezone(entry["timestamp"])) < retention_delta
+                ]
+                
+                try:
+                    os.makedirs(LOGS_DIR, exist_ok=True)
+                    with open(log_file, 'w') as f:
+                        json.dump(history, f)
+                except IOError as e:
+                    logger.error(f"Failed to write history log for {name}: {e}")
 
         # Return live data directly
         return jsonify({"ok": True, "liveData": perf_data})
 
     except (json.JSONDecodeError, KeyError) as e:
         logger.error(f"Error decoding JSON from agent file for {name}: {e}. Raw data: {out}")
-        return jsonify({"ok": False, "error": f"Failed to parse data file from agent. File may be corrupted or malformed.", "details": out}), 500
+        return jsonify({"ok": False, "error": "Failed to parse data file from agent.", "details": out}), 500
     except Exception as e:
         logger.error(f"Unexpected error processing agent data for {name}: {e}", exc_info=True)
-        return jsonify({"ok": False, "error": f"An unexpected error occurred while processing agent data for {name}."}), 500
+        return jsonify({"ok": False, "error": "An unexpected error occurred."}), 500
 
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
@@ -791,3 +794,4 @@ def api_enable_snmp():
 
 
     
+

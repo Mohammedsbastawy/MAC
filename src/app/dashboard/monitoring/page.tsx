@@ -103,53 +103,22 @@ export default function MonitoringPage() {
   const [isDeploying, setIsDeploying] = React.useState(false);
   const [deploymentLog, setDeploymentLog] = React.useState("");
   
-  const checkOnlineStatus = React.useCallback(async (deviceList: Device[]): Promise<Device[]> => {
-      const ipsToCheck = deviceList.map(d => d.ipAddress).filter(Boolean);
-      if (ipsToCheck.length === 0) {
-        return deviceList;
-      };
-
-      try {
-          const res = await fetch("/api/network/check-status", {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ips: ipsToCheck })
-          });
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error || "Status check failed on the server.");
-          
-          const onlineIps = new Set<string>(data.online_ips);
-          
-          return deviceList.map(d => ({
-              ...d,
-              status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-          }));
-
-      } catch (err: any) {
-          toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
-           return deviceList.map(d => ({ ...d, status: 'unknown' }));
-      }
-  }, [toast]);
-
-  const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]): Promise<Device[]> => {
-      const agentChecks = devicesToCheck.map(async (device) => {
-        if (device.status !== 'online') {
-            return { ...device, isAgentDeployed: false, agentLastUpdate: null };
+  const fetchLiveData = React.useCallback(async (device: Device): Promise<Partial<Device>> => {
+    try {
+        const res = await fetch("/api/network/fetch-live-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: device.id, ip: device.ipAddress }),
+        });
+        const data = await res.json();
+        if(data.ok && data.liveData) {
+            return { isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp };
+        } else {
+            return { isAgentDeployed: false, agentLastUpdate: null };
         }
-        try {
-            const res = await fetch("/api/pstools/psinfo", {
-              method: "POST",
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ip: device.ipAddress, name: device.name })
-            });
-            const data = await res.json();
-            return { ...device, isAgentDeployed: data.ok, agentLastUpdate: data.ok ? data.liveData.timestamp : null };
-        } catch {
-            return { ...device, isAgentDeployed: false, agentLastUpdate: null };
-        }
-      });
-
-      return await Promise.all(agentChecks);
+    } catch {
+        return { isAgentDeployed: false, agentLastUpdate: null };
+    }
   }, []);
 
   const fetchAllDevices = React.useCallback(async () => {
@@ -158,22 +127,43 @@ export default function MonitoringPage() {
     setDevices([]);
 
     try {
-        const response = await fetch("/api/ad/get-computers", { method: "POST" });
-        const adData = await response.json();
+        // 1. Fetch AD Computers
+        const adResponse = await fetch("/api/ad/get-computers", { method: "POST" });
+        const adData = await adResponse.json();
         if (!adData.ok) {
             throw adData;
         }
-        let initialDevices = adData.computers.map(mapAdComputerToDevice);
+        let initialDevices: Device[] = adData.computers.map(mapAdComputerToDevice);
         setDevices(initialDevices.map(d => ({ ...d, isLoadingDetails: true })));
 
-        initialDevices = await checkOnlineStatus(initialDevices);
+        // 2. Check Online Status
+        const onlineCheckResponse = await fetch("/api/network/check-status", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ips: initialDevices.map(d => d.ipAddress).filter(Boolean) })
+        });
+        const onlineCheckData = await onlineCheckResponse.json();
+        if (!onlineCheckData.ok) throw new Error(onlineCheckData.error || "Status check failed.");
         
-        const onlineDevices = initialDevices.filter(d => d.status === 'online');
-        const offlineDevices = initialDevices.filter(d => d.status !== 'online');
+        const onlineIps = new Set<string>(onlineCheckData.online_ips);
+        const devicesWithStatus = initialDevices.map(d => ({
+            ...d,
+            status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
+        }));
+        
+        // 3. For online devices, check agent status
+        const agentStatusChecks = devicesWithStatus.map(async (device) => {
+            if (device.status === 'online') {
+                const agentData = await fetchLiveData(device);
+                return { ...device, ...agentData, isLoadingDetails: false };
+            }
+            return { ...device, isLoadingDetails: false };
+        });
 
-        const checkedOnlineDevices = await checkAgentStatus(onlineDevices);
+        const finalDevices = await Promise.all(agentStatusChecks);
 
-        setDevices([...checkedOnlineDevices, ...offlineDevices].map(d => ({ ...d, isLoadingDetails: false })));
+        // 4. Final state update
+        setDevices(finalDevices);
 
     } catch (err: any) {
         setError({
@@ -185,8 +175,7 @@ export default function MonitoringPage() {
     } finally {
         setIsLoading(false);
     }
-}, [checkOnlineStatus, checkAgentStatus]);
-
+  }, [fetchLiveData]);
 
 
   React.useEffect(() => {
@@ -208,17 +197,14 @@ export default function MonitoringPage() {
         const data = await res.json();
         setDeploymentLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + (data.details || data.stdout || JSON.stringify(data, null, 2)));
         if (data.ok) {
-            toast({ title: "Deployment Successful", description: `Agent has been deployed to ${deploymentState.device.name}.`});
-            // Immediately fetch the new status
-            const agentStatusRes = await fetch("/api/pstools/psinfo", {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ip: deploymentState.device.ipAddress, name: deploymentState.device.name })
-            });
-            const agentStatusData = await agentStatusRes.json();
-            setDevices(prev => prev.map(d => d.id === deploymentState.device!.id ? {...d, isAgentDeployed: agentStatusData.ok, agentLastUpdate: agentStatusData.ok ? agentStatusData.liveData.timestamp : null } : d));
+            toast({ title: "Update Successful", description: `Statics script has been run on ${deploymentState.device.name}.`});
+            // Immediately fetch the new status for this device
+            const updatedDeviceState = await fetchLiveData(deploymentState.device);
+            setDevices(prev => prev.map(d => 
+                d.id === deploymentState.device!.id ? {...d, ...updatedDeviceState } : d
+            ));
         } else {
-             toast({ variant: "destructive", title: "Deployment Failed", description: data.error || "An unknown error occurred."});
+             toast({ variant: "destructive", title: "Update Failed", description: data.error || "An unknown error occurred."});
         }
     } catch (err: any) {
          setDeploymentLog(prev => prev + `\n\n--- CLIENT ERROR ---\n` + err.message);
@@ -394,3 +380,4 @@ export default function MonitoringPage() {
     
 
     
+
