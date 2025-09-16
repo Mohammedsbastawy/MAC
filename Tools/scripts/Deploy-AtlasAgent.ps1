@@ -1,75 +1,60 @@
+# SCRIPT TO DEPLOY THE ATLAS PERFORMANCE MONITORING AGENT
+# This script creates a scheduled task to run every minute, collect performance data, and write it to a JSON file.
 
-# This script is executed on a remote machine to set up the Atlas Performance Agent.
-# It creates a scheduled task that runs every minute to gather performance data.
+try {
+    # 1. Define the core command block to be executed by the scheduled task.
+    #    ALL logic is now self-contained within this block to avoid scope issues.
+    $CommandToRun = {
+        # Define paths INSIDE the command block.
+        $AtlasFolder = "C:\Atlas"
+        $OutputFile = Join-Path -Path $AtlasFolder -ChildPath "$($env:COMPUTERNAME).json"
 
-# This placeholder is dynamically replaced by the Python backend before execution.
-$ComputerName = '$ComputerNamePlaceholder$'
-
-# --- Configuration ---
-$TaskName = "Atlas Performance Monitor"
-$TaskDescription = "Collects system performance data (CPU, Memory) for the Atlas Control Panel."
-$LogDir = "C:\Atlas"
-$LogFile = Join-Path $LogDir "$($ComputerName).json"
-
-# --- Script to be Executed by the Scheduled Task ---
-# This command block is encoded and passed to powershell.exe
-$CommandToRun = @"
-# Ensure the directory exists
-if (-not (Test-Path -Path '$LogDir' -PathType Container)) {
-    New-Item -Path '$LogDir' -ItemType Directory -Force | Out-Null
-}
-
-# Get CPU usage. It's important to get two samples for an accurate reading.
-\$cpuSample = Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -MaxSamples 2
-\$cpuUsage = \$cpuSample.CounterSamples | Where-Object { \$_.Status -eq 0 } | Measure-Object -Property CookedValue -Average | Select-Object -ExpandProperty Average
-
-# Get Memory usage
-\$memory = Get-CimInstance -ClassName Win32_OperatingSystem
-\$totalMemoryGB = \$memory.TotalVisibleMemorySize / 1MB 
-\$freeMemoryGB = \$memory.FreePhysicalMemory / 1MB
-\$usedMemoryGB = \$totalMemoryGB - \$freeMemoryGB
-
-# Create performance data object
-\$perfData = @{
-    timestamp = (Get-Date).ToUniversalTime().ToString('o');
-    cpuUsage = \$cpuUsage;
-    totalMemoryGB = \$totalMemoryGB;
-    usedMemoryGB = \$usedMemoryGB;
-    diskInfo = @(Get-Volume | Where-Object { \$_.DriveType -eq 'Fixed' } | ForEach-Object {
-        [pscustomobject]@{
-            volume = \$_.DriveLetter;
-            sizeGB = [math]::Round(\$_.Size / 1GB, 2);
-            freeGB = [math]::Round(\$_.SizeRemaining / 1GB, 2);
+        # Create the directory if it doesn't exist. This runs every time, but is safe.
+        if (-not (Test-Path -Path $AtlasFolder)) {
+            New-Item -Path $AtlasFolder -ItemType Directory -Force
         }
-    })
+
+        # Performance Data Collection. Averages CPU over 2 samples to get a more stable reading.
+        $cpuSample = Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -MaxSamples 2
+        $cpuUsage = $cpuSample.CounterSamples | Measure-Object -Property CookedValue -Average | Select-Object -ExpandProperty Average
+        
+        $totalMemoryGB = (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory / 1GB
+        $usedMemoryGB = $totalMemoryGB - ((Get-Counter -Counter "\Memory\Available MBytes").CounterSamples.CookedValue / 1024)
+
+        # Construct the JSON object with two decimal places for cleanliness.
+        $perfData = @{
+            timestamp = (Get-Date).ToUniversalTime().ToString('o');
+            cpuUsage = [math]::Round($cpuUsage, 2);
+            totalMemoryGB = [math]::Round($totalMemoryGB, 2);
+            usedMemoryGB = [math]::Round($usedMemoryGB, 2);
+        }
+
+        # Convert to JSON and write to the file.
+        $perfData | ConvertTo-Json -Compress | Out-File -FilePath $OutputFile -Encoding utf8 -Force
+    }
+
+    # 2. Encode the self-contained command for reliable execution.
+    $EncodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($CommandToRun.ToString()))
+
+    # 3. Define the action for the scheduled task.
+    #    This runs powershell.exe and passes the entire logic block as an encoded command.
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-EncodedCommand $EncodedCommand"
+
+    # 4. Define the trigger for the task to run every minute.
+    $Trigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 1) -Once -At (Get-Date)
+
+    # 5. Define the principal for the task to run as the SYSTEM account.
+    $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
+
+    # 6. Define the settings for the task.
+    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+    # 7. Register the scheduled task, overwriting it if it already exists.
+    Register-ScheduledTask -TaskName "Atlas Performance Monitor" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force
+
+    Write-Host "SUCCESS: Atlas agent (Scheduled Task 'Atlas Performance Monitor') has been successfully created or updated."
+
+} catch {
+    Write-Error "FAILURE: An error occurred during agent deployment. Details: $($_.Exception.Message)"
+    exit 1
 }
-
-# Convert to JSON and write to file
-\$perfData | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path '$LogFile' -Force
-"@
-
-# Encode the command for reliable execution
-$EncodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($CommandToRun))
-
-# --- Scheduled Task Setup ---
-
-# 1. Define the action to run PowerShell with the encoded command
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -EncodedCommand $EncodedCommand"
-
-# 2. Define the trigger to run every minute
-$Trigger = New-ScheduledTaskTrigger -Repetitive -RepetitionInterval (New-TimeSpan -Minutes 1)
-
-# 3. Define the principal (user) under which the task will run
-$Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
-
-# 4. Define the task settings
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-
-# 5. Register (create or update) the scheduled task
-# Use -Force to overwrite any existing task with the same name.
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Description $TaskDescription -Force
-
-Write-Host "Scheduled task '$TaskName' has been created/updated successfully."
-Write-Host "Agent will now log performance data to '$LogFile' every minute."
-
-    
