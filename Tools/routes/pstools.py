@@ -4,6 +4,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -676,31 +677,33 @@ def api_enable_snmp():
         logger.error(f"Error reading or finding SNMP script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
     
-    # We will pass the server_ip as an argument to the script
-    # The script now uses param() block to accept it
+    # We will pass the server_ip as a parameter to the script
+    # This is a more robust way than replacing a placeholder.
     ps_command_with_args = f"&{{ {script_content} -TrapDestination '{server_ip}' }}"
     
+    # Encode the entire command block for reliable execution via PsExec
     encoded_script = base64.b64encode(ps_command_with_args.encode('utf-16-le')).decode('ascii')
     
     cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-    # PsExec often returns non-zero RC even on partial success or for verbose scripts.
-    # We check the output for a success message as a more reliable indicator.
+    # Combine stdout and stderr for a complete log. PsExec often puts useful info in stderr.
+    full_details = (out or "") + "\n" + (err or "")
+
     if rc == 0 or "SNMP configuration completed successfully" in out:
         logger.info(f"SNMP configuration script executed successfully on {ip}.")
         return jsonify({
             "ok": True,
-            "message": f"SNMP configuration initiated on {ip}.",
-            "details": out or "Script executed successfully."
+            "message": f"SNMP configuration finished on {ip}.",
+            "details": full_details.strip()
         })
     else:
-        logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Stderr: {err}. Stdout: {out}")
+        logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Details: {full_details.strip()}")
         return jsonify({
             "ok": False,
             "error": f"Failed to execute SNMP script on {ip}.",
-            "details": err or out
+            "details": full_details.strip()
         }), 500
 
     

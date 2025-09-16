@@ -1,84 +1,84 @@
-# PowerShell Script to Configure (not install) SNMP Service
+# PowerShell Script to Configure SNMP Service
 # This script is intended to be run remotely via PsExec.
-# It assumes the SNMP Service Windows Feature/Capability is already installed.
 
+# --- Configuration ---
 param(
-    [string]$CommunityString = "public",
     [string]$TrapDestination = "127.0.0.1"
 )
+$CommunityString = "public"
 
+# --- Script Body ---
 try {
-    Write-Host "Starting SNMP configuration..."
-
-    # Step 1: Ensure SNMP Service is running and set to Automatic
-    try {
-        Set-Service -Name "SNMP" -StartupType Automatic -ErrorAction Stop
-        Start-Service -Name "SNMP" -ErrorAction SilentlyContinue # Start if not already running
-        Write-Host "SNMP service is running and set to automatic."
-    } catch {
-        Write-Error "Failed to set or start SNMP Service. Ensure the 'SNMP Service' feature is installed on the target machine. Error: $_"
-        exit 1
+    $ErrorActionPreference = "Stop"
+    
+    # Step 1: Ensure SNMP Service and Trap service are installed and running
+    Write-Host "Step 1: Checking for SNMP Service..."
+    $snmpService = Get-Service -Name "SNMP" -ErrorAction SilentlyContinue
+    if (!$snmpService) {
+        throw "SNMP Service is not installed. Please install it via 'Windows Features' on the target machine before running this script."
     }
-
-    # Step 2: Configure Registry for Community String and Trap Destination
+    Write-Host "SNMP Service is installed."
+    
+    Write-Host "Ensuring SNMP Service is set to Automatic and started..."
+    Set-Service -Name "SNMP" -StartupType Automatic
+    Start-Service -Name "SNMP"
+    
+    Write-Host "Ensuring SNMP Trap Service is set to Automatic and started..."
+    Set-Service -Name "SNMPTrap" -StartupType Automatic
+    Start-Service -Name "SNMPTrap"
+    Write-Host "Services are configured and running."
+    
+    # Step 2: Configure SNMP Service Registry
+    Write-Host "Step 2: Configuring SNMP registry settings..."
     $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters"
     
-    # Community String (Value 4 means ReadOnly)
-    $validCommunitiesPath = Join-Path -Path $regPath -ChildPath "ValidCommunities"
-    if (!(Test-Path $validCommunitiesPath)) { New-Item -Path $validCommunitiesPath -Force }
-    Set-ItemProperty -Path $validCommunitiesPath -Name $CommunityString -Value 4 -Type DWord -Force
-    Write-Host "Set community string '$CommunityString'."
+    # Set Community String
+    $communityPath = Join-Path -Path $regPath -ChildPath "ValidCommunities"
+    if (!(Test-Path $communityPath)) { New-Item -Path $communityPath -Force | Out-Null }
+    Set-ItemProperty -Path $communityPath -Name $CommunityString -Value 4 # 4 = ReadOnly
+    Write-Host " - Community string '$CommunityString' set to ReadOnly."
 
-    # Trap Destination
+    # Set Trap Destination
     $trapConfigPath = Join-Path -Path $regPath -ChildPath "TrapConfiguration\$CommunityString"
-    if (!(Test-Path $trapConfigPath)) { New-Item -Path $trapConfigPath -Force }
-    Set-ItemProperty -Path $trapConfigPath -Name "1" -Value $TrapDestination -Type String -Force
-    Write-Host "Set trap destination to '$TrapDestination'."
+    if (!(Test-Path $trapConfigPath)) { New-Item -Path $trapConfigPath -Force | Out-Null }
+    Set-ItemProperty -Path $trapConfigPath -Name "1" -Value $TrapDestination
+    Write-Host " - Trap destination set to '$TrapDestination'."
 
-    # Step 3: Ensure Firewall allows SNMP traffic
-    $ruleName = "SNMP"
+    # Step 3: Configure Windows Firewall
+    Write-Host "Step 3: Configuring Windows Firewall..."
+    $ruleName = "SNMP Traps (UDP-Out)"
     $firewallRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-    if (-not $firewallRule) {
-        Write-Host "Firewall rule '$ruleName' not found. Creating..."
-        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol UDP -LocalPort 161 -Action Allow -Profile Any -ErrorAction Stop
-    } else {
-        Write-Host "Firewall rule '$ruleName' already exists. Ensuring it is enabled."
-        Enable-NetFirewallRule -DisplayName $ruleName -ErrorAction Stop
-    }
     
-    # The Trap service rule
-    $trapRuleName = "SNMPTRAP"
-     $trapFirewallRule = Get-NetFirewallRule -DisplayName $trapRuleName -ErrorAction SilentlyContinue
-    if (-not $trapFirewallRule) {
-        Write-Host "Firewall rule '$trapRuleName' not found. Creating..."
-        New-NetFirewallRule -DisplayName $trapRuleName -Direction Inbound -Protocol UDP -LocalPort 162 -Action Allow -Profile Any -ErrorAction Stop
+    if (!$firewallRule) {
+        Write-Host " - Firewall rule '$ruleName' not found. Creating..."
+        New-NetFirewallRule -DisplayName $ruleName -Direction Outbound -Protocol UDP -RemotePort 162 -Action Allow
     } else {
-        Write-Host "Firewall rule '$trapRuleName' already exists. Ensuring it is enabled."
-        Enable-NetFirewallRule -DisplayName $trapRuleName -ErrorAction Stop
+        Write-Host " - Firewall rule '$ruleName' already exists. Ensuring it is enabled."
+        Enable-NetFirewallRule -DisplayName $ruleName
     }
-
-    # Step 4: Restart the SNMP Service to apply all registry changes
-    Write-Host "Restarting SNMP Service..."
-    Restart-Service -Name "SNMP" -Force
-
-    # Step 5: Send a test trap to confirm connectivity
-    # This requires the 'trapgen.exe' utility, which should be available with SNMP.
+    Write-Host "Firewall configured."
+    
+    # Step 4: Send a test trap
+    Write-Host "Step 4: Sending a test trap to confirm configuration..."
     try {
-        Write-Host "Sending a test trap to $TrapDestination..."
-        # Generic trap, enterprise OID, generic trap ID 6 (enterpriseSpecific), specific trap ID 1
-        trapgen -d $TrapDestination -c $CommunityString -g 6 -s 1 1.3.6.1.4.1.9999.1.0 ""
-        Write-Host "Test trap sent."
+        # Check for trapgen.exe
+        $trapgenPath = Join-Path -Path $env:SystemRoot -ChildPath "System32\trapgen.exe"
+        if (Test-Path $trapgenPath) {
+            trapgen -d $TrapDestination -c $CommunityString -g 6 -s 1 -o 1.3.6.1.4.1 -t 60
+            Write-Host " - Test trap sent successfully via trapgen.exe."
+        } else {
+            Write-Warning " - trapgen.exe not found. Cannot send a test trap. Configuration is likely complete, but cannot be verified automatically."
+        }
     } catch {
-        Write-Warning "Could not send a test trap using 'trapgen.exe'. The utility might not be in the system's PATH. However, configuration may still be successful."
+        Write-Warning " - Could not send a test trap: $($_.Exception.Message)"
     }
 
     Write-Host "SNMP configuration completed successfully."
+    exit 0
 
 } catch {
-    Write-Error "An error occurred during SNMP configuration: $_"
+    # Output error for debugging
+    $errorMessage = "An error occurred during SNMP configuration: $($_.Exception.Message)"
+    Write-Error $errorMessage
     exit 1
 }
-
-exit 0
-
-    

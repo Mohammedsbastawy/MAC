@@ -52,6 +52,7 @@ import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -157,6 +158,12 @@ const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device
     );
 };
 
+type SnmpLogEntry = {
+    deviceId: string;
+    deviceName: string;
+    log: string;
+    status: 'pending' | 'success' | 'error';
+}
 
 export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isAdLoading, setIsAdLoading] = React.useState(true);
@@ -176,6 +183,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [selectedDevicesForSnmp, setSelectedDevicesForSnmp] = React.useState<Set<string>>(new Set());
   const [snmpConfigProgress, setSnmpConfigProgress] = React.useState(0);
   const [isSnmpConfiguring, setIsSnmpConfiguring] = React.useState(false);
+  const [snmpLogs, setSnmpLogs] = React.useState<SnmpLogEntry[]>([]);
 
 
   // Fetch initial data (AD computers and network interfaces) on mount
@@ -412,36 +420,46 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           toast({ variant: "destructive", title: "No Devices Selected", description: "Please select at least one device to configure." });
           return;
       }
+      
+      const devicesToConfigure = allDevices.filter(d => selectedDevicesForSnmp.has(d.id));
+      
+      setSnmpLogs(devicesToConfigure.map(d => ({
+          deviceId: d.id,
+          deviceName: d.name,
+          log: "Queued...",
+          status: 'pending'
+      })));
       setIsSnmpConfiguring(true);
       setSnmpConfigProgress(0);
       
-      const devicesToConfigure = allDevices.filter(d => selectedDevicesForSnmp.has(d.id));
+      toast({ title: "Starting SNMP Configuration", description: `Configuring ${devicesToConfigure.length} devices...` });
+
       let successfulCount = 0;
       let failedCount = 0;
-      
-      toast({ title: "Starting SNMP Configuration", description: `Configuring ${devicesToConfigure.length} devices...` });
 
       for (let i = 0; i < devicesToConfigure.length; i++) {
           const device = devicesToConfigure[i];
+          
+          setSnmpLogs(prev => prev.map(log => log.deviceId === device.id ? { ...log, log: "Configuring...", status: 'pending' } : log));
+
           try {
               const res = await fetch('/api/pstools/enable-snmp', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ ip: device.ipAddress, server_ip: interfaces[0]?.ip || '127.0.0.1' })
               });
-              if (res.ok) {
-                  const data = await res.json();
-                  if (data.ok) {
-                    successfulCount++;
-                  } else {
-                    failedCount++;
-                    console.error(`Failed to configure ${device.name}: ${data.details || data.error}`);
-                  }
+              const data = await res.json();
+              
+              if (res.ok && data.ok) {
+                  successfulCount++;
+                   setSnmpLogs(prev => prev.map(log => log.deviceId === device.id ? { ...log, log: data.details || "Success", status: 'success' } : log));
               } else {
                   failedCount++;
+                   setSnmpLogs(prev => prev.map(log => log.deviceId === device.id ? { ...log, log: data.details || data.error || "An unknown error occurred.", status: 'error' } : log));
               }
-          } catch (e) {
+          } catch (e: any) {
               failedCount++;
+              setSnmpLogs(prev => prev.map(log => log.deviceId === device.id ? { ...log, log: e.message, status: 'error' } : log));
           }
           setSnmpConfigProgress(((i + 1) / devicesToConfigure.length) * 100);
       }
@@ -451,12 +469,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           description: `Successfully configured ${successfulCount} devices. Failed to configure ${failedCount} devices.`
       });
 
+      // Keep dialog open for review, but re-enable the button for another run
       setIsSnmpConfiguring(false);
-      setTimeout(() => {
-          setIsSnmpDialogOpen(false);
-          setSnmpConfigProgress(0);
-          setSelectedDevicesForSnmp(new Set());
-      }, 2000);
   };
 
   const allDevices = [...domainDevices, ...workgroupDevices];
@@ -563,25 +577,46 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 {(domainDevices.some(d => d.isLoadingDetails) || workgroupDevices.some(d => d.isLoadingDetails)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Refresh Online Status
             </Button>
-             <Dialog open={isSnmpDialogOpen} onOpenChange={setIsSnmpDialogOpen}>
+             <Dialog open={isSnmpDialogOpen} onOpenChange={(isOpen) => {
+                 if (!isOpen) {
+                     // Reset state when closing the dialog
+                     setIsSnmpDialogOpen(false);
+                     setIsSnmpConfiguring(false);
+                     setSnmpLogs([]);
+                     setSnmpConfigProgress(0);
+                 } else {
+                     setIsSnmpDialogOpen(true);
+                 }
+             }}>
                 <DialogTrigger asChild>
                     <Button size="lg" className="h-11" disabled={allDevices.length === 0}>
                         <Wrench className="mr-2 h-4 w-4" /> Configure SNMP
                     </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-2xl">
+                <DialogContent className="max-w-4xl">
                     <DialogHeader>
                         <DialogTitle>Configure SNMP on Devices</DialogTitle>
                         <DialogDescription>
-                            Select the devices you want to configure to send SNMP traps to this server.
+                            Select devices to configure them to send SNMP traps to this server. This requires the SNMP Service to be installed on the target machines.
                         </DialogDescription>
                     </DialogHeader>
-                    {isSnmpConfiguring ? (
-                        <div className="py-10 text-center">
-                            <h3 className="text-lg font-medium">Configuration in Progress...</h3>
-                            <Progress value={snmpConfigProgress} className="mt-4" />
-                            <p className="text-sm text-muted-foreground mt-2">{Math.round(snmpConfigProgress)}% Complete</p>
-                        </div>
+                    {snmpLogs.length > 0 ? (
+                         <div className="flex flex-col gap-4 py-4">
+                            <Progress value={snmpConfigProgress} />
+                            <ScrollArea className="h-96 w-full rounded-md border p-4 font-mono text-xs">
+                                {snmpLogs.map(log => (
+                                    <div key={log.deviceId} className="mb-4">
+                                        <div className="font-bold flex items-center gap-2">
+                                            {log.status === 'pending' && <Loader2 className="h-4 w-4 animate-spin" />}
+                                            {log.status === 'success' && <Check className="h-4 w-4 text-green-500" />}
+                                            {log.status === 'error' && <Siren className="h-4 w-4 text-red-500" />}
+                                            {log.deviceName}
+                                        </div>
+                                        <pre className={cn("whitespace-pre-wrap mt-1 pl-6", log.status === 'error' && 'text-red-500')}>{log.log}</pre>
+                                    </div>
+                                ))}
+                            </ScrollArea>
+                         </div>
                     ) : (
                     <>
                     <div className="flex items-center space-x-2 py-4">
@@ -590,7 +625,8 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                             Select All ({selectedDevicesForSnmp.size} / {allDevices.length} selected)
                         </Label>
                     </div>
-                    <div className="max-h-[50vh] overflow-y-auto rounded-md border">
+                    <ScrollArea className="h-[50vh] rounded-md border">
+                        <div className="p-1">
                         {allDevices.map((device) => (
                             <div key={device.id} className="flex items-center p-3 border-b last:border-b-0">
                                 <Checkbox 
@@ -608,15 +644,25 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                                 </Badge>
                             </div>
                         ))}
-                    </div>
-                    <DialogFooter className="pt-4">
-                        <Button variant="outline" onClick={() => setIsSnmpDialogOpen(false)}>Cancel</Button>
-                        <Button onClick={handleConfigureSnmp} disabled={selectedDevicesForSnmp.size === 0}>
-                            <Check className="mr-2 h-4 w-4" /> Configure {selectedDevicesForSnmp.size} Devices
-                        </Button>
-                    </DialogFooter>
+                        </div>
+                    </ScrollArea>
                     </>
                     )}
+                    <DialogFooter className="pt-4">
+                        <Button variant="outline" onClick={() => setIsSnmpDialogOpen(false)} disabled={isSnmpConfiguring}>
+                            {snmpLogs.length > 0 ? "Close" : "Cancel"}
+                        </Button>
+                        {snmpLogs.length === 0 && (
+                            <Button onClick={handleConfigureSnmp} disabled={selectedDevicesForSnmp.size === 0}>
+                                <Check className="mr-2 h-4 w-4" /> Configure {selectedDevicesForSnmp.size} Devices
+                            </Button>
+                        )}
+                         {snmpLogs.length > 0 && !isSnmpConfiguring && (
+                            <Button onClick={() => setSnmpLogs([])}>
+                                Configure More
+                            </Button>
+                        )}
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>
@@ -649,3 +695,4 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
+
