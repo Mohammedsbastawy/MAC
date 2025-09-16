@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -66,7 +58,7 @@ def get_auth_from_request(data):
 @pstools_bp.before_request
 def require_login_hook():
     # Allow access to psinfo from the monitoring page which may not have a body
-    if request.endpoint in ['pstools.api_psinfo', 'pstools.api_enable_snmp']:
+    if request.endpoint in ['pstools.api_enable_snmp']:
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -671,25 +663,35 @@ def api_enable_snmp():
         current_dir = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
         
+        # This is the correct, robust way to execute a script with parameters
+        # We pass the path to the script, then the arguments
+        
+        # Note: PsExec has trouble with paths containing spaces when calling powershell.
+        # It's safer to read the script content and pass it encoded.
         with open(script_path, 'r', encoding='utf-8') as f:
-            script_content_template = f.read()
+            script_content = f.read()
+
+        # The script is now parameterized, so we don't need to replace text.
+        # We will pass the server_ip as an argument to the powershell command.
+        
+        # Correctly encode the script content for reliable execution
+        encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
+        
+        # We build the argument list for powershell.exe itself
+        ps_args = [
+            "powershell.exe",
+            "-EncodedCommand", encoded_script,
+            "-ExecutionPolicy", "Bypass", # This is passed to the top-level powershell
+            "-TrapDestination", server_ip # This passes the parameter to our script
+        ]
+        
+        # The arguments for psexec are the powershell command and its arguments
+        rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, ps_args, timeout=300)
 
     except Exception as e:
         logger.error(f"Error reading or finding SNMP script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
     
-    # We will pass the server_ip as a parameter to the script
-    # This is a more robust way than replacing a placeholder.
-    ps_command_with_args = f"&{{ {script_content_template} }} -TrapDestination '{server_ip}'"
-    
-    # Encode the entire command block for reliable execution via PsExec
-    encoded_script = base64.b64encode(ps_command_with_args.encode('utf-16-le')).decode('ascii')
-    
-    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
-
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
-
-    # Combine stdout and stderr for a complete log. PsExec often puts useful info in stderr.
     full_details = (out or "") + "\n" + (err or "")
 
     if rc == 0:
@@ -706,6 +708,3 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": full_details.strip()
         }), 500
-
-    
-
