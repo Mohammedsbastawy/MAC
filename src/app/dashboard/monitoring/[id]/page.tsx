@@ -94,7 +94,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     if (isAutoRefresh) {
         const intervalId = setInterval(() => {
             fetchHistory(false);
-        }, 5000); // Refresh every 5 seconds
+        }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
   }, [isAutoRefresh, fetchHistory]);
