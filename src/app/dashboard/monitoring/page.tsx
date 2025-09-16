@@ -61,128 +61,33 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useRouter } from "next/navigation";
-
-
-const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
-    id: adComputer.dn, // Use the guaranteed unique Distinguished Name
-    name: adComputer.name,
-    ipAddress: adComputer.dns_hostname,
-    macAddress: "-",
-    status: 'unknown', // Initially unknown
-    type: determineDeviceType(adComputer.name),
-    os: adComputer.os,
-    lastSeen: adComputer.last_logon,
-    domain: adComputer.domain || "Domain",
-    isDomainMember: true,
-    isLoadingDetails: false,
-    source: 'ad',
-    isAgentDeployed: false, // Will be checked later
-    agentLastUpdate: null,
-});
-
-const determineDeviceType = (hostname: string): Device["type"] => {
-    if (!hostname) return 'unknown';
-    const lowerHostname = hostname.toLowerCase();
-    if (lowerHostname.includes("laptop")) return "laptop";
-    if (lowerHostname.includes("server")) return "server";
-    if (lowerHostname.includes("router") || lowerHostname.includes("gateway")) return "router";
-    if (lowerHostname.includes("phone") || lowerHostname.includes("mobile")) return "mobile";
-    if (lowerHostname.includes("desktop") || lowerHostname.includes("pc")) return "desktop";
-    if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light")) return "iot";
-    return "unknown";
-};
+import { useDeviceContext } from "@/hooks/use-device-context";
 
 
 export default function MonitoringPage() {
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [devices, setDevices] = React.useState<Device[]>([]);
+  const { 
+    devices, 
+    isLoading, 
+    error,
+    fetchAllDevices, 
+    fetchLiveData,
+    isUpdating,
+  } = useDeviceContext();
   const { toast } = useToast();
   const router = useRouter();
-  const [error, setError] = React.useState<{title: string, message: string, details?:string} | null>(null);
+  
   const [deploymentState, setDeploymentState] = React.useState<{isOpen: boolean, device: Device | null}>({isOpen: false, device: null});
   const [isDeploying, setIsDeploying] = React.useState(false);
   const [deploymentLog, setDeploymentLog] = React.useState("");
   
-  const fetchLiveData = React.useCallback(async (device: Device): Promise<Partial<Device>> => {
-    try {
-        const res = await fetch("/api/network/fetch-live-data", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: device.id, ip: device.ipAddress }),
-        });
-        const data = await res.json();
-        if(data.ok && data.liveData) {
-            return { isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp };
-        } else {
-            return { isAgentDeployed: false, agentLastUpdate: null };
-        }
-    } catch {
-        return { isAgentDeployed: false, agentLastUpdate: null };
-    }
-  }, []);
-
-  const fetchAllDevices = React.useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    setDevices([]);
-
-    try {
-        // 1. Fetch AD Computers
-        const adResponse = await fetch("/api/ad/get-computers", { method: "POST" });
-        const adData = await adResponse.json();
-        if (!adData.ok) {
-            throw adData;
-        }
-        let initialDevices: Device[] = adData.computers.map(mapAdComputerToDevice);
-        setDevices(initialDevices.map(d => ({ ...d, isLoadingDetails: true })));
-
-        // 2. Check Online Status
-        const onlineCheckResponse = await fetch("/api/network/check-status", {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ips: initialDevices.map(d => d.ipAddress).filter(Boolean) })
-        });
-        const onlineCheckData = await onlineCheckResponse.json();
-        if (!onlineCheckData.ok) throw new Error(onlineCheckData.error || "Status check failed.");
-        
-        const onlineIps = new Set<string>(onlineCheckData.online_ips);
-        const devicesWithStatus = initialDevices.map(d => ({
-            ...d,
-            status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-        }));
-        
-        // 3. For online devices, check agent status
-        const agentStatusChecks = devicesWithStatus.map(async (device) => {
-            if (device.status === 'online') {
-                const agentData = await fetchLiveData(device);
-                return { ...device, ...agentData, isLoadingDetails: false };
-            }
-            return { ...device, isLoadingDetails: false };
-        });
-
-        const finalDevices = await Promise.all(agentStatusChecks);
-
-        // 4. Final state update
-        setDevices(finalDevices);
-
-    } catch (err: any) {
-        setError({
-            title: err.error || "Server Error",
-            message: err.message || "Failed to connect to the server to get devices.",
-            details: err.details,
-        });
-        setDevices([]);
-    } finally {
-        setIsLoading(false);
-    }
-  }, [fetchLiveData]);
-
-
   React.useEffect(() => {
-    fetchAllDevices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Fetch devices only if they haven't been fetched yet by the context
+    if (devices.length === 0 && !isLoading) {
+      fetchAllDevices();
+    }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
+  
   const handleDeployAgent = async () => {
     if (!deploymentState.device) return;
     setIsDeploying(true);
@@ -199,10 +104,7 @@ export default function MonitoringPage() {
         if (data.ok) {
             toast({ title: "Update Successful", description: `Statics script has been run on ${deploymentState.device.name}.`});
             // Immediately fetch the new status for this device
-            const updatedDeviceState = await fetchLiveData(deploymentState.device);
-            setDevices(prev => prev.map(d => 
-                d.id === deploymentState.device!.id ? {...d, ...updatedDeviceState } : d
-            ));
+            fetchLiveData(deploymentState.device);
         } else {
              toast({ variant: "destructive", title: "Update Failed", description: data.error || "An unknown error occurred."});
         }
@@ -224,7 +126,7 @@ export default function MonitoringPage() {
       )
   }
 
-  if (error) {
+  if (error && devices.length === 0) {
     return (
         <div className="flex items-center justify-center h-full">
             <Alert variant="destructive" className="max-w-lg">
@@ -261,8 +163,8 @@ export default function MonitoringPage() {
                 </p>
             </div>
              <div className="flex items-center gap-2">
-                <Button onClick={() => fetchAllDevices()} disabled={isLoading || devices.some(d => d.isLoadingDetails)}>
-                    {isLoading || devices.some(d => d.isLoadingDetails) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                <Button onClick={() => fetchAllDevices()} disabled={isLoading || isUpdating}>
+                    {isLoading || isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Refresh Status
                 </Button>
             </div>
@@ -280,7 +182,7 @@ export default function MonitoringPage() {
                             <TableHead>Device Name</TableHead>
                             <TableHead>IP Address</TableHead>
                             <TableHead>Online Status</TableHead>
-                            <TableHead>Agent Status</TableHead>
+                            <TableHead>Last Status Update</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -366,18 +268,3 @@ export default function MonitoringPage() {
     </>
   );
 }
-
-
-    
-
-    
-
-
-
-
-    
-
-    
-
-    
-

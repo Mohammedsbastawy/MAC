@@ -47,6 +47,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
+import { useDeviceContext } from "@/hooks/use-device-context";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -70,34 +71,6 @@ type ScanErrorState = {
     details?: string;
     errorCode?: 'MASSCAN_NOT_FOUND' | 'MASSCAN_FAILED';
 }
-
-const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
-    id: adComputer.dn, // Use the guaranteed unique Distinguished Name
-    name: adComputer.name,
-    ipAddress: adComputer.dns_hostname,
-    macAddress: "-",
-    status: 'unknown', // Initially unknown
-    type: determineDeviceType(adComputer.name),
-    os: adComputer.os,
-    lastSeen: adComputer.last_logon,
-    domain: adComputer.domain || "Domain",
-    isDomainMember: true,
-    isLoadingDetails: false,
-    source: 'ad',
-});
-
-const determineDeviceType = (hostname: string): Device["type"] => {
-    if (!hostname) return 'unknown';
-    const lowerHostname = hostname.toLowerCase();
-    if (lowerHostname.includes("laptop")) return "laptop";
-    if (lowerHostname.includes("server")) return "server";
-    if (lowerHostname.includes("router") || lowerHostname.includes("gateway")) return "router";
-    if (lowerHostname.includes("phone") || lowerHostname.includes("mobile")) return "mobile";
-    if (lowerHostname.includes("desktop") || lowerHostname.includes("pc")) return "desktop";
-    if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light")) return "iot";
-    return "unknown";
-};
-
 
 const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device, onSelect }) => {
     const Icon = ICONS[device.type] || Laptop;
@@ -184,12 +157,19 @@ const DeviceList: React.FC<DeviceListProps & { devices: Device[], isLoading: boo
 
 
 export default function DevicesPage() {
-  const [isAdLoading, setIsAdLoading] = React.useState(true);
-  const [isScanLoading, setIsScanLoading] = React.useState(false);
-  const [domainDevices, setDomainDevices] = React.useState<Device[]>([]);
-  const [workgroupDevices, setWorkgroupDevices] = React.useState<Device[]>([]);
+  const { 
+    devices, 
+    isLoading: isAdLoading, 
+    isUpdating,
+    error,
+    fetchAllDevices,
+    refreshAllDeviceStatus 
+  } = useDeviceContext();
+  
   const { toast } = useToast();
   
+  const [isScanLoading, setIsScanLoading] = React.useState(false);
+  const [workgroupDevices, setWorkgroupDevices] = React.useState<Device[]>([]);
   const [interfaces, setInterfaces] = React.useState<NetworkInterface[]>([]);
   const [selectedCidr, setSelectedCidr] = React.useState<string | undefined>();
   const [networkError, setNetworkError] = React.useState<string | null>(null);
@@ -204,14 +184,24 @@ export default function DevicesPage() {
     setSelectedDevice(device);
     setIsPanelOpen(true);
   };
+  
+  const determineDeviceType = (hostname: string): Device["type"] => {
+    if (!hostname) return 'unknown';
+    const lowerHostname = hostname.toLowerCase();
+    if (lowerHostname.includes("laptop")) return "laptop";
+    if (lowerHostname.includes("server")) return "server";
+    if (lowerHostname.includes("router") || lowerHostname.includes("gateway")) return "router";
+    if (lowerHostname.includes("phone") || lowerHostname.includes("mobile")) return "mobile";
+    if (lowerHostname.includes("desktop") || lowerHostname.includes("pc")) return "desktop";
+    if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light")) return "iot";
+    return "unknown";
+};
+
 
   // Fetch initial data (AD computers and network interfaces) on mount
   React.useEffect(() => {
-    const fetchInitialData = async () => {
-        setIsAdLoading(true);
+    const fetchInterfaceData = async () => {
         setNetworkError(null);
-        setScanError(null);
-
         // Fetch network interfaces
         try {
             const res = await fetch("/api/network-interfaces", { method: 'POST' });
@@ -227,124 +217,22 @@ export default function DevicesPage() {
         } catch (err) {
              setNetworkError("Failed to fetch network interfaces.");
         }
-
-        // Fetch AD Computers
-        try {
-            const response = await fetch("/api/ad/get-computers", { method: "POST" });
-            const data = await response.json();
-            if (data.ok) {
-                const adDevices = data.computers.map(mapAdComputerToDevice);
-                setDomainDevices(adDevices);
-            } else {
-                 setScanError({
-                    isError: true,
-                    title: data.error || "AD Error",
-                    message: data.message || `Failed to fetch devices from Active Directory.`,
-                    details: data.details,
-                });
-            }
-        } catch (err) {
-            setScanError({ isError: true, title: "Server Error", message: "Failed to connect to the server to get AD devices." });
-        }
-
-        setIsAdLoading(false);
     };
-    fetchInitialData();
+    
+    fetchInterfaceData();
+    if (devices.length === 0) {
+      fetchAllDevices();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRefreshStatus = async () => {
-      const allDevices = [...domainDevices, ...workgroupDevices];
-      const ipsToCheck = allDevices.map(d => d.ipAddress).filter(Boolean);
-
-      if (ipsToCheck.length === 0) {
+      const allIps = [...devices, ...workgroupDevices].map(d => d.ipAddress).filter(Boolean);
+      if (allIps.length === 0) {
           toast({ title: "No devices to check" });
           return;
       }
-
-      toast({ title: "Refreshing Status...", description: `Checking ${ipsToCheck.length} devices.` });
-
-      const updateDeviceLists = (updateFn: (d: Device) => Partial<Device>) => {
-          setDomainDevices(prev => prev.map(d => ({ ...d, ...updateFn(d) })));
-          setWorkgroupDevices(prev => prev.map(d => ({ ...d, ...updateFn(d) })));
-      };
-
-      // Set all devices to loading
-      updateDeviceLists(() => ({ isLoadingDetails: true, status: 'unknown' }));
-
-      let onlineIps = new Set<string>();
-
-      try {
-          // --- Phase 1: Ping Scan ---
-          const pingRes = await fetch("/api/network/check-status-ping", {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ips: ipsToCheck })
-          });
-          
-          let pingData;
-          try {
-              pingData = await pingRes.json();
-          } catch (e) {
-              const resClone = pingRes.clone();
-              try {
-                const textError = await resClone.text();
-                throw new Error(`Received an invalid response from the server during ping scan. Details: ${textError}`);
-              } catch {
-                throw new Error("Received an invalid and unreadable response from the server during ping scan.");
-              }
-          }
-          if (!pingData.ok) throw new Error(pingData.error || "Ping scan failed on the server.");
-          onlineIps = new Set<string>(pingData.online_ips);
-          
-          const ipsForPortScan = ipsToCheck.filter(ip => !onlineIps.has(ip));
-          toast({ title: "Ping Scan Complete", description: `Found ${onlineIps.size} devices. Now checking ${ipsForPortScan.length} more.` });
-
-          updateDeviceLists(d => {
-              const isOnline = onlineIps.has(d.ipAddress) || onlineIps.has(d.name);
-              return {
-                  status: isOnline ? 'online' : 'unknown',
-                  isLoadingDetails: !isOnline
-              };
-          });
-
-          // --- Phase 2: Port Scan ---
-          if (ipsForPortScan.length > 0) {
-              const portScanRes = await fetch("/api/network/check-status-ports", {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ ips: ipsForPortScan })
-              });
-              
-              let portScanData;
-              try {
-                  portScanData = await portScanRes.json();
-              } catch(e) {
-                 const resClone = portScanRes.clone();
-                 try {
-                    const textError = await resClone.text();
-                    throw new Error(`Received an invalid response from the server during Port scan. Details: ${textError}`);
-                 } catch {
-                    throw new Error("Received an invalid and unreadable response from the server during Port scan.");
-                 }
-              }
-              
-              if (!portScanData.ok) throw new Error(portScanData.error || "Port scan failed on the server.");
-              
-              portScanData.online_ips.forEach((ip: string) => onlineIps.add(ip));
-              toast({ title: "Status Refresh Complete", description: `Total online: ${onlineIps.size}.` });
-          } else {
-              toast({ title: "Status Refresh Complete", description: "All responsive devices found by ping." });
-          }
-
-      } catch (err: any) {
-          toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
-      } finally {
-          updateDeviceLists(d => ({
-              status: (onlineIps.has(d.ipAddress) || onlineIps.has(d.name)) ? 'online' : 'offline',
-              isLoadingDetails: false
-          }));
-      }
+      await refreshAllDeviceStatus();
   };
 
 
@@ -395,8 +283,8 @@ export default function DevicesPage() {
             source: 'scan',
         } as Device));
 
-        const domainIps = new Set(domainDevices.map(d => d.ipAddress).filter(Boolean));
-        const domainNames = new Set(domainDevices.map(d => d.name.toLowerCase()));
+        const domainIps = new Set(devices.map(d => d.ipAddress).filter(Boolean));
+        const domainNames = new Set(devices.map(d => d.name.toLowerCase()));
 
         const filteredWorkgroupDevices = discoveredRaw.filter((scannedDevice: Device) => {
             const isIpInDomain = domainIps.has(scannedDevice.ipAddress);
@@ -414,7 +302,7 @@ export default function DevicesPage() {
     }
   };
 
-  const allDevices = [...domainDevices, ...workgroupDevices];
+  const allDevices = [...devices, ...workgroupDevices];
   
   return (
     <>
@@ -431,15 +319,20 @@ export default function DevicesPage() {
                 <NotebookText className="mr-2 h-4 w-4" />
                 View Logs
             </Button>
-            <Button onClick={handleRefreshStatus} disabled={isAdLoading || (domainDevices.length === 0 && workgroupDevices.length === 0)} size="lg" className="h-11">
-                {(domainDevices.some(d => d.isLoadingDetails) || workgroupDevices.some(d => d.isLoadingDetails)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            <Button onClick={handleRefreshStatus} disabled={isAdLoading || isUpdating || allDevices.length === 0} size="lg" className="h-11">
+                {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Refresh Online Status
             </Button>
         </div>
       </div>
       
         <div className="space-y-8">
-            <DeviceList onSelectDevice={handleSelectDevice} devices={allDevices} isLoading={isAdLoading}/>
+            {error && <Alert variant="destructive">
+                <Siren className="h-4 w-4" />
+                <AlertTitle>{error.title}</AlertTitle>
+                <AlertDescription>{error.message}</AlertDescription>
+            </Alert>}
+            <DeviceList onSelectDevice={handleSelectDevice} devices={devices} isLoading={isAdLoading && devices.length === 0}/>
 
             <Separator />
             <div>
@@ -474,14 +367,13 @@ export default function DevicesPage() {
                         </Button>
                     </div>
                 </div>
-                { isScanLoading && (
+                 { isScanLoading ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
                         {Array.from({ length: 4 }).map((_, i) => (
                             <Skeleton key={i} className="h-40" />
                         ))}
                     </div>
-                )}
-                { scanError?.isError && (
+                ) : scanError?.isError ? (
                     <Alert variant="destructive" className="mt-4">
                         <Siren className="h-4 w-4" />
                         <AlertTitle>{scanError.title}</AlertTitle>
@@ -495,6 +387,8 @@ export default function DevicesPage() {
                             )}
                         </AlertDescription>
                     </Alert>
+                ) : (
+                     <DeviceList onSelectDevice={handleSelectDevice} devices={workgroupDevices} isLoading={false} />
                 )}
             </div>
         </div>
