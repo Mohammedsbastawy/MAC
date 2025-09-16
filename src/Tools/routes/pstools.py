@@ -4,6 +4,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -666,16 +667,12 @@ def api_enable_snmp():
     logger.info(f"Starting SNMP configuration on {ip} to send traps to {server_ip}.")
     
     try:
-        # Construct the path to the script relative to the current file
         current_dir = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
         
-        if not os.path.exists(script_path):
-             logger.error(f"EnableSnmp.ps1 script not found at {script_path}")
-             return jsonify({"ok": False, "error": "EnableSnmp.ps1 script not found on the server."}), 500
-
         with open(script_path, 'r', encoding='utf-8') as f:
             script_content = f.read()
+
     except Exception as e:
         logger.error(f"Error reading or finding SNMP script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
@@ -688,7 +685,7 @@ def api_enable_snmp():
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-    if rc == 0:
+    if "SNMP configuration completed successfully" in out or (rc == 0 and not err):
         logger.info(f"SNMP configuration script executed successfully on {ip}.")
         return jsonify({
             "ok": True,
@@ -702,3 +699,4 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": err or out
         }), 500
+    
