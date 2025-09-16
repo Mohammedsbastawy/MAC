@@ -670,8 +670,8 @@ def api_enable_snmp():
         logger.error(f"Error reading or finding SNMP script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
     
-    # Inject the server_ip into the script content
-    script_content = script_content_template.replace('$TrapDestination', f"'{server_ip}'")
+    # Inject the server_ip into the script content by defining it as a variable at the top of the script.
+    script_content = f"$TrapDestination = '{server_ip}'\n{script_content_template}"
     
     # Encode the modified script for -EncodedCommand
     encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
