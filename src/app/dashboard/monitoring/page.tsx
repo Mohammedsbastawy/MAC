@@ -102,11 +102,10 @@ export default function MonitoringPage() {
   const [isDeploying, setIsDeploying] = React.useState(false);
   const [deploymentLog, setDeploymentLog] = React.useState("");
   
-  const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]) => {
+  const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]): Promise<Device[]> => {
       const agentChecks = devicesToCheck.map(async (device) => {
-        // We only check agent status for online devices
         if (device.status !== 'online') {
-            return { id: device.id, isAgentDeployed: false };
+            return device; // Return as-is if not online
         }
         try {
             const res = await fetch("/api/pstools/psinfo", {
@@ -115,34 +114,19 @@ export default function MonitoringPage() {
               body: JSON.stringify({ ip: device.ipAddress, name: device.name })
             });
             const data = await res.json();
-            return { id: device.id, isAgentDeployed: data.ok };
+            return { ...device, isAgentDeployed: data.ok };
         } catch {
-            return { id: device.id, isAgentDeployed: false };
+            return { ...device, isAgentDeployed: false };
         }
       });
 
-      const results = await Promise.all(agentChecks);
-      
-      setDevices(prevDevices => {
-          const newDevices = [...prevDevices];
-          results.forEach(result => {
-              if (result) {
-                  const { id, isAgentDeployed } = result;
-                  const deviceIndex = newDevices.findIndex(d => d.id === id);
-                  if (deviceIndex > -1) {
-                      newDevices[deviceIndex].isAgentDeployed = isAgentDeployed;
-                  }
-              }
-          });
-          return newDevices;
-      });
+      return await Promise.all(agentChecks);
   }, []);
 
-  const checkOnlineStatus = React.useCallback(async (deviceList: Device[]) => {
+  const checkOnlineStatus = React.useCallback(async (deviceList: Device[]): Promise<Device[]> => {
       const ipsToCheck = deviceList.map(d => d.ipAddress).filter(Boolean);
       if (ipsToCheck.length === 0) {
-        setIsLoading(false);
-        return deviceList; // Return original list if nothing to check
+        return deviceList;
       };
 
       setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true, status: 'unknown' })));
@@ -161,42 +145,41 @@ export default function MonitoringPage() {
           const updatedDevices = deviceList.map(d => ({
               ...d,
               status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-              isLoadingDetails: false
           }));
-
-          setDevices(updatedDevices);
-          return updatedDevices; // Return the updated list
+          return updatedDevices;
 
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
-           setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: false, status: 'unknown' })));
-           return deviceList; // Return original list on error
+           return deviceList.map(d => ({ ...d, status: 'unknown' }));
       }
   }, [toast]);
 
   const fetchAllDevices = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    setDevices([]);
     try {
         const response = await fetch("/api/ad/get-computers", { method: "POST" });
         const data = await response.json();
-        if (data.ok) {
-            const adDevices = data.computers.map(mapAdComputerToDevice);
-            setDevices(adDevices); // Set initial list
-            const devicesWithStatus = await checkOnlineStatus(adDevices);
-            const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
-            if (onlineDevices.length > 0) {
-                await checkAgentStatus(onlineDevices);
-            }
-        } else {
-             setError({
-                title: data.error || "AD Error",
-                message: data.message || `Failed to fetch devices from Active Directory.`,
-                details: data.details,
-            });
+        if (!data.ok) {
+            throw data; // Throw the error response to be caught below
         }
-    } catch (err) {
-        setError({ title: "Server Error", message: "Failed to connect to the server to get devices." });
+
+        const adDevices = data.computers.map(mapAdComputerToDevice);
+        setDevices(adDevices); // Set initial list with loading state
+
+        const devicesWithStatus = await checkOnlineStatus(adDevices);
+        const devicesWithAgentStatus = await checkAgentStatus(devicesWithStatus);
+        
+        // Final update with all statuses
+        setDevices(devicesWithAgentStatus.map(d => ({ ...d, isLoadingDetails: false })));
+
+    } catch (err: any) {
+        setError({
+            title: err.error || "Server Error",
+            message: err.message || "Failed to connect to the server to get devices.",
+            details: err.details,
+        });
     } finally {
         setIsLoading(false);
     }
@@ -380,4 +363,5 @@ export default function MonitoringPage() {
     
 
     
+
 
