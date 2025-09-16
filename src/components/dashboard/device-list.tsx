@@ -12,21 +12,15 @@ import {
   Server,
   Smartphone,
   ToyBrick,
-  Wifi,
-  WifiOff,
   Users,
   Briefcase,
-  Zap,
-  CheckCircle2,
-  XCircle,
-  HelpCircle,
-  ShieldAlert,
-  DownloadCloud,
-  Siren,
-  FileText,
   Search,
   RefreshCw,
-  NotebookText
+  NotebookText,
+  Siren,
+  FileText,
+  Wrench,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,12 +44,14 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "../ui/badge";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../ui/alert-dialog";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import Link from "next/link";
 import { Input } from "../ui/input";
 import { Separator } from "../ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "../ui/dialog";
+import { Checkbox } from "../ui/checkbox";
+import { Progress } from "../ui/progress";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -175,6 +171,13 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [scanError, setScanError] = React.useState<ScanErrorState | null>(null);
   const [errorDialog, setErrorDialog] = React.useState<{isOpen: boolean, title: string, content: string}>({ isOpen: false, title: '', content: '' });
 
+  // State for SNMP configuration dialog
+  const [isSnmpDialogOpen, setIsSnmpDialogOpen] = React.useState(false);
+  const [selectedDevicesForSnmp, setSelectedDevicesForSnmp] = React.useState<Set<string>>(new Set());
+  const [snmpConfigProgress, setSnmpConfigProgress] = React.useState(0);
+  const [isSnmpConfiguring, setIsSnmpConfiguring] = React.useState(false);
+
+
   // Fetch initial data (AD computers and network interfaces) on mount
   React.useEffect(() => {
     const fetchInitialData = async () => {
@@ -256,7 +259,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           try {
               pingData = await pingRes.json();
           } catch (e) {
-              // Clone the response to be able to read it again
               const resClone = pingRes.clone();
               try {
                 const textError = await resClone.text();
@@ -271,12 +273,11 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           const ipsForPortScan = ipsToCheck.filter(ip => !onlineIps.has(ip));
           toast({ title: "Ping Scan Complete", description: `Found ${onlineIps.size} devices. Now checking ${ipsForPortScan.length} more.` });
 
-          // Update UI immediately after ping scan
           updateDeviceLists(d => {
               const isOnline = onlineIps.has(d.ipAddress) || onlineIps.has(d.name);
               return {
                   status: isOnline ? 'online' : 'unknown',
-                  isLoadingDetails: !isOnline // Stop loading only for online devices
+                  isLoadingDetails: !isOnline
               };
           });
 
@@ -303,7 +304,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
               
               if (!portScanData.ok) throw new Error(portScanData.error || "Port scan failed on the server.");
               
-              // Add new online IPs to the existing set
               portScanData.online_ips.forEach((ip: string) => onlineIps.add(ip));
               toast({ title: "Status Refresh Complete", description: `Total online: ${onlineIps.size}.` });
           } else {
@@ -313,7 +313,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
       } finally {
-          // Final update for all devices
           updateDeviceLists(d => ({
               status: (onlineIps.has(d.ipAddress) || onlineIps.has(d.name)) ? 'online' : 'offline',
               isLoadingDetails: false
@@ -369,7 +368,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             source: 'scan',
         } as Device));
 
-        // **Robust Filtering Logic**
         const domainIps = new Set(domainDevices.map(d => d.ipAddress).filter(Boolean));
         const domainNames = new Set(domainDevices.map(d => d.name.toLowerCase()));
 
@@ -379,27 +377,84 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             return !isIpInDomain && !isNameInDomain;
         });
 
-
         toast({ title: "Workgroup Scan Complete", description: `Found ${filteredWorkgroupDevices.length} new non-domain devices.`});
         setWorkgroupDevices(filteredWorkgroupDevices);
 
     } catch (err: any) {
         setScanError({ isError: true, title: "Client Error", message: err.message || "An unknown client-side error occurred." });
-        console.error(err);
     } finally {
       setIsScanLoading(false);
     }
   };
 
+  const handleToggleSelectDevice = (deviceId: string) => {
+      setSelectedDevicesForSnmp(prev => {
+          const newSet = new Set(prev);
+          if (newSet.has(deviceId)) {
+              newSet.delete(deviceId);
+          } else {
+              newSet.add(deviceId);
+          }
+          return newSet;
+      });
+  };
 
-  const handleViewLogs = () => {
-    window.open('/dashboard/logs', '_blank');
-  }
+  const handleSelectAllDevices = () => {
+    if (selectedDevicesForSnmp.size === allDevices.length) {
+        setSelectedDevicesForSnmp(new Set());
+    } else {
+        setSelectedDevicesForSnmp(new Set(allDevices.map(d => d.id)));
+    }
+  };
+
+  const handleConfigureSnmp = async () => {
+      if (selectedDevicesForSnmp.size === 0) {
+          toast({ variant: "destructive", title: "No Devices Selected", description: "Please select at least one device to configure." });
+          return;
+      }
+      setIsSnmpConfiguring(true);
+      setSnmpConfigProgress(0);
+      
+      const devicesToConfigure = allDevices.filter(d => selectedDevicesForSnmp.has(d.id));
+      let successfulCount = 0;
+      let failedCount = 0;
+      
+      toast({ title: "Starting SNMP Configuration", description: `Configuring ${devicesToConfigure.length} devices...` });
+
+      for (let i = 0; i < devicesToConfigure.length; i++) {
+          const device = devicesToConfigure[i];
+          try {
+              const res = await fetch('/api/pstools/enable-snmp', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ ip: device.ipAddress, server_ip: interfaces[0]?.ip || '127.0.0.1' })
+              });
+              if (res.ok) {
+                  successfulCount++;
+              } else {
+                  failedCount++;
+              }
+          } catch (e) {
+              failedCount++;
+          }
+          setSnmpConfigProgress(((i + 1) / devicesToConfigure.length) * 100);
+      }
+      
+      toast({
+          title: "Configuration Complete",
+          description: `Successfully configured ${successfulCount} devices. Failed to configure ${failedCount} devices.`
+      });
+
+      setIsSnmpConfiguring(false);
+      setTimeout(() => {
+          setIsSnmpDialogOpen(false);
+          setSnmpConfigProgress(0);
+          setSelectedDevicesForSnmp(new Set());
+      }, 2000);
+  };
 
   const allDevices = [...domainDevices, ...workgroupDevices];
-  // Create a unique ID for each device for the key prop
   const getUniqueKey = (device: Device) => device.id;
-
 
   const renderContent = () => {
     return (
@@ -423,7 +478,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           </div>
         )}
 
-        {/* Separator and Workgroup section */}
         <Separator />
          <div>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between">
@@ -480,7 +534,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 </Alert>
             )}
         </div>
-
       </div>
     );
   };
@@ -496,7 +549,7 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-             <Button onClick={handleViewLogs} variant="outline" size="lg" className="h-11">
+             <Button onClick={() => window.open('/dashboard/logs', '_blank')} variant="outline" size="lg" className="h-11">
                 <NotebookText className="mr-2 h-4 w-4" />
                 View Logs
             </Button>
@@ -504,6 +557,62 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
                 {(domainDevices.some(d => d.isLoadingDetails) || workgroupDevices.some(d => d.isLoadingDetails)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                 Refresh Online Status
             </Button>
+             <Dialog open={isSnmpDialogOpen} onOpenChange={setIsSnmpDialogOpen}>
+                <DialogTrigger asChild>
+                    <Button size="lg" className="h-11" disabled={allDevices.length === 0}>
+                        <Wrench className="mr-2 h-4 w-4" /> Configure SNMP
+                    </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Configure SNMP on Devices</DialogTitle>
+                        <DialogDescription>
+                            Select the devices you want to configure to send SNMP traps to this server.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {isSnmpConfiguring ? (
+                        <div className="py-10 text-center">
+                            <h3 className="text-lg font-medium">Configuration in Progress...</h3>
+                            <Progress value={snmpConfigProgress} className="mt-4" />
+                            <p className="text-sm text-muted-foreground mt-2">{Math.round(snmpConfigProgress)}% Complete</p>
+                        </div>
+                    ) : (
+                    <>
+                    <div className="flex items-center space-x-2 py-4">
+                        <Checkbox id="select-all" onCheckedChange={handleSelectAllDevices} checked={selectedDevicesForSnmp.size === allDevices.length && allDevices.length > 0} />
+                        <Label htmlFor="select-all" className="font-medium">
+                            Select All ({selectedDevicesForSnmp.size} / {allDevices.length} selected)
+                        </Label>
+                    </div>
+                    <div className="max-h-[50vh] overflow-y-auto rounded-md border">
+                        {allDevices.map((device) => (
+                            <div key={device.id} className="flex items-center p-3 border-b last:border-b-0">
+                                <Checkbox 
+                                    id={`device-${device.id}`}
+                                    checked={selectedDevicesForSnmp.has(device.id)}
+                                    onCheckedChange={() => handleToggleSelectDevice(device.id)}
+                                    className="mr-3"
+                                />
+                                <div className="flex-1">
+                                    <Label htmlFor={`device-${device.id}`} className="font-medium">{device.name}</Label>
+                                    <p className="text-xs text-muted-foreground">{device.ipAddress}</p>
+                                </div>
+                                <Badge variant={device.status === 'online' ? 'default' : 'secondary'} className={cn(device.status === 'online' && 'bg-green-600')}>
+                                    {device.status}
+                                </Badge>
+                            </div>
+                        ))}
+                    </div>
+                    <DialogFooter className="pt-4">
+                        <Button variant="outline" onClick={() => setIsSnmpDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={handleConfigureSnmp} disabled={selectedDevicesForSnmp.size === 0}>
+                            <Check className="mr-2 h-4 w-4" /> Configure {selectedDevicesForSnmp.size} Devices
+                        </Button>
+                    </DialogFooter>
+                    </>
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
       </div>
       {renderContent()}

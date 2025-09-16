@@ -1,6 +1,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -61,7 +62,7 @@ def get_auth_from_request(data):
 @pstools_bp.before_request
 def require_login_hook():
     # Allow access to psinfo from the monitoring page which may not have a body
-    if request.endpoint == 'pstools.api_psinfo' or request.endpoint == 'pstools.api_deploy_agent':
+    if request.endpoint == 'pstools.api_psinfo' or request.endpoint == 'pstools.api_deploy_agent' or request.endpoint == 'pstools.api_enable_snmp':
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -226,7 +227,6 @@ def api_psinfo():
 
     logger.info(f"Reading performance data for '{device_name}' from agent file on {ip}.")
     
-    # Path to the agent's data file on the remote machine
     remote_file_path = f"C:\\Atlas\\{device_name}.json"
     ps_command = f"Get-Content -Path '{remote_file_path}' -Raw"
 
@@ -240,7 +240,6 @@ def api_psinfo():
         perf_data = json.loads(out)
         structured_data = {"psinfo": perf_data}
 
-        # --- Historical Logging ---
         log_file = os.path.join(LOGS_DIR, f"{device_name}.json")
         history = []
         if os.path.exists(log_file):
@@ -264,11 +263,11 @@ def api_psinfo():
                 if now - datetime.datetime.fromisoformat(entry["timestamp"].replace('Z','+00:00')) < retention_delta
             ]
         except (TypeError, ValueError):
-            # If timestamps are bad, just keep the latest 500 entries as a fallback
              history = history[-500:]
 
         
         try:
+            os.makedirs(LOGS_DIR, exist_ok=True)
             with open(log_file, 'w') as f:
                 json.dump(history, f)
         except IOError as e:
@@ -502,18 +501,15 @@ def upload_file():
         return json_result(1, "", "Destination path and file content are required.")
     
     logger.info(f"Initiating upload to '{dest_path}' on {ip}")
-    # We send the content in chunks to avoid PowerShell command length limits
     chunk_size = 8000 
     chunks = [content_b64[i:i + chunk_size] for i in range(0, len(content_b64), chunk_size)]
     
-    # Command to create/overwrite the file
     ps_command_create = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{chunks[0]}'); [System.IO.File]::WriteAllBytes($path, $data)"
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command_create)
     if rc != 0:
         logger.error(f"Upload failed (initial chunk) to {dest_path} on {ip}. Error: {err}")
         return json_result(rc, out, f"Failed to create file on remote host. {err}")
         
-    # Commands to append subsequent chunks
     for chunk in chunks[1:]:
         ps_command_append = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{chunk}'); [System.IO.File]::AppendAllBytes($path, $data)"
         rc_append, out_append, err_append = run_winrm_command(ip, winrm_user, pwd, ps_command_append)
@@ -563,7 +559,6 @@ def api_enable_winrm():
 
     logger.info(f"Attempting to robustly enable WinRM on {ip} using PsExec.")
 
-    # Note: Double quotes inside the command need to be escaped for the shell.
     chained_command = (
         'winrm quickconfig -q && '
         'sc config winrm start= auto && '
@@ -575,8 +570,6 @@ def api_enable_winrm():
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     
-    # Check for success messages in stdout, even if RC is non-zero (e.g. service already started)
-    # RC 2 can mean the service was already started, which is not a failure for our goal.
     if rc == 0 or (rc != 0 and "service has already been started" in err):
         logger.info(f"Successfully sent WinRM configuration commands to {ip}.")
         final_message = out + "\n" + err if err else out
@@ -638,7 +631,6 @@ def api_set_network_private():
 
     logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
 
-    # This command attempts to run PowerShell with elevated privileges to change the network profile.
     ps_command = 'Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private'
     cmd_args = ["powershell.exe", "-Command", ps_command]
     
@@ -659,61 +651,45 @@ def api_set_network_private():
             "details": err or out
         }), 500
 
-@pstools_bp.route('/deploy-agent', methods=['POST'])
-def api_deploy_agent():
+@pstools_bp.route('/enable-snmp', methods=['POST'])
+def api_enable_snmp():
     data = request.get_json() or {}
     ip = data.get("ip")
-    device_name = data.get("name")
+    server_ip = data.get("server_ip")
     user, domain, pwd, _ = get_auth_from_request(data)
+
+    if not ip or not server_ip:
+        return jsonify({"ok": False, "error": "Target IP and Server IP are required."}), 400
+
+    logger.info(f"Starting SNMP configuration on {ip} to send traps to {server_ip}.")
     
-    if not ip or not device_name:
-        return jsonify({"ok": False, "error": "IP address and device name are required."}), 400
-
-    logger.info(f"Starting agent deployment on {ip}.")
-    agent_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'AtlasMonitorAgent.ps1'))
-    
-    if not os.path.exists(agent_script_path):
-        logger.error(f"Agent script not found at {agent_script_path}")
-        return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
-
-    # --- Step 1: Create C:\Atlas folder ---
-    logger.info(f"Step 1/2: Creating C:\\Atlas directory on {ip}.")
-    mkdir_rc, _, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
-    # Gracefully handle the error if the directory already exists (error code 1 for mkdir)
-    if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
-        logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
-        return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err}), 500
-
-    # --- Step 2: Copy and Execute the self-installing script ---
-    logger.info(f"Step 2/2: Copying and executing the agent script on {ip}.")
     try:
-        with open(agent_script_path, 'r', encoding='utf-8') as f:
+        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'EnableSnmp.ps1'))
+        with open(script_path, 'r', encoding='utf-8') as f:
             script_content = f.read()
-        
-        # Base64 encode the script to avoid issues with special characters in PowerShell
-        # The script must be encoded in UTF-16LE for PowerShell's -EncodedCommand
-        encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
-        
-        # The command to be executed remotely.
-        # It decodes the Base64 string and pipes it directly into PowerShell for execution.
-        # This single command copies AND runs the script.
-        ps_command_to_run = f"[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('{encoded_script}')) | powershell.exe -NoProfile -"
-        
-        # We need to encode the command itself to pass it to powershell.exe -EncodedCommand
-        encoded_ps_command = base64.b64encode(ps_command_to_run.encode('utf-16-le')).decode('ascii')
+    except FileNotFoundError:
+        logger.error(f"EnableSnmp.ps1 script not found at {script_path}")
+        return jsonify({"ok": False, "error": "EnableSnmp.ps1 script not found on the server."}), 500
+    
+    # Replace placeholder and encode
+    final_script = script_content.replace('$env:ATLAS_SERVER_IP', f'"{server_ip}"')
+    encoded_script = base64.b64encode(final_script.encode('utf-16-le')).decode('ascii')
+    
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
 
-        copy_rc, copy_out, copy_err = run_ps_command("psexec", ip, user, domain, pwd, ["powershell.exe", "-EncodedCommand", encoded_ps_command], timeout=180)
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-        if copy_rc != 0:
-            logger.error(f"Failed to execute agent script on {ip}: {copy_err} {copy_out}")
-            return jsonify({"ok": False, "error": "Failed to execute agent script remotely.", "details": f"{copy_err} {copy_out}"}), 500
-
-    except Exception as e:
-        logger.error(f"Error reading or encoding agent script: {e}")
-        return jsonify({"ok": False, "error": "Server-side error reading the agent script."}), 500
-
-    logger.info(f"Agent deployment script executed successfully on {ip}.")
-    return jsonify({
-        "ok": True,
-        "message": f"Agent deployment initiated successfully on {ip}. The first data report should be available within a minute."
-    })
+    if rc == 0:
+        logger.info(f"SNMP configuration script executed successfully on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": f"SNMP configuration initiated on {ip}.",
+            "details": out or "Script executed successfully."
+        })
+    else:
+        logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Stderr: {err}. Stdout: {out}")
+        return jsonify({
+            "ok": False,
+            "error": f"Failed to execute SNMP script on {ip}.",
+            "details": err or out
+        }), 500
