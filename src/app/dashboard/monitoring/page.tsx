@@ -144,21 +144,15 @@ const MonitoringCard: React.FC<{
         ) : performanceError ? (
            <div className="flex flex-col items-center justify-center h-48 text-destructive text-center p-4">
                 <XCircle className="h-8 w-8 mb-2" />
-                <p className="font-semibold">{isAgentNotDeployedError ? "Agent Not Deployed" : "Failed to load data"}</p>
+                <p className="font-semibold">{isAgentNotDeployedError ? "Get Info Failed" : "Failed to load data"}</p>
                 <p className="text-xs max-w-full truncate" title={performanceError}>
-                    {isAgentNotDeployedError ? "Click the button below to install the agent." : performanceError}
+                    {isAgentNotDeployedError ? "The monitoring script may not be installed." : performanceError}
                 </p>
-                {isAgentNotDeployedError ? (
-                    <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
-                        <Zap className="mr-2 h-4 w-4" />
-                        Deploy Agent
-                    </Button>
-                ) : (
-                    <Button variant="secondary" size="sm" className="mt-4" onClick={() => onRunDiagnostics(device)}>
-                        <ShieldCheck className="mr-2 h-4 w-4" />
-                        Run Diagnostics
-                    </Button>
-                )}
+                
+                 <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
+                    <Zap className="mr-2 h-4 w-4" />
+                    {isAgentNotDeployedError ? "Install Agent" : "Retry"}
+                </Button>
             </div>
         ) : performance ? (
           <div className="grid grid-cols-2 gap-4">
@@ -343,7 +337,7 @@ export default function MonitoringPage() {
   };
 
   const handleDeployAgent = async (device: MonitoredDevice) => {
-      toast({ title: "Deploying Agent...", description: `Attempting to install monitoring agent on ${device.name}. This may take a moment.` });
+      toast({ title: "Installing Agent...", description: `Attempting to install monitoring agent on ${device.name}. This may take a moment.` });
       try {
            const res = await fetch("/api/pstools/deploy-agent", {
                 method: "POST",
@@ -354,7 +348,6 @@ export default function MonitoringPage() {
              if (data.ok) {
                 toast({ title: "Deployment Successful", description: data.message });
                 setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
-                // Wait for the agent to run and create the file before fetching.
                 await new Promise(resolve => setTimeout(resolve, 5000)); 
                 await fetchDevicePerformance(device, new AbortController().signal);
             } else {
@@ -399,19 +392,15 @@ export default function MonitoringPage() {
 }, []);
 
 
-  const fetchInitialDeviceList = React.useCallback(async (forceRefresh = false, signal: AbortSignal) => {
-      if (!forceRefresh) {
-        setIsLoading(true);
-      } else {
-        setIsRefreshing(true);
-      }
+  const fetchInitialDeviceList = React.useCallback(async (signal: AbortSignal) => {
+      setIsLoading(true);
       setError(null);
       
       try {
         const response = await fetch("/api/network/get-monitoring-data", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ force_refresh: forceRefresh }),
+          body: JSON.stringify({ force_refresh: false }),
           signal,
         });
 
@@ -425,10 +414,6 @@ export default function MonitoringPage() {
             
             if (data.last_updated) {
               setLastUpdated(data.last_updated);
-            }
-
-            if (forceRefresh) {
-                toast({ title: "Success", description: "Device status has been refreshed." });
             }
 
             const onlineDevices = newDevices.filter((d: MonitoredDevice) => d.status === 'online');
@@ -448,20 +433,51 @@ export default function MonitoringPage() {
       } finally {
         if (!signal.aborted) {
           setIsLoading(false);
-          setIsRefreshing(false);
         }
       }
-  }, [toast, fetchDevicePerformance]);
+  }, [fetchDevicePerformance]);
+  
+  const handleForceRefresh = React.useCallback(async () => {
+    setIsRefreshing(true);
+    toast({ title: "Force Refreshing...", description: "Running monitoring script on all online devices." });
+
+    const onlineDevices = devices.filter(d => d.status === 'online');
+    if (onlineDevices.length === 0) {
+        toast({ title: "No Online Devices", description: "There are no online devices to refresh." });
+        setIsRefreshing(false);
+        return;
+    }
+
+    const refreshPromises = onlineDevices.map(device => 
+        fetch('/api/pstools/force-run-agent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: device.ipAddress })
+        })
+    );
+
+    await Promise.all(refreshPromises);
+
+    toast({ title: "Commands Sent", description: `Fetching updated data...` });
+
+    // Wait a moment for scripts to execute before fetching data
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    const fetchPromises = onlineDevices.map(device => fetchDevicePerformance(device, new AbortController().signal));
+    await Promise.all(fetchPromises);
+    
+    setLastUpdated(new Date().toISOString());
+    setIsRefreshing(false);
+    toast({ title: "Refresh Complete", description: "All online devices have been updated." });
+  }, [devices, fetchDevicePerformance, toast]);
 
 
   React.useEffect(() => {
     const controller = new AbortController();
     const signal = controller.signal;
     if (user) {
-        fetchInitialDeviceList(false, signal);
+        fetchInitialDeviceList(signal);
     }
-
-    // Cleanup function to abort requests when the component unmounts
     return () => {
         controller.abort();
     };
@@ -474,18 +490,17 @@ export default function MonitoringPage() {
 
     if (autoRefresh && user) {
         interval = setInterval(() => {
-            if (!document.hidden) { // Only refresh if tab is visible
-                fetchInitialDeviceList(true, signal);
+            if (!document.hidden) { 
+                handleForceRefresh();
             }
-        }, 30000);
+        }, 60000); // Refresh every 60 seconds
     }
     
-    // Cleanup function
     return () => {
       if (interval) clearInterval(interval);
       controller.abort();
     };
-  }, [autoRefresh, user, fetchInitialDeviceList]);
+  }, [autoRefresh, user, handleForceRefresh]);
 
 
   if (!user) {
@@ -525,7 +540,7 @@ export default function MonitoringPage() {
           <AlertDescription>{error}</AlertDescription>
            <Button onClick={() => {
                const controller = new AbortController();
-               fetchInitialDeviceList(false, controller.signal);
+               fetchInitialDeviceList(controller.signal);
            }} className="mt-4">Retry</Button>
         </Alert>
       </div>
@@ -540,21 +555,18 @@ export default function MonitoringPage() {
           <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Device Monitoring</h1>
            {lastUpdated && (
             <p className="text-muted-foreground">
-              Real-time performance metrics. Last cache update: {new Date(lastUpdated).toLocaleTimeString()}
+              Real-time performance metrics. Last data fetch: {new Date(lastUpdated).toLocaleTimeString()}
             </p>
           )}
         </div>
         <div className="flex items-center gap-4">
             <div className="flex items-center space-x-2">
                 <Switch id="auto-refresh" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-                <Label htmlFor="auto-refresh">Auto-Refresh (30s)</Label>
+                <Label htmlFor="auto-refresh">Auto-Refresh (1m)</Label>
             </div>
-            <Button onClick={() => {
-                const controller = new AbortController();
-                fetchInitialDeviceList(true, controller.signal);
-            }} disabled={isRefreshing}>
+            <Button onClick={handleForceRefresh} disabled={isRefreshing}>
                 {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                Force Refresh
+                Force Get Info
             </Button>
         </div>
       </div>
@@ -587,3 +599,4 @@ export default function MonitoringPage() {
     </>
   );
 }
+
