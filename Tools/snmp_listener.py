@@ -71,11 +71,9 @@ async def start_listener_async():
     trap_port = 162
     
     try:
-        config.addTransport(
-            snmpEngine,
-            udp.domainName,
-            await udp.UdpTransport().openServerMode(('0.0.0.0', trap_port))
-        )
+        # The transport setup is synchronous
+        transport = udp.UdpAsyncioTransport().openServerMode(('0.0.0.0', trap_port))
+        config.addTransport(snmpEngine, udp.domainName, await transport)
         logger.info(f"SNMP Listener: Successfully bound to UDP port {trap_port}")
     except Exception as e:
         logger.error(f"SNMP Listener FATAL: Could not bind to port {trap_port}. "
@@ -90,7 +88,13 @@ async def start_listener_async():
     logger.info(f"SNMP Trap Listener is running and waiting for traps on port {trap_port}...")
     
     # This will run forever
-    await asyncio.Event().wait()
+    snmpEngine.transportDispatcher.jobStarted(1)
+    try:
+        # Use asyncio's event to wait indefinitely without blocking the thread in a tight loop.
+        await asyncio.Event().wait()
+    finally:
+        snmpEngine.transportDispatcher.jobFinished(1)
+
 
 def run_listener_in_new_loop():
     """Creates and runs a new asyncio event loop."""
