@@ -22,7 +22,8 @@ import {
   XCircle,
   HelpCircle,
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  ServerCrash,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -99,6 +100,9 @@ export default function MonitoringPage() {
   const [deploymentState, setDeploymentState] = React.useState<{isOpen: boolean, device: Device | null}>({isOpen: false, device: null});
   const [isDeploying, setIsDeploying] = React.useState(false);
   const [deploymentLog, setDeploymentLog] = React.useState("");
+  const [snmpState, setSnmpState] = React.useState<{isOpen: boolean, device: Device | null}>({isOpen: false, device: null});
+  const [isConfiguringSnmp, setIsConfiguringSnmp] = React.useState(false);
+  const [snmpLog, setSnmpLog] = React.useState("");
 
   const fetchAllDevices = async () => {
     setIsLoading(true);
@@ -184,6 +188,33 @@ export default function MonitoringPage() {
     setIsDeploying(false);
   }
 
+  const handleConfigureSnmp = async () => {
+      if (!snmpState.device) return;
+      setIsConfiguringSnmp(true);
+      setSnmpLog("Starting SNMP configuration...");
+
+       try {
+        // We need the server's IP. The easiest way is to get it from the current window location.
+        const serverIp = window.location.hostname;
+        const res = await fetch("/api/pstools/enable-snmp", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: snmpState.device.ipAddress, server_ip: serverIp })
+        });
+        const data = await res.json();
+        setSnmpLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + (data.details || JSON.stringify(data, null, 2)));
+        if (data.ok) {
+            toast({ title: "SNMP Configured Successfully", description: `SNMP has been enabled on ${snmpState.device.name}.`});
+        } else {
+             toast({ variant: "destructive", title: "SNMP Configuration Failed", description: data.error || "An unknown error occurred."});
+        }
+    } catch (err: any) {
+         setSnmpLog(prev => prev + `\n\n--- CLIENT ERROR ---\n` + err.message);
+         toast({ variant: "destructive", title: "Client Error", description: "Failed to send request to the server."});
+    }
+    setIsConfiguringSnmp(false);
+  }
+
 
   if (isLoading) {
       return (
@@ -198,7 +229,7 @@ export default function MonitoringPage() {
     return (
         <div className="flex items-center justify-center h-full">
             <Alert variant="destructive" className="max-w-lg">
-                <Siren className="h-4 w-4" />
+                <ServerCrash className="h-4 w-4" />
                 <AlertTitle>{error.title}</AlertTitle>
                 <AlertDescription>
                     {error.message}
@@ -222,10 +253,15 @@ export default function MonitoringPage() {
                     Deploy agents and monitor the performance of your domain computers.
                 </p>
             </div>
-            <Button onClick={() => checkOnlineStatus(devices)} disabled={devices.some(d => d.isLoadingDetails)}>
-                 {devices.some(d => d.isLoadingDetails) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                Refresh Status
-            </Button>
+             <div className="flex items-center gap-2">
+                <Button onClick={() => setSnmpState({isOpen: true, device: null})} variant="outline">
+                    <Network className="mr-2 h-4 w-4" /> Configure SNMP
+                </Button>
+                <Button onClick={() => checkOnlineStatus(devices)} disabled={devices.some(d => d.isLoadingDetails)}>
+                    {devices.some(d => d.isLoadingDetails) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    Refresh Status
+                </Button>
+            </div>
         </div>
         
         <Card>
@@ -319,8 +355,64 @@ export default function MonitoringPage() {
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
+    
+    {/* SNMP Dialog */}
+    <AlertDialog open={snmpState.isOpen} onOpenChange={(open) => !open && setSnmpState({isOpen: false, device: null})}>
+        <AlertDialogContent className="max-w-2xl">
+            <AlertDialogHeader>
+                <AlertDialogTitle>Configure SNMP on a Device</AlertDialogTitle>
+                <AlertDialogDescription>
+                    Select a device to enable and configure SNMP. The device will be configured to send SNMP traps to this server.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="my-4 space-y-4">
+                 <Select
+                    onValueChange={(value) => {
+                        const device = devices.find(d => d.id === value);
+                        setSnmpState(prev => ({...prev, device: device || null}));
+                    }}
+                    disabled={isConfiguringSnmp}
+                >
+                    <SelectTrigger>
+                        <SelectValue placeholder="Select a device to configure..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {devices.filter(d => d.status === 'online').map(d => (
+                            <SelectItem key={d.id} value={d.id}>{d.name} ({d.ipAddress})</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+
+                {isConfiguringSnmp || snmpLog ? (
+                    <div>
+                        <Label htmlFor="snmp-log">Configuration Log</Label>
+                        <Textarea id="snmp-log" readOnly value={snmpLog} className="mt-2 h-60 font-mono text-xs bg-muted" />
+                    </div>
+                ) : (
+                    <Alert>
+                        <ShieldCheck className="h-4 w-4" />
+                        <AlertTitle>Ready to Configure</AlertTitle>
+                        <AlertDescription>
+                            Once you select a device, click &quot;Configure Now&quot; to begin remote setup via PsExec.
+                        </AlertDescription>
+                    </Alert>
+                )}
+            </div>
+
+            <AlertDialogFooter>
+                <AlertDialogCancel>Close</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfigureSnmp} disabled={!snmpState.device || isConfiguringSnmp}>
+                    {isConfiguringSnmp && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Configure Now
+                </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }
+
+    
 
     
