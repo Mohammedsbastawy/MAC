@@ -2,6 +2,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -62,7 +63,7 @@ def get_auth_from_request(data):
 @pstools_bp.before_request
 def require_login_hook():
     # Allow access to psinfo from the monitoring page which may not have a body
-    if request.endpoint == 'pstools.api_psinfo' or request.endpoint == 'pstools.api_deploy_agent' or request.endpoint == 'pstools.api_force_run_agent':
+    if request.endpoint == 'pstools.api_psinfo' or request.endpoint == 'pstools.api_deploy_agent':
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -676,10 +677,10 @@ def api_deploy_agent():
         logger.error(f"Agent script not found at {agent_script_path}")
         return jsonify({"ok": False, "error": "Agent script file is missing from the server."}), 500
 
-    # Step 1: Create C:\Atlas folder
+    # Step 1: Create C:\Atlas folder. We ignore the error if it already exists.
     logger.info(f"Step 1/3: Creating C:\\Atlas directory on {ip}.")
     mkdir_rc, _, mkdir_err = run_ps_command("psexec", ip, user, domain, pwd, ["cmd", "/c", "mkdir", "C:\\Atlas"], timeout=60)
-    if mkdir_rc != 0 and "A subdirectory or file C:\\Atlas already exists" not in mkdir_err:
+    if mkdir_rc != 0 and "already exists" not in mkdir_err:
         logger.error(f"Failed to create directory on {ip}: {mkdir_err}")
         return jsonify({"ok": False, "error": "Failed to create remote directory.", "details": mkdir_err}), 500
 
@@ -691,7 +692,7 @@ def api_deploy_agent():
         
         encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
         
-        # This PS command decodes the Base64 string and writes it to a file.
+        # PowerShell command to decode Base64 and write to file
         ps_command_to_run = f"[System.IO.File]::WriteAllBytes('C:\\Atlas\\AtlasMonitorAgent.ps1', [System.Convert]::FromBase64String('{encoded_script}'))"
         
         # We need to encode the command itself to pass it to powershell.exe -EncodedCommand
@@ -707,7 +708,7 @@ def api_deploy_agent():
         logger.error(f"Error reading or encoding agent script: {e}")
         return jsonify({"ok": False, "error": "Server-side error reading the agent script."}), 500
 
-    # Step 3: Run the self-installing script
+    # Step 3: Run the self-installing/self-running script
     logger.info(f"Step 3/3: Executing the self-installing script on {ip}.")
     run_rc, run_out, run_err = run_ps_command("psexec", ip, user, domain, pwd, ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\Atlas\\AtlasMonitorAgent.ps1"], timeout=120)
 
@@ -716,32 +717,8 @@ def api_deploy_agent():
         return jsonify({"ok": False, "error": "Agent script execution failed remotely.", "details": f"{run_err} {run_out}"}), 500
 
 
-    logger.info(f"Agent deployment initiated successfully on {ip}.")
+    logger.info(f"Agent deployment successful on {ip}.")
     return jsonify({
         "ok": True,
-        "message": f"Agent deployment initiated successfully on {ip}. The first data report should be available within a minute."
+        "message": f"Agent deployment initiated successfully on {ip}. Data will be available shortly."
     })
-
-
-@pstools_bp.route('/force-run-agent', methods=['POST'])
-def api_force_run_agent():
-    """Remotely executes the agent script to force an immediate data update."""
-    data = request.get_json() or {}
-    ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
-    
-    if not ip:
-        return jsonify({"ok": False, "error": "IP address is required."}), 400
-    
-    logger.info(f"Force-running agent script on {ip}.")
-    
-    # We simply run the script. If it's there, it will run. If not, it will fail gracefully.
-    ps_command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\Atlas\\AtlasMonitorAgent.ps1"]
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, ps_command, timeout=120)
-    
-    if rc != 0:
-        logger.warning(f"Force run of agent script failed on {ip} (this is okay if agent is not installed). Error: {err}")
-        return jsonify({"ok": False, "error": "Script execution failed.", "details": err}), 500
-        
-    logger.info(f"Agent script force-run command sent to {ip}.")
-    return jsonify({"ok": True, "message": "Force run command sent."})

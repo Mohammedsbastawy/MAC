@@ -124,7 +124,7 @@ const MonitoringCard: React.FC<{
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
                             <DropdownMenuItem onClick={() => onDeployAgent(device)}>
                                 <Wrench className="mr-2 h-4 w-4" />
-                                <span>Re-Install Agent</span>
+                                <span>Install/Run Agent</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => onRunDiagnostics(device)}>
                                 <ShieldCheck className="mr-2 h-4 w-4" />
@@ -144,9 +144,9 @@ const MonitoringCard: React.FC<{
         ) : performanceError ? (
            <div className="flex flex-col items-center justify-center h-48 text-destructive text-center p-4">
                 <XCircle className="h-8 w-8 mb-2" />
-                <p className="font-semibold">{isAgentNotDeployedError ? "Get Info Failed" : "Failed to load data"}</p>
+                <p className="font-semibold">{isAgentNotDeployedError ? "Agent Not Installed" : "Failed to load data"}</p>
                 <p className="text-xs max-w-full truncate" title={performanceError}>
-                    {isAgentNotDeployedError ? "The monitoring script may not be installed." : performanceError}
+                    {isAgentNotDeployedError ? "Click below to install the monitoring agent." : performanceError}
                 </p>
                 
                  <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
@@ -336,8 +336,9 @@ export default function MonitoringPage() {
     setIsFixing(false);
   };
 
-  const handleDeployAgent = async (device: MonitoredDevice) => {
-      toast({ title: "Installing Agent...", description: `Attempting to install monitoring agent on ${device.name}. This may take a moment.` });
+  const handleDeployAgent = React.useCallback(async (device: MonitoredDevice) => {
+      toast({ title: "Deploying Agent...", description: `Attempting to install/run agent on ${device.name}. This may take a moment.` });
+      setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
       try {
            const res = await fetch("/api/pstools/deploy-agent", {
                 method: "POST",
@@ -347,16 +348,18 @@ export default function MonitoringPage() {
             const data = await res.json();
              if (data.ok) {
                 toast({ title: "Deployment Successful", description: data.message });
-                setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: true, performanceError: null } : d));
+                // Wait for the agent to run before fetching data
                 await new Promise(resolve => setTimeout(resolve, 5000)); 
                 await fetchDevicePerformance(device, new AbortController().signal);
             } else {
                 toast({ variant: "destructive", title: "Deployment Failed", description: data.details || data.error, duration: 10000 });
+                setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false, performanceError: data.details || data.error } : d));
             }
       } catch (e: any) {
           toast({ variant: "destructive", title: "Client Error", description: e.message });
+          setDevices(prev => prev.map(d => d.id === device.id ? { ...d, isFetching: false, performanceError: e.message } : d));
       }
-  }
+  }, []);
 
   const fetchDevicePerformance = React.useCallback(async (device: MonitoredDevice, signal: AbortSignal) => {
     try {
@@ -439,7 +442,7 @@ export default function MonitoringPage() {
   
   const handleForceRefresh = React.useCallback(async () => {
     setIsRefreshing(true);
-    toast({ title: "Force Refreshing...", description: "Running monitoring script on all online devices." });
+    toast({ title: "Refreshing All Agents...", description: "Deploying/running agent on all online devices." });
 
     const onlineDevices = devices.filter(d => d.status === 'online');
     if (onlineDevices.length === 0) {
@@ -448,28 +451,14 @@ export default function MonitoringPage() {
         return;
     }
 
-    const refreshPromises = onlineDevices.map(device => 
-        fetch('/api/pstools/force-run-agent', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip: device.ipAddress })
-        })
-    );
-
-    await Promise.all(refreshPromises);
-
-    toast({ title: "Commands Sent", description: `Fetching updated data...` });
-
-    // Wait a moment for scripts to execute before fetching data
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    const fetchPromises = onlineDevices.map(device => fetchDevicePerformance(device, new AbortController().signal));
-    await Promise.all(fetchPromises);
+    // Run deployment on all online devices
+    const deployPromises = onlineDevices.map(device => handleDeployAgent(device));
+    await Promise.all(deployPromises);
     
     setLastUpdated(new Date().toISOString());
     setIsRefreshing(false);
-    toast({ title: "Refresh Complete", description: "All online devices have been updated." });
-  }, [devices, fetchDevicePerformance, toast]);
+    toast({ title: "Refresh Complete", description: "All online agents have been updated." });
+  }, [devices, handleDeployAgent, toast]);
 
 
   React.useEffect(() => {
@@ -566,7 +555,7 @@ export default function MonitoringPage() {
             </div>
             <Button onClick={handleForceRefresh} disabled={isRefreshing}>
                 {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                Force Get Info
+                Refresh All Agents
             </Button>
         </div>
       </div>
