@@ -160,18 +160,18 @@ export default function MonitoringPage() {
         const response = await fetch("/api/ad/get-computers", { method: "POST" });
         const data = await response.json();
         if (!data.ok) {
-            throw data;
+            throw data; // Throw the error object from the backend
         }
         const adDevices = data.computers.map(mapAdComputerToDevice);
         setDevices(adDevices.map(d => ({ ...d, isLoadingDetails: true })));
 
-        // Step 2: Check online status for all of them
+        // Step 2: Check online status for all of them and wait for the result
         const devicesWithStatus = await checkOnlineStatus(adDevices);
 
-        // Step 3: Check agent status ONLY for the ones that are online
+        // Step 3: Check agent status for the online devices and wait for the result
         const finalDevices = await checkAgentStatus(devicesWithStatus);
         
-        // Step 4: Set final state once with all information
+        // Step 4: Set the final state once with all the information
         setDevices(finalDevices.map(d => ({ ...d, isLoadingDetails: false })));
 
     } catch (err: any) {
@@ -180,11 +180,12 @@ export default function MonitoringPage() {
             message: err.message || "Failed to connect to the server to get devices.",
             details: err.details,
         });
-        setDevices([]); // Clear devices on error
+        setDevices([]);
     } finally {
         setIsLoading(false);
     }
   }, [checkOnlineStatus, checkAgentStatus]);
+
 
   React.useEffect(() => {
     fetchAllDevices();
@@ -367,5 +368,7 @@ export default function MonitoringPage() {
 
 
 
+
+    
 
     
