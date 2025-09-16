@@ -10,11 +10,11 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Zap, HardDrive, ShieldAlert } from "lucide-react";
+import { Zap, ShieldAlert, FileText } from "lucide-react";
 
 const CodeBlock: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <pre className="mt-2 rounded-md bg-muted p-4 text-sm">
-        <code className="text-foreground font-mono">{children}</code>
+    <pre className="mt-2 rounded-md bg-muted p-4 text-sm font-mono text-foreground">
+        <code>{children}</code>
     </pre>
 );
 
@@ -35,57 +35,79 @@ const Step: React.FC<{ number: number, title: string, children: React.ReactNode 
 
 export default function AgentDeploymentPage() {
     const agentScript = `
-# Atlas Monitoring Agent Script
-# This script gathers performance data and saves it to a local JSON file.
+# Universal PowerShell Script to Install and Configure SNMP Service
+# Compatible with modern Windows Client and Server editions.
 
-# Ensure the script stops on errors and the destination directory exists.
-$ErrorActionPreference = "Stop"
-$AgentPath = "C:\\Atlas"
+param (
+    [string]$TrapDestination
+)
+
+# --- Configuration ---
+$CommunityString = "public"
+if (-not $TrapDestination) {
+    Write-Warning "Trap destination IP not provided. Defaulting to localhost."
+    $TrapDestination = "127.0.0.1"
+}
 
 try {
-    # This command ensures the C:\\Atlas directory exists. If it does, nothing happens. If it doesn't, it is created.
-    if (-not (Test-Path -Path $AgentPath -PathType Container)) {
-        New-Item -ItemType Directory -Path $AgentPath -Force
+    # Step 1: Install SNMP Service using DISM (most reliable method)
+    Write-Host "Step 1: Installing SNMP Service..." -ForegroundColor Yellow
+    $snmpFeature = Get-WindowsOptionalFeature -Online -FeatureName "SNMP"
+    if ($snmpFeature.State -ne 'Enabled') {
+        Write-Host "SNMP feature is not installed. Installing via DISM..."
+        dism.exe /online /enable-feature /featurename:SNMP /NoRestart
+        Write-Host "SNMP feature installed successfully." -ForegroundColor Green
+    } else {
+        Write-Host "SNMP Service is already installed." -ForegroundColor Green
     }
 
-    # 1. Gather Performance Data
-    # Use a brief sample interval for a more accurate point-in-time reading.
-    $cpuCounter = Get-Counter -Counter "\\Processor(_Total)\\% Processor Time" -SampleInterval 1 -MaxSamples 1
-    $cpuUsage = $cpuCounter.CounterSamples.CookedValue
+    # Step 2: Configure and Start Services
+    Write-Host "Step 2: Configuring and starting services..." -ForegroundColor Yellow
+    Set-Service -Name "SNMP" -StartupType Automatic
+    Start-Service -Name "SNMP"
+    Set-Service -Name "SNMPTrap" -StartupType Automatic
+    Start-Service -Name "SNMPTrap"
+    Write-Host "SNMP and SNMPTrap services are set to Automatic and started." -ForegroundColor Green
 
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem
-    $totalMemoryGB = $os.TotalVisibleMemorySize / 1GB
-    $usedMemoryGB = ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1GB
+    # Step 3: Configure Registry for Community String and Trap Destination
+    Write-Host "Step 3: Configuring SNMP registry settings..." -ForegroundColor Yellow
+    
+    # Set Community String
+    $regPathCommunities = "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SNMP\\Parameters\\ValidCommunities"
+    if (-not (Test-Path $regPathCommunities)) { New-Item -Path $regPathCommunities -Force | Out-Null }
+    Set-ItemProperty -Path $regPathCommunities -Name $CommunityString -Value 4 -Type DWORD -Force
+    Write-Host " - Community string '$CommunityString' set to ReadOnly."
 
-    $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter } | ForEach-Object {
-        [pscustomobject]@{
-            volume = $_.DriveLetter;
-            sizeGB = [math]::Round($_.Size / 1GB, 2);
-            freeGB = [math]::Round($_.SizeRemaining / 1GB, 2);
-        }
+    # Set Trap Destination
+    $trapConfigPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\SNMP\\Parameters\\TrapConfiguration\\$CommunityString"
+    if (-not (Test-Path $trapConfigPath)) { New-Item -Path $trapConfigPath -Force | Out-Null }
+    Set-ItemProperty -Path $trapConfigPath -Name "1" -Value $TrapDestination -Type String -Force
+    Write-Host " - Trap destination set to '$TrapDestination'."
+
+    # Step 4: Configure Windows Firewall
+    Write-Host "Step 4: Configuring Windows Firewall..." -ForegroundColor Yellow
+    $ruleName = "SNMP Traps (UDP-Out)"
+    $firewallRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+    if (-not $firewallRule) {
+        Write-Host " - Firewall rule '$ruleName' not found. Creating..."
+        New-NetFirewallRule -DisplayName $ruleName -Direction Outbound -Protocol UDP -RemotePort 162 -Action Allow
+    } else {
+        Write-Host " - Firewall rule '$ruleName' already exists."
+        $firewallRule | Enable-NetFirewallRule
     }
+    Write-Host "Firewall configured." -ForegroundColor Green
 
-    # 2. Create the Data Object
-    $data = [PSCustomObject]@{
-        cpuUsage      = [math]::Round($cpuUsage, 2)
-        totalMemoryGB = [math]::Round($totalMemoryGB, 2)
-        usedMemoryGB  = [math]::Round($usedMemoryGB, 2)
-        diskInfo      = $disks
-        timestamp     = (Get-Date).ToUniversalTime().ToString("o") # ISO 8601 format
-    }
-
-    # 3. Define the local path and save the file
-    $filePath = Join-Path -Path $AgentPath -ChildPath "$($env:COMPUTERNAME).json"
-
-    # Convert to JSON and save to the local path
-    $data | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path $filePath -Encoding UTF8 -Force
+    # Step 5: Send a test trap to confirm configuration
+    Write-Host "Step 5: Sending a test trap to confirm configuration..." -ForegroundColor Yellow
+    # This module is installed with the SNMP feature
+    Import-Module SNMPScripting
+    Send-SnmpTrap -Community $CommunityString -Agent $env:COMPUTERNAME -Destination $TrapDestination -Generic 6 -Specific 1
+    
+    Write-Host "SNMP configuration completed successfully." -ForegroundColor Green
 
 } catch {
-    # Optional: For troubleshooting, you can write errors to a local log file.
-    # For example:
-    # $logPath = "C:\\Atlas\\MonitorAgentErrors.log"
-    # $errorMessage = "[$((Get-Date).ToString('o'))] Error: $($_.Exception.Message)"
-    # Add-Content -Path $logPath -Value $errorMessage
+    Write-Error "An error occurred during SNMP configuration: $_"
+    exit 1
 }
 `.trim();
 
@@ -94,70 +116,50 @@ try {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <Zap /> Monitoring Agent Deployment Guide
+                        <Zap /> Automatic SNMP Deployment Script
                     </CardTitle>
                     <CardDescription>
-                        Follow these steps to deploy the monitoring agent across your network using Group Policy. This is the most reliable and scalable method for live monitoring.
+                        This is the PowerShell script used by the "Configure SNMP" button. You can use it for manual deployment or troubleshooting.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                     
-                    <Step number={1} title="Save the Agent Script">
-                        <p>Copy the PowerShell script below and save it as a file named <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">monitor_agent.ps1</code>.</p>
-                        <p>This script is self-contained. It will automatically create the <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">C:\Atlas</code> folder on the client machine and save the performance data there.</p>
-                         <CodeBlock>{agentScript}</CodeBlock>
-                        <p className="mt-2">Place this <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">monitor_agent.ps1</code> file in a location accessible by domain controllers, such as the NETLOGON share.</p>
-                        <Alert>
-                            <ShieldAlert className="h-4 w-4" />
-                            <AlertTitle>NETLOGON Share</AlertTitle>
+                    <Step number={1} title="Understand the Script">
+                        <p>The script below is designed to be run on a target machine. It performs all necessary steps to install and configure SNMP to send data to your control panel server.</p>
+                        <p className="font-semibold mt-2">Key Actions:</p>
+                        <ul className="list-disc pl-5 mt-1 space-y-1">
+                            <li>Installs the SNMP Service feature using DISM if it's not already present.</li>
+                            <li>Sets the SNMP and SNMP Trap services to start automatically and ensures they are running.</li>
+                            <li>Configures the "public" community string.</li>
+                            <li>Sets the trap destination to your server's IP address.</li>
+                            <li>Creates a firewall rule to allow outgoing SNMP trap messages on UDP port 162.</li>
+                             <li>Sends a test trap to verify the configuration.</li>
+                        </ul>
+                    </Step>
+
+                     <Step number={2} title="Review the Script">
+                        <p>The <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">$TrapDestination</code> parameter is automatically replaced with your server's IP when you use the button in the application.</p>
+                         <Alert className="mt-2">
+                             <FileText className="h-4 w-4" />
+                            <AlertTitle>Full Script Content</AlertTitle>
                             <AlertDescription>
-                                The NETLOGON share is typically located at <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">\\YOUR_DOMAIN\NETLOGON</code>. Files placed here are replicated across all domain controllers, making it a reliable location for deployment scripts.
+                                This script is a robust, all-in-one solution for enabling SNMP monitoring.
                             </AlertDescription>
                         </Alert>
+                         <CodeBlock>{agentScript}</CodeBlock>
                     </Step>
 
-                     <Step number={2} title="Create and Configure a Group Policy Object (GPO)">
-                        <p>Open **Group Policy Management** on your domain controller.</p>
-                        <p>Create a new GPO and link it to the Organizational Unit (OU) that contains the computers you want to monitor.</p>
-                        <p>Edit the GPO and navigate to:</p>
-                         <CodeBlock>Computer Configuration &rarr; Preferences &rarr; Control Panel Settings &rarr; Scheduled Tasks</CodeBlock>
-                        <p>Right-click and select New &rarr; **Scheduled Task (At least Windows 7)**.</p>
-                    </Step>
-
-                     <Step number={3} title="Configure the Scheduled Task">
-                        <p>Configure the task with the following settings:</p>
-                        <ul className="list-disc pl-6 space-y-2">
-                           <li>**General Tab:**
-                                <ul>
-                                    <li>Name: <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">Atlas System Monitor Agent</code></li>
-                                    <li>When running the task, use the following user account: Click "Change User or Group..." and type <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">NT AUTHORITY\System</code>. The SYSTEM account has the necessary local permissions to run the script.</li>
-                                     <li>Run whether user is logged on or not.</li>
-                                     <li>Run with highest privileges.</li>
-                                </ul>
-                           </li>
-                           <li>**Triggers Tab:**
-                                <ul>
-                                    <li>Click "New...".</li>
-                                    <li>Begin the task: "On a schedule".</li>
-                                    <li>Settings: "Daily".</li>
-                                    <li>Advanced settings: Check "Repeat task every:" and set it to **1 minute**. For a duration of: **Indefinitely**. This ensures continuous monitoring.</li>
-                                </ul>
-                           </li>
-                            <li>**Actions Tab:**
-                                <ul>
-                                    <li>Click "New...".</li>
-                                    <li>Action: "Start a program".</li>
-                                    <li>Program/script: <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">powershell.exe</code></li>
-                                     <li>Add arguments (optional): <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">-ExecutionPolicy Bypass -File "\\YOUR_DOMAIN.com\NETLOGON\monitor_agent.ps1"</code></li>
-                                </ul>
-                           </li>
+                     <Step number={3} title="Manual Deployment (Optional)">
+                        <p>If you need to deploy this on a machine that cannot be reached by the application, you can:</p>
+                         <ul className="list-disc pl-5 mt-1 space-y-1">
+                            <li>Save the script above as a <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">.ps1</code> file.</li>
+                            <li>Run it on the target machine with Administrator privileges.</li>
+                            <li>You will need to manually provide the IP of your control panel server:</li>
                         </ul>
-                         <img src="https://i.imgur.com/kF3b0tY.png" alt="GPO Scheduled Task Configuration" className="mt-2 rounded-lg border shadow-md" />
+                         <CodeBlock>
+                            .\\YourScript.ps1 -TrapDestination "YOUR_SERVER_IP"
+                        </CodeBlock>
                     </Step>
-                     <Step number={4} title="Final Step">
-                        <p>Once the GPO is applied, the target computers will automatically create this scheduled task on their next policy update (or after a reboot). The task will run the script every minute, creating and updating the local performance file at <code className="font-mono bg-muted px-1 py-0.5 rounded-sm">C:\Atlas\{"{COMPUTERNAME}"}.json</code>.</p>
-                        <p>The monitoring page will now read from these files directly, resulting in a much faster and more reliable experience.</p>
-                     </Step>
                 </CardContent>
             </Card>
         </div>
