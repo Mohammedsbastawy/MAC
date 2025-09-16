@@ -6,7 +6,7 @@ import * as React from "react";
 import type { Device, MonitoredDevice, PerformanceData } from "@/lib/types";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw, XCircle, ShieldCheck, Zap, HelpCircle } from "lucide-react";
+import { Loader2, Server, ServerCrash, SlidersHorizontal, RefreshCw, XCircle, ShieldCheck, Zap, HelpCircle, MoreVertical, Wrench } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,14 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Bar,
   BarChart,
@@ -92,16 +100,41 @@ const MonitoringCard: React.FC<{
     <Card className={cn(status !== 'online' && "opacity-50")}>
       <CardHeader>
         <div className="flex items-center justify-between">
-            <CardTitle className="text-lg hover:underline">
-                 <Link href={`/dashboard/monitoring/${encodeURIComponent(device.id)}`}>
-                    {device.name}
-                </Link>
-            </CardTitle>
-          <Badge variant={status === 'online' ? 'default' : 'secondary'} className={cn(status === 'online' && 'bg-green-600')}>
-            {status}
-          </Badge>
+            <div className="flex-1">
+                <CardTitle className="text-lg hover:underline">
+                    <Link href={`/dashboard/monitoring/${encodeURIComponent(device.id)}`}>
+                        {device.name}
+                    </Link>
+                </CardTitle>
+                <CardDescription>{device.ipAddress}</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+                 <Badge variant={status === 'online' ? 'default' : 'secondary'} className={cn(status === 'online' && 'bg-green-600')}>
+                    {status}
+                </Badge>
+                {status === 'online' && (
+                     <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Open menu</span>
+                                <MoreVertical className="h-4 w-4" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                            <DropdownMenuItem onClick={() => onDeployAgent(device)}>
+                                <Wrench className="mr-2 h-4 w-4" />
+                                <span>Re-Install Agent</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onRunDiagnostics(device)}>
+                                <ShieldCheck className="mr-2 h-4 w-4" />
+                                <span>Run Diagnostics</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
+            </div>
         </div>
-        <CardDescription>{device.ipAddress}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {device.isFetching ? (
@@ -113,7 +146,7 @@ const MonitoringCard: React.FC<{
                 <XCircle className="h-8 w-8 mb-2" />
                 <p className="font-semibold">{isAgentNotDeployedError ? "Agent Not Deployed" : "Failed to load data"}</p>
                 <p className="text-xs max-w-full truncate" title={performanceError}>
-                    {isAgentNotDeployedError ? "Click below to install the monitoring agent on this device." : performanceError}
+                    {isAgentNotDeployedError ? "Click the button below to install the agent." : performanceError}
                 </p>
                 {isAgentNotDeployedError ? (
                     <Button variant="secondary" size="sm" className="mt-4" onClick={() => onDeployAgent(device)}>
