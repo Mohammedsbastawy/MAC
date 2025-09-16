@@ -97,7 +97,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 if(prevHistory.some(p => p.timestamp === newPoint.timestamp)) {
                     return prevHistory;
                 }
-                const updatedHistory = [...prevHistory, newPoint];
+                const updatedHistory = [...prevHistory, newPoint].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
                 // Limit the number of points on the chart
                 if(updatedHistory.length > MAX_HISTORY_POINTS) {
                     return updatedHistory.slice(updatedHistory.length - MAX_HISTORY_POINTS);
@@ -234,7 +234,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
           </Card>
            <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><MemoryStick/> Memory Usage (GB)</CardTitle>
+              <CardTitle className="flex items-center gap-2"><MemoryStick/> Memory Usage (MB)</CardTitle>
               <CardDescription>
                 Used memory over the last 24 hours.
               </CardDescription>
@@ -268,7 +268,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                   </defs>
                   <Area
                     dataKey="usedMemoryGB"
-                    name="Memory"
+                    name="Memory (MB)"
                     type="natural"
                     fill="url(#fillMemory)"
                     stroke="var(--color-memory)"

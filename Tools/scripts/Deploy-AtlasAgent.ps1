@@ -28,9 +28,8 @@ try {
         $CpuUsage = if ($CpuCounter) { [math]::Round($CpuCounter.CookedValue, 2) } else { 0 }
         # Get Memory Info
         $MemoryInfo = Get-CimInstance -ClassName Win32_OperatingSystem
-        # Values are in KB, so we divide by 1024*1024 to get GB
-        $TotalMemoryGB = [math]::Round($MemoryInfo.TotalVisibleMemorySize / 1048576, 2)
-        $UsedMemoryGB = [math]::Round(($MemoryInfo.TotalVisibleMemorySize - $MemoryInfo.FreePhysicalMemory) / 1048576, 2)
+        $TotalMemoryMB = [math]::Round($MemoryInfo.TotalVisibleMemorySize / 1024, 2)
+        $UsedMemoryMB = [math]::Round(($MemoryInfo.TotalVisibleMemorySize - $MemoryInfo.FreePhysicalMemory) / 1024, 2)
         
         # Get Disk Info for all fixed disks
         $DiskInfo = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and -not [string]::IsNullOrWhiteSpace($_.DriveLetter) } | ForEach-Object {
@@ -44,8 +43,8 @@ try {
         $PerformanceData = @{
             timestamp = [datetime]::UtcNow.ToString("o"); # ISO 8601 format
             cpuUsage = $CpuUsage;
-            totalMemoryGB = $TotalMemoryGB;
-            usedMemoryGB = $UsedMemoryGB;
+            totalMemoryGB = $TotalMemoryMB; # This is actually MB now
+            usedMemoryGB = $UsedMemoryMB; # This is actually MB now
             diskInfo = $DiskInfo;
         }
         # Convert to JSON and write to file
@@ -53,9 +52,9 @@ try {
     }
     # --- Immediate Execution ---
     # Run the command once immediately to create the file and confirm the script works.
-    Write-Host "Performing initial data collection..."
+    Write-Host "Performing initial data collection..." -ForegroundColor Yellow
     Invoke-Command -ScriptBlock $CommandToRun
-    Write-Host "Initial data file created successfully."
+    Write-Host "Initial data file created successfully." -ForegroundColor Yellow
     # --- Scheduled Task Creation ---
     # Convert the script block to a string correctly and then encode it for the task argument
     # We get the string content of the script block, not the block itself.
@@ -73,13 +72,16 @@ try {
     # Define task settings
     $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
     # Unregister any existing task with the same name to ensure a clean slate
-    Write-Host "Unregistering any existing task..."
+    Write-Host "Unregistering any existing task..." -ForegroundColor Yellow
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     # Register the new scheduled task
-    Write-Host "Registering the new scheduled task..."
+    Write-Host "Registering the new scheduled task..." -ForegroundColor Yellow
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $TaskPrincipal -Settings $TaskSettings -Description $TaskDescription -Force
-    Write-Host "Atlas Agent scheduled task has been created/updated successfully."
+    Write-Host "Atlas Agent scheduled task has been created/updated successfully." -ForegroundColor Green
     
+    # Optional: Display task info for verification
+    Get-ScheduledTask -TaskName $TaskName
+
 } catch {
     Write-Error "Agent deployment failed: $_"
     # Exit with a non-zero status code to indicate failure to PsExec
