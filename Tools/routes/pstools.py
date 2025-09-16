@@ -58,7 +58,7 @@ def get_auth_from_request(data):
 @pstools_bp.before_request
 def require_login_hook():
     # Allow access to specific endpoints without a JSON body by checking session auth
-    if request.endpoint in ['pstools.api_enable_snmp', 'pstools.api_enable_prereqs', 'pstools.api_set_network_private', 'pstools.api_enable_winrm']:
+    if request.endpoint in ['pstools.api_deploy_agent', 'pstools.api_enable_prereqs', 'pstools.api_set_network_private', 'pstools.api_enable_winrm']:
         if 'user' not in session:
              return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
         return
@@ -647,31 +647,31 @@ def api_set_network_private():
             "details": err or out
         }), 500
 
-@pstools_bp.route('/enable-snmp', methods=['POST'])
-def api_enable_snmp():
+@pstools_bp.route('/deploy-agent', methods=['POST'])
+def api_deploy_agent():
     data = request.get_json() or {}
     ip = data.get("ip")
-    server_ip = data.get("server_ip")
+    device_name = data.get("name")
     user, domain, pwd, _ = get_auth_from_request(data)
 
-    if not ip or not server_ip:
-        return jsonify({"ok": False, "error": "Target IP and Server IP are required."}), 400
+    if not ip or not device_name:
+        return jsonify({"ok": False, "error": "Target IP and Device Name are required."}), 400
 
-    logger.info(f"Starting SNMP configuration on {ip} to send traps to {server_ip}.")
+    logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
     
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
+        script_path = os.path.join(current_dir, '..', 'scripts', 'Deploy-AtlasAgent.ps1')
         
         with open(script_path, 'r', encoding='utf-8') as f:
             script_content_template = f.read()
 
     except Exception as e:
-        logger.error(f"Error reading or finding SNMP script: {e}")
+        logger.error(f"Error reading or finding agent deployment script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
     
-    # Inject the server_ip into the script content by defining it as a variable at the top of the script.
-    script_content = f"$TrapDestination = '{server_ip}'\n{script_content_template}"
+    # Inject the device name into the script content
+    script_content = script_content_template.replace('$ComputerNamePlaceholder$', device_name)
     
     # Encode the modified script for -EncodedCommand
     encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
@@ -683,16 +683,16 @@ def api_enable_snmp():
     full_details = (out or "") + "\n" + (err or "")
     
     if rc == 0:
-        logger.info(f"SNMP configuration script executed successfully on {ip}.")
+        logger.info(f"Agent deployment script executed successfully on {ip}.")
         return jsonify({
             "ok": True,
-            "message": f"SNMP configuration finished on {ip}.",
+            "message": f"Atlas Agent deployment finished on {ip}.",
             "details": full_details.strip()
         })
     else:
-        logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Details: {full_details.strip()}")
+        logger.error(f"Failed to execute agent script on {ip}. RC={rc}. Details: {full_details.strip()}")
         return jsonify({
             "ok": False,
-            "error": f"Failed to execute SNMP script on {ip}.",
+            "error": f"Failed to execute agent script on {ip}.",
             "details": full_details.strip()
         }), 500

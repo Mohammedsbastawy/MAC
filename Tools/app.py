@@ -1,15 +1,10 @@
 # ملف التشغيل الرئيسي لتطبيق Flask
 from Tools.routes import create_app
 from Tools.utils.logger import logger
-import Tools.snmp_listener as snmp_listener
-
-# Start the SNMP listener in a background thread
-snmp_listener.run_in_background()
 
 app = create_app()
 
 if __name__ == "__main__":
     # Enabling threaded mode to handle concurrent requests.
-    # This is crucial so that the SNMP listener doesn't block web requests.
     logger.info("Starting Flask development server...")
     app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)
