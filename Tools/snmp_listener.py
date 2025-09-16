@@ -1,6 +1,7 @@
-# SNMP Trap Listener Service
+# SNMP Trap Listener Service using asyncio for modern Python versions
+import asyncio
 import threading
-from pysnmp.carrier.asyncore.dgram import udp
+from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.entity import engine, config
 from pysnmp.entity.rfc3413 import ntfrcv
 from Tools.utils.logger import logger
@@ -9,8 +10,6 @@ import json
 import os
 
 # --- In-Memory Storage for Traps ---
-# In a production app, this would be a database or a message queue.
-# For simplicity, we'll store traps in memory and write to a file.
 MAX_TRAPS = 200
 trap_log_file = os.path.abspath(os.path.join(os.path.dirname(__file__), 'snmp_traps.json'))
 snmp_traps = []
@@ -22,6 +21,7 @@ def load_traps():
         try:
             with open(trap_log_file, 'r') as f:
                 snmp_traps = json.load(f)
+            logger.info(f"Loaded {len(snmp_traps)} SNMP traps from log file.")
         except (IOError, json.JSONDecodeError) as e:
             logger.error(f"Could not load SNMP trap log file: {e}")
             snmp_traps = []
@@ -33,7 +33,6 @@ def save_traps():
             json.dump(snmp_traps, f, indent=2)
     except IOError as e:
         logger.error(f"Could not save SNMP trap log file: {e}")
-
 
 def trap_callback(snmpEngine, stateReference, contextEngineId, contextName, varBinds, cbCtx):
     """Callback function to process received traps."""
@@ -51,34 +50,31 @@ def trap_callback(snmpEngine, stateReference, contextEngineId, contextName, varB
     }
 
     for name, val in varBinds:
-        logger.info(f"{name.prettyPrint()} = {val.prettyPrint()}")
+        oid_str = name.prettyPrint()
+        val_str = val.prettyPrint()
+        logger.info(f"{oid_str} = {val_str}")
         trap_data["variables"].append({
-            "oid": name.prettyPrint(),
-            "value": val.prettyPrint()
+            "oid": oid_str,
+            "value": val_str
         })
 
-    # Add to in-memory list and keep it trimmed
     snmp_traps.insert(0, trap_data)
     if len(snmp_traps) > MAX_TRAPS:
         snmp_traps = snmp_traps[:MAX_TRAPS]
     
-    # Persist traps to file
     save_traps()
 
-
-def start_listener():
-    """Initializes and starts the SNMP Trap Listener."""
+async def start_listener_async():
+    """Initializes and starts the SNMP Trap Listener using asyncio."""
     snmpEngine = engine.SnmpEngine()
 
-    # --- Listener Configuration ---
-    # We listen on all interfaces '0.0.0.0' on the standard SNMP trap port 162
     trap_port = 162
     
     try:
         config.addTransport(
             snmpEngine,
             udp.domainName,
-            udp.UdpTransport().openServerMode(('0.0.0.0', trap_port))
+            await udp.UdpTransport().openServerMode(('0.0.0.0', trap_port))
         )
         logger.info(f"SNMP Listener: Successfully bound to UDP port {trap_port}")
     except Exception as e:
@@ -86,26 +82,26 @@ def start_listener():
                      f"Make sure you are running with administrator/root privileges and that no other service is using this port. Error: {e}")
         return
 
-    # --- Community Strings ---
-    # Configure community strings to accept traps from.
-    # We'll accept traps with the "public" and "private" community strings.
     config.addV1System(snmpEngine, 'community-public', 'public')
     config.addV1System(snmpEngine, 'community-private', 'private')
 
-    # Register the callback function for incoming notifications
     ntfrcv.NotificationReceiver(snmpEngine, trap_callback)
 
     logger.info(f"SNMP Trap Listener is running and waiting for traps on port {trap_port}...")
+    
+    # This will run forever
+    await asyncio.Event().wait()
 
+def run_listener_in_new_loop():
+    """Creates and runs a new asyncio event loop."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        # This starts the I/O dispatcher. It will block until jobFinished() is called.
-        snmpEngine.transportDispatcher.jobStarted(1)
-        snmpEngine.transportDispatcher.runDispatcher()
-    except Exception as e:
-        logger.error(f"SNMP Listener dispatcher error: {e}", exc_info=True)
+        loop.run_until_complete(start_listener_async())
+    except KeyboardInterrupt:
+        logger.info("SNMP Listener shutting down.")
     finally:
-        snmpEngine.transportDispatcher.closeDispatcher()
-        logger.info("SNMP Trap Listener has stopped.")
+        loop.close()
 
 def get_current_traps():
     """Returns the list of currently stored traps."""
@@ -113,7 +109,7 @@ def get_current_traps():
 
 def run_in_background():
     """Runs the SNMP listener in a separate thread."""
-    load_traps() # Load previous traps from file
-    listener_thread = threading.Thread(target=start_listener, daemon=True)
+    load_traps()
+    listener_thread = threading.Thread(target=run_listener_in_new_loop, daemon=True)
     listener_thread.start()
     logger.info("SNMP Listener has been started in a background thread.")
