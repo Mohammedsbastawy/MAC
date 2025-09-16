@@ -2,6 +2,7 @@
 
 
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -672,7 +673,7 @@ def api_enable_snmp():
         return jsonify({"ok": False, "error": "EnableSnmp.ps1 script not found on the server."}), 500
     
     # Replace placeholder and encode
-    final_script = script_content.replace('$env:ATLAS_SERVER_IP', f'"{server_ip}"')
+    final_script = script_content.replace('$env:ATLAS_SERVER_IP', server_ip)
     encoded_script = base64.b64encode(final_script.encode('utf-16-le')).decode('ascii')
     
     cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
