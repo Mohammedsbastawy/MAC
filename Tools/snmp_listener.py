@@ -4,7 +4,6 @@ import threading
 from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.entity import engine, config
 from pysnmp.entity.rfc3413 import ntfrcv
-from pysnmp.entity.rfc3413.oneliner import ntforg
 from Tools.utils.logger import logger
 from datetime import datetime
 import json
