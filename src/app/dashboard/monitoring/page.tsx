@@ -77,6 +77,7 @@ const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
     isLoadingDetails: false,
     source: 'ad',
     isAgentDeployed: false, // Will be checked later
+    agentLastUpdate: null,
 });
 
 const determineDeviceType = (hostname: string): Device["type"] => {
@@ -133,7 +134,7 @@ export default function MonitoringPage() {
   const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]): Promise<Device[]> => {
       const agentChecks = devicesToCheck.map(async (device) => {
         if (device.status !== 'online') {
-            return device;
+            return { ...device, isAgentDeployed: false, agentLastUpdate: null };
         }
         try {
             const res = await fetch("/api/pstools/psinfo", {
@@ -142,9 +143,9 @@ export default function MonitoringPage() {
               body: JSON.stringify({ ip: device.ipAddress, name: device.name })
             });
             const data = await res.json();
-            return { ...device, isAgentDeployed: data.ok };
+            return { ...device, isAgentDeployed: data.ok, agentLastUpdate: data.ok ? data.liveData.timestamp : null };
         } catch {
-            return { ...device, isAgentDeployed: false };
+            return { ...device, isAgentDeployed: false, agentLastUpdate: null };
         }
       });
 
@@ -162,14 +163,17 @@ export default function MonitoringPage() {
         if (!adData.ok) {
             throw adData;
         }
-        const initialDevices = adData.computers.map(mapAdComputerToDevice);
+        let initialDevices = adData.computers.map(mapAdComputerToDevice);
         setDevices(initialDevices.map(d => ({ ...d, isLoadingDetails: true })));
 
-        const devicesWithStatus = await checkOnlineStatus(initialDevices);
+        initialDevices = await checkOnlineStatus(initialDevices);
         
-        const finalDevices = await checkAgentStatus(devicesWithStatus);
+        const onlineDevices = initialDevices.filter(d => d.status === 'online');
+        const offlineDevices = initialDevices.filter(d => d.status !== 'online');
 
-        setDevices(finalDevices.map(d => ({ ...d, isLoadingDetails: false })));
+        const checkedOnlineDevices = await checkAgentStatus(onlineDevices);
+
+        setDevices([...checkedOnlineDevices, ...offlineDevices].map(d => ({ ...d, isLoadingDetails: false })));
 
     } catch (err: any) {
         setError({
@@ -205,7 +209,14 @@ export default function MonitoringPage() {
         setDeploymentLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + (data.details || data.stdout || JSON.stringify(data, null, 2)));
         if (data.ok) {
             toast({ title: "Deployment Successful", description: `Agent has been deployed to ${deploymentState.device.name}.`});
-             setDevices(prev => prev.map(d => d.id === deploymentState.device!.id ? {...d, isAgentDeployed: true} : d));
+            // Immediately fetch the new status
+            const agentStatusRes = await fetch("/api/pstools/psinfo", {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip: deploymentState.device.ipAddress, name: deploymentState.device.name })
+            });
+            const agentStatusData = await agentStatusRes.json();
+            setDevices(prev => prev.map(d => d.id === deploymentState.device!.id ? {...d, isAgentDeployed: agentStatusData.ok, agentLastUpdate: agentStatusData.ok ? agentStatusData.liveData.timestamp : null } : d));
         } else {
              toast({ variant: "destructive", title: "Deployment Failed", description: data.error || "An unknown error occurred."});
         }
@@ -244,6 +255,14 @@ export default function MonitoringPage() {
     )
   }
 
+  const formatTimestamp = (ts: string | null | undefined) => {
+    if (!ts) return "Not Deployed";
+    try {
+        return `Last updated: ${new Date(ts).toLocaleString()}`;
+    } catch {
+        return "Invalid date";
+    }
+  }
 
   return (
     <>
@@ -296,8 +315,11 @@ export default function MonitoringPage() {
                                 </TableCell>
                                 <TableCell>
                                      <Badge variant={device.isAgentDeployed ? 'default' : 'destructive'} className={cn(device.isAgentDeployed && 'bg-blue-600')}>
-                                        {device.isAgentDeployed ? "Deployed" : "Not Deployed"}
+                                         {device.isAgentDeployed ? "Deployed" : "Not Deployed"}
                                      </Badge>
+                                      {device.agentLastUpdate && (
+                                        <p className="text-xs text-muted-foreground mt-1">{`Last update: ${new Date(device.agentLastUpdate).toLocaleTimeString()}`}</p>
+                                    )}
                                 </TableCell>
                                 <TableCell className="text-right">
                                      <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online'}>
