@@ -44,9 +44,9 @@ def json_result(rc, out, err, structured_data=None, extra_data={}):
 
 def get_auth_from_request(data):
     """Safely gets auth credentials from request JSON or falls back to session."""
-    user = data.get("username") or session.get("user")
-    domain = data.get("domain") or session.get("domain")
-    pwd = data.get("pwd") or session.get("password")
+    user = data.get("username") if data else session.get("user")
+    domain = data.get("domain") if data else session.get("domain")
+    pwd = data.get("pwd") if data else session.get("password")
     
     if not user or not pwd:
         return None, None, None, None
@@ -57,23 +57,23 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    # Allow access to specific endpoints without a JSON body by checking session auth
-    if request.endpoint in ['pstools.api_deploy_agent', 'pstools.api_enable_prereqs', 'pstools.api_set_network_private', 'pstools.api_enable_winrm', 'pstools.api_enable_snmp']:
+    # Allow body-less requests for specific endpoints by checking session auth
+    bodyless_endpoints = ['pstools.api_deploy_agent']
+    if request.endpoint in bodyless_endpoints:
         if 'user' not in session:
-             return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return
+            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return # Proceed
         
     data = request.get_json(silent=True)
     if data is None:
-        # If there's no JSON body, we allow it to proceed but auth must be checked in the route
-        # using session if needed. This is a failsafe.
         if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return
+            return jsonify({'ok': False, 'error': 'Request is missing a body, and no active session was found.'}), 401
+        return # Proceed with session auth
 
+    # If body exists, validate credentials from it or session
     user, _, _, _ = get_auth_from_request(data)
     if not user:
-         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
 
 @pstools_bp.route('/psexec', methods=['POST'])
@@ -656,14 +656,11 @@ def api_set_network_private():
 
 @pstools_bp.route('/deploy-agent', methods=['POST'])
 def api_deploy_agent():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ip = data.get("ip")
     device_name = data.get("name")
     
-    # Correctly get auth from session for body-less requests
-    user = session.get("user")
-    domain = session.get("domain")
-    pwd = session.get("password")
+    user, domain, pwd, _ = get_auth_from_request(data)
 
     if not all([ip, device_name, user, domain, pwd]):
         return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
@@ -684,11 +681,9 @@ def api_deploy_agent():
         logger.error(f"An unexpected error occurred while reading the agent script: {e}")
         return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
     
-    # Encode the script for -EncodedCommand
     encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
     
-    # Correctly build the command to run PowerShell hidden
-    cmd_args = ["powershell.exe", "-WindowStyle", "Hidden", "-EncodedCommand", encoded_script]
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
     
@@ -699,14 +694,18 @@ def api_deploy_agent():
         return jsonify({
             "ok": True,
             "message": f"Atlas Agent deployment finished on {ip}.",
-            "details": full_details.strip()
+            "details": full_details.strip(),
+            "stdout": out
         })
     else:
         logger.error(f"Failed to execute agent script on {ip}. RC={rc}. Details: {full_details.strip()}")
         return jsonify({
             "ok": False,
             "error": f"Failed to execute agent script on {ip}.",
-            "details": full_details.strip()
+            "details": full_details.strip(),
+            "rc": rc,
+            "stdout": out,
+            "stderr": err
         }), 500
 
 @pstools_bp.route('/enable-snmp', methods=['POST'])
@@ -762,4 +761,5 @@ def api_enable_snmp():
     
 
     
+
 

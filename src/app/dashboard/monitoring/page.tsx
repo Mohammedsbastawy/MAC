@@ -106,7 +106,7 @@ export default function MonitoringPage() {
       const agentChecks = devicesToCheck.map(async (device) => {
         // We only check agent status for online devices
         if (device.status !== 'online') {
-            return { id: device.id, isAgentDeployed: device.isAgentDeployed }; // Return current state if offline
+            return { id: device.id, isAgentDeployed: device.isAgentDeployed };
         }
         const res = await fetch("/api/pstools/psinfo", {
           method: "POST",
@@ -120,7 +120,7 @@ export default function MonitoringPage() {
       const results = await Promise.allSettled(agentChecks);
       
       setDevices(prevDevices => {
-          const newDevices = [...prevDevices]; // Create a mutable copy
+          const newDevices = [...prevDevices];
           results.forEach(result => {
               if (result.status === 'fulfilled' && result.value) {
                   const { id, isAgentDeployed } = result.value;
@@ -130,7 +130,7 @@ export default function MonitoringPage() {
                   }
               }
           });
-          return newDevices; // Return the updated array
+          return newDevices;
       });
   }, []);
 
@@ -141,7 +141,6 @@ export default function MonitoringPage() {
         return;
       };
 
-      // Set only loading state, do not reset agent deployment status
       setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true, status: 'unknown' })));
 
       try {
@@ -159,12 +158,13 @@ export default function MonitoringPage() {
           setDevices(prev => {
               const newDevices = prev.map(d => {
                   const isOnline = onlineIps.has(d.ipAddress);
-                  if(isOnline) onlineDevices.push(d);
-                  return {
+                  const updatedDevice = {
                     ...d,
                     status: isOnline ? 'online' : 'offline',
                     isLoadingDetails: false
-                  }
+                  };
+                  if(isOnline) onlineDevices.push(updatedDevice);
+                  return updatedDevice;
               });
               
               if(onlineDevices.length > 0) {
@@ -223,7 +223,7 @@ export default function MonitoringPage() {
             body: JSON.stringify({ ip: deploymentState.device.ipAddress, name: deploymentState.device.name })
         });
         const data = await res.json();
-        setDeploymentLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + (data.details || JSON.stringify(data, null, 2)));
+        setDeploymentLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + (data.details || data.stdout || JSON.stringify(data, null, 2)));
         if (data.ok) {
             toast({ title: "Deployment Successful", description: `Agent has been deployed to ${deploymentState.device.name}.`});
              setDevices(prev => prev.map(d => d.id === deploymentState.device!.id ? {...d, isAgentDeployed: true} : d));
@@ -321,7 +321,7 @@ export default function MonitoringPage() {
                                     </Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                     <Button variant="outline" size="sm" className="mr-2" onClick={() => setDeploymentState({isOpen: true, device})} disabled={device.status !== 'online'}>
+                                     <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online'}>
                                         <ShieldCheck className="mr-2 h-4 w-4" /> Deploy Agent
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)}>
@@ -379,7 +379,3 @@ export default function MonitoringPage() {
     </>
   );
 }
-
-    
-
-    
