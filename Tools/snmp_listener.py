@@ -4,6 +4,7 @@ import threading
 from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.entity import engine, config
 from pysnmp.entity.rfc3413 import ntfrcv
+from pysnmp.entity.rfc3413.oneliner import ntforg
 from Tools.utils.logger import logger
 from datetime import datetime
 import json
@@ -71,26 +72,37 @@ async def start_listener_async():
     trap_port = 162
     
     try:
-        # Correctly set up the transport without await
-        transport = udp.UdpAsyncioTransport().openServerMode(('0.0.0.0', trap_port))
+        loop = asyncio.get_running_loop()
+        
+        # This is the correct way to start a listening server with asyncio for pysnmp
+        transport = udp.UdpAsyncioTransport()
+        await loop.create_datagram_endpoint(
+            lambda: transport, local_addr=('0.0.0.0', trap_port)
+        )
+
         config.addTransport(snmpEngine, udp.domainName, transport)
         logger.info(f"SNMP Listener: Successfully bound to UDP port {trap_port}")
+
     except Exception as e:
         logger.error(f"SNMP Listener FATAL: Could not bind to port {trap_port}. "
                      f"Make sure you are running with administrator/root privileges and that no other service is using this port. Error: {e}")
         return
 
-    config.addV1System(snmpEngine, 'community-public', 'public')
-    config.addV1System(snmpEngine, 'community-private', 'private')
+    # Configure community strings
+    config.addV1System(snmpEngine, 'public', 'public')
+    config.addV1System(snmpEngine, 'private', 'private')
 
+    # Register the callback for receiving traps
     ntfrcv.NotificationReceiver(snmpEngine, trap_callback)
 
     logger.info(f"SNMP Trap Listener is running and waiting for traps on port {trap_port}...")
     
-    # This will run forever
+    # This keeps the listener running indefinitely
     snmpEngine.transportDispatcher.jobStarted(1)
     try:
         await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        logger.info("SNMP listener task cancelled.")
     finally:
         snmpEngine.transportDispatcher.jobFinished(1)
 
