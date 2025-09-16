@@ -16,7 +16,7 @@ from .activedirectory import _get_ad_computers_data
 from Tools.utils.logger import logger
 import datetime
 from datetime import timezone
-
+from Tools.snmp_listener import get_current_traps
 
 network_bp = Blueprint('network', __name__)
 
@@ -564,33 +564,32 @@ def get_historical_data():
 def fetch_live_data():
     """
     Fetches the latest performance data directly from the agent file on a remote device.
+    This acts as a proxy to the internal psinfo function.
     """
     data = request.get_json() or {}
-    device_id = data.get("id")
-    if not device_id:
-        return jsonify({"ok": False, "error": "Device ID (DN) is required."}), 400
+    device_ip = data.get("ip")
+    device_id = data.get("id") # DN
+    
+    if not device_id or not device_ip:
+        return jsonify({"ok": False, "error": "Device ID (DN) and IP address are required."}), 400
 
     try:
         device_name = device_id.split(',')[0].split('=')[1]
-        
-        # We need the IP address, which should be stored in AD.
-        # This is a bit inefficient but necessary if we only have the DN.
-        # A better approach would be to pass the IP from the frontend.
-        # Let's assume the frontend will pass it for now.
-        # If not, we'd have to do an AD lookup here.
-        
-        # Temporary: This is a placeholder as the frontend doesn't pass it yet.
-        # We will make the psinfo call do the lookup. This is inefficient.
-        # A better long-term solution is to cache device IP/DN mappings.
-        from Tools.routes.pstools import api_psinfo_internal
-        live_data_response = api_psinfo_internal(dn=device_id)
-
-        return live_data_response
-
-
     except IndexError:
         logger.warning(f"Could not parse device name from DN: {device_id}")
         return jsonify({"ok": False, "error": "Invalid Device ID format."}), 400
-    except Exception as e:
-        logger.error(f"Unexpected error in fetch_live_data for {device_id}: {e}", exc_info=True)
-        return jsonify({"ok": False, "error": "An unexpected server error occurred."}), 500
+    
+    from Tools.routes.pstools import api_psinfo_internal
+    
+    # Directly call the internal function, passing the explicit IP and name.
+    # This bypasses any further JSON parsing and ensures the correct target is used.
+    return api_psinfo_internal(ip=device_ip, name=device_name)
+        
+@network_bp.route('/api/network/get-snmp-traps', methods=['GET'])
+def get_snmp_traps_data():
+    """
+    API endpoint to fetch the latest SNMP traps from the in-memory store.
+    """
+    logger.info("Received request for /api/network/get-snmp-traps.")
+    traps = get_current_traps()
+    return jsonify({"ok": True, "traps": traps}), 200
