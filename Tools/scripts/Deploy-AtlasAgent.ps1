@@ -26,11 +26,11 @@ try {
         # This samples the processor usage over a brief period.
         $CpuCounter = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -MaxSamples 2).CounterSamples | Select-Object -Last 1
         $CpuUsage = if ($CpuCounter) { [math]::Round($CpuCounter.CookedValue, 2) } else { 0 }
-        # Get Memory Info - Win32_OperatingSystem returns values in KB
+        # Get Memory Info
         $MemoryInfo = Get-CimInstance -ClassName Win32_OperatingSystem
-        # Correctly convert from KB to GB
-        $TotalMemoryGB = [math]::Round($MemoryInfo.TotalVisibleMemorySize / (1024*1024), 2)
-        $UsedMemoryGB = [math]::Round(($MemoryInfo.TotalVisibleMemorySize - $MemoryInfo.FreePhysicalMemory) / (1024*1024), 2)
+        # Values are in KB, so we divide by 1024*1024 to get GB
+        $TotalMemoryGB = [math]::Round($MemoryInfo.TotalVisibleMemorySize / 1048576, 2)
+        $UsedMemoryGB = [math]::Round(($MemoryInfo.TotalVisibleMemorySize - $MemoryInfo.FreePhysicalMemory) / 1048576, 2)
         
         # Get Disk Info for all fixed disks
         $DiskInfo = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and -not [string]::IsNullOrWhiteSpace($_.DriveLetter) } | ForEach-Object {
@@ -80,8 +80,6 @@ try {
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $TaskPrincipal -Settings $TaskSettings -Description $TaskDescription -Force
     Write-Host "Atlas Agent scheduled task has been created/updated successfully."
     
-    # Optional: Display task info for verification
-    Get-ScheduledTask -TaskName $TaskName
 } catch {
     Write-Error "Agent deployment failed: $_"
     # Exit with a non-zero status code to indicate failure to PsExec

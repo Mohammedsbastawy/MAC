@@ -46,7 +46,7 @@ def get_auth_from_request(data):
     """Safely gets auth credentials from request JSON or falls back to session."""
     user = data.get("username") if data else session.get("user")
     domain = data.get("domain") if data else session.get("domain")
-    pwd = data.get("pwd") if data else session.get("password")
+    pwd = data.get("password") if data else session.get("password")
     
     if not user or not pwd:
         return None, None, None, None
@@ -228,7 +228,7 @@ def api_psinfo():
     remote_file_path = f"C:\\Atlas\\{device_name}.json"
     ps_command = f"Get-Content -Path '{remote_file_path}' -Raw"
 
-    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=15)
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=30)
     
     if rc != 0:
         logger.warning(f"Failed to read agent file from {ip} for {device_name}. Error: {err}")
