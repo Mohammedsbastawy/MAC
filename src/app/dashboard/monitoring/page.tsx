@@ -102,28 +102,6 @@ export default function MonitoringPage() {
   const [isDeploying, setIsDeploying] = React.useState(false);
   const [deploymentLog, setDeploymentLog] = React.useState("");
   
-  const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]): Promise<Device[]> => {
-      const agentChecks = devicesToCheck.map(async (device) => {
-        // Only check agent status for online devices
-        if (device.status !== 'online') {
-            return device;
-        }
-        try {
-            const res = await fetch("/api/pstools/psinfo", {
-              method: "POST",
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ip: device.ipAddress, name: device.name })
-            });
-            const data = await res.json();
-            return { ...device, isAgentDeployed: data.ok };
-        } catch {
-            return { ...device, isAgentDeployed: false };
-        }
-      });
-
-      return await Promise.all(agentChecks);
-  }, []);
-
   const checkOnlineStatus = React.useCallback(async (deviceList: Device[]): Promise<Device[]> => {
       const ipsToCheck = deviceList.map(d => d.ipAddress).filter(Boolean);
       if (ipsToCheck.length === 0) {
@@ -152,26 +130,45 @@ export default function MonitoringPage() {
       }
   }, [toast]);
 
+  const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]): Promise<Device[]> => {
+      const agentChecks = devicesToCheck.map(async (device) => {
+        if (device.status !== 'online') {
+            return device;
+        }
+        try {
+            const res = await fetch("/api/pstools/psinfo", {
+              method: "POST",
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ip: device.ipAddress, name: device.name })
+            });
+            const data = await res.json();
+            return { ...device, isAgentDeployed: data.ok };
+        } catch {
+            return { ...device, isAgentDeployed: false };
+        }
+      });
+
+      return await Promise.all(agentChecks);
+  }, []);
+
   const fetchAllDevices = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    setDevices([]);
+
     try {
-        // Step 1: Fetch AD Computers
         const response = await fetch("/api/ad/get-computers", { method: "POST" });
-        const data = await response.json();
-        if (!data.ok) {
-            throw data; // Throw the error object from the backend
+        const adData = await response.json();
+        if (!adData.ok) {
+            throw adData;
         }
-        const adDevices = data.computers.map(mapAdComputerToDevice);
-        setDevices(adDevices.map(d => ({ ...d, isLoadingDetails: true })));
+        const initialDevices = adData.computers.map(mapAdComputerToDevice);
+        setDevices(initialDevices.map(d => ({ ...d, isLoadingDetails: true })));
 
-        // Step 2: Check online status for all of them and wait for the result
-        const devicesWithStatus = await checkOnlineStatus(adDevices);
-
-        // Step 3: Check agent status for the online devices and wait for the result
-        const finalDevices = await checkAgentStatus(devicesWithStatus);
+        const devicesWithStatus = await checkOnlineStatus(initialDevices);
         
-        // Step 4: Set the final state once with all the information
+        const finalDevices = await checkAgentStatus(devicesWithStatus);
+
         setDevices(finalDevices.map(d => ({ ...d, isLoadingDetails: false })));
 
     } catch (err: any) {
@@ -184,7 +181,8 @@ export default function MonitoringPage() {
     } finally {
         setIsLoading(false);
     }
-  }, [checkOnlineStatus, checkAgentStatus]);
+}, [checkOnlineStatus, checkAgentStatus]);
+
 
 
   React.useEffect(() => {
@@ -303,7 +301,7 @@ export default function MonitoringPage() {
                                 </TableCell>
                                 <TableCell className="text-right">
                                      <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online'}>
-                                        <ShieldCheck className="mr-2 h-4 w-4" /> Deploy Agent
+                                        <RefreshCw className="mr-2 h-4 w-4" /> Update Statics
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)} disabled={!device.isAgentDeployed}>
                                         View Dashboard <ChevronRight className="ml-2 h-4 w-4" />
@@ -326,23 +324,23 @@ export default function MonitoringPage() {
     <AlertDialog open={deploymentState.isOpen} onOpenChange={(open) => !open && setDeploymentState({isOpen: false, device: null})}>
         <AlertDialogContent className="max-w-2xl">
             <AlertDialogHeader>
-                <AlertDialogTitle>Deploy Monitoring Agent to {deploymentState.device?.name}</AlertDialogTitle>
+                <AlertDialogTitle>Update Statics for {deploymentState.device?.name}</AlertDialogTitle>
                 <AlertDialogDescription>
-                    This will install a lightweight monitoring agent on the target device. The agent runs as a scheduled task every minute to collect performance data.
+                    This will run the script on the target device to create/update the performance data file and ensure the scheduled task is running correctly.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             
             {isDeploying || deploymentLog ? (
                 <div className="my-4">
-                    <Label htmlFor="deploy-log">Deployment Log</Label>
+                    <Label htmlFor="deploy-log">Execution Log</Label>
                     <Textarea id="deploy-log" readOnly value={deploymentLog} className="mt-2 h-60 font-mono text-xs bg-muted" />
                 </div>
             ) : (
                  <Alert className="my-4">
                     <ShieldCheck className="h-4 w-4" />
-                    <AlertTitle>Ready to Deploy</AlertTitle>
+                    <AlertTitle>Ready to Update</AlertTitle>
                     <AlertDescription>
-                        Click &quot;Deploy Now&quot; to begin the remote installation. PsExec will be used to execute the deployment script.
+                        Click &quot;Run Now&quot; to begin the remote execution.
                     </AlertDescription>
                 </Alert>
             )}
@@ -351,7 +349,7 @@ export default function MonitoringPage() {
                 <AlertDialogCancel>Close</AlertDialogCancel>
                 <AlertDialogAction onClick={handleDeployAgent} disabled={isDeploying}>
                     {isDeploying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Deploy Now
+                    Run Now
                 </AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>
@@ -368,6 +366,8 @@ export default function MonitoringPage() {
 
 
 
+
+    
 
     
 
