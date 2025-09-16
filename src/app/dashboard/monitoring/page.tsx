@@ -104,8 +104,9 @@ export default function MonitoringPage() {
   
   const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]): Promise<Device[]> => {
       const agentChecks = devicesToCheck.map(async (device) => {
+        // Only check agent status for online devices
         if (device.status !== 'online') {
-            return device; // Return as-is if not online
+            return device;
         }
         try {
             const res = await fetch("/api/pstools/psinfo", {
@@ -129,8 +130,6 @@ export default function MonitoringPage() {
         return deviceList;
       };
 
-      setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true, status: 'unknown' })));
-
       try {
           const res = await fetch("/api/network/check-status", {
               method: 'POST',
@@ -142,11 +141,10 @@ export default function MonitoringPage() {
           
           const onlineIps = new Set<string>(data.online_ips);
           
-          const updatedDevices = deviceList.map(d => ({
+          return deviceList.map(d => ({
               ...d,
               status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
           }));
-          return updatedDevices;
 
       } catch (err: any) {
           toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
@@ -157,22 +155,24 @@ export default function MonitoringPage() {
   const fetchAllDevices = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    setDevices([]);
     try {
+        // Step 1: Fetch AD Computers
         const response = await fetch("/api/ad/get-computers", { method: "POST" });
         const data = await response.json();
         if (!data.ok) {
-            throw data; // Throw the error response to be caught below
+            throw data;
         }
-
         const adDevices = data.computers.map(mapAdComputerToDevice);
-        setDevices(adDevices); // Set initial list with loading state
+        setDevices(adDevices.map(d => ({ ...d, isLoadingDetails: true })));
 
+        // Step 2: Check online status for all of them
         const devicesWithStatus = await checkOnlineStatus(adDevices);
-        const devicesWithAgentStatus = await checkAgentStatus(devicesWithStatus);
+
+        // Step 3: Check agent status ONLY for the ones that are online
+        const finalDevices = await checkAgentStatus(devicesWithStatus);
         
-        // Final update with all statuses
-        setDevices(devicesWithAgentStatus.map(d => ({ ...d, isLoadingDetails: false })));
+        // Step 4: Set final state once with all information
+        setDevices(finalDevices.map(d => ({ ...d, isLoadingDetails: false })));
 
     } catch (err: any) {
         setError({
@@ -180,6 +180,7 @@ export default function MonitoringPage() {
             message: err.message || "Failed to connect to the server to get devices.",
             details: err.details,
         });
+        setDevices([]); // Clear devices on error
     } finally {
         setIsLoading(false);
     }
@@ -365,3 +366,6 @@ export default function MonitoringPage() {
     
 
 
+
+
+    
