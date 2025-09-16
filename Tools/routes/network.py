@@ -15,6 +15,7 @@ from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, par
 from .activedirectory import _get_ad_computers_data
 from Tools.utils.logger import logger
 import datetime
+from datetime import timezone
 
 
 network_bp = Blueprint('network', __name__)
@@ -527,11 +528,15 @@ def get_historical_data():
         
         # Filter out old entries on read
         retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_utc = datetime.datetime.now(timezone.utc)
 
         def parse_iso_with_timezone(ts_str):
             # Handles both 'Z' and '+00:00' suffixes for UTC
-            return datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+            dt_obj = datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+            # Ensure the object is timezone-aware for comparison
+            if dt_obj.tzinfo is None:
+                return dt_obj.replace(tzinfo=timezone.utc)
+            return dt_obj
 
         valid_history = [
             entry for entry in history
