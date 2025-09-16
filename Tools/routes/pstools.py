@@ -9,6 +9,7 @@ from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, par
 from Tools.utils.logger import logger
 import datetime
 import json
+from .activedirectory import get_ldap_connection
 
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
@@ -213,15 +214,51 @@ def api_psloglist():
     return json_result(rc, out, err, structured_data)
 
 
-@pstools_bp.route('/psinfo', methods=['POST'])
-def api_psinfo():
-    data = request.get_json() or {}
-    ip = data.get("ip")
-    device_name = data.get("name")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+def api_psinfo_internal(dn=None):
+    """
+    Internal function to fetch agent data. Can be called by other routes.
+    It performs an AD lookup to find the device's IP and name if only DN is provided.
+    """
+    ip = None
+    device_name = None
+    
+    if dn:
+        try:
+            device_name = dn.split(',')[0].split('=')[1]
+            conn, error, status = get_ldap_connection()
+            if error:
+                return jsonify(error), status
+            
+            try:
+                conn.search(search_base=dn, search_filter='(objectClass=computer)', search_scope='BASE', attributes=['dNSHostName'])
+                if conn.entries:
+                    ip = str(conn.entries[0].dNSHostName.value)
+                else:
+                    raise ValueError(f"Computer with DN '{dn}' not found in AD.")
+            finally:
+                if conn:
+                    conn.unbind()
+        except Exception as e:
+            logger.error(f"Failed to resolve DN '{dn}' to IP address: {e}")
+            return jsonify({"ok": False, "error": f"Failed to find device info for DN: {dn}"}), 404
+
+    else: # Called from /psinfo endpoint
+        data = request.get_json() or {}
+        ip = data.get("ip")
+        device_name = data.get("name")
     
     if not ip or not device_name:
-        return json_result(1, "", "IP address and device name are required.", None)
+        return jsonify({"ok": False, "error": "IP address and device name are required."}), 400
+
+    user, domain, pwd, winrm_user = get_auth_from_request(request.get_json(silent=True) or {})
+    if not user: # Fallback to session if no body
+         user = session.get("user")
+         domain = session.get("domain")
+         pwd = session.get("password")
+         winrm_user = f"{user}@{domain}" if '@' not in user else user
+
+    if not all([user, domain, pwd]):
+        return jsonify({"ok": False, "error": "Authentication required to fetch agent data."}), 401
 
     logger.info(f"Reading performance data for '{device_name}' from agent file on {ip}.")
     
@@ -232,12 +269,11 @@ def api_psinfo():
     
     if rc != 0:
         logger.warning(f"Failed to read agent file from {ip} for {device_name}. Error: {err}")
-        return json_result(rc, out, err)
+        return jsonify({"ok": False, "error": "Could not read agent data file.", "details": err})
 
     try:
         perf_data = json.loads(out)
-        structured_data = {"psinfo": perf_data}
-
+        
         log_file = os.path.join(LOGS_DIR, f"{device_name}.json")
         history = []
         if os.path.exists(log_file):
@@ -249,7 +285,6 @@ def api_psinfo():
         
         current_timestamp = datetime.datetime.fromisoformat(perf_data["timestamp"].replace('Z', '+00:00'))
         
-        # Check if the last entry has the same timestamp. If so, do not append.
         if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
             history.append({
                 "timestamp": perf_data.get("timestamp"),
@@ -257,7 +292,6 @@ def api_psinfo():
                 "usedMemoryGB": perf_data.get("usedMemoryGB")
             })
 
-            # Prune old entries after appending
             retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             
@@ -276,14 +310,20 @@ def api_psinfo():
             except IOError as e:
                 logger.error(f"Failed to write history log for {device_name}: {e}")
 
-        return json_result(0, json.dumps(perf_data), "", structured_data)
+        # Return live data directly
+        return jsonify({"ok": True, "liveData": perf_data})
 
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, KeyError) as e:
         logger.error(f"Error decoding JSON from agent file for {device_name}: {e}. Raw data: {out}")
-        return json_result(500, out, f"Failed to parse data file from agent. The file may be corrupted or malformed.", None)
+        return jsonify({"ok": False, "error": f"Failed to parse data file from agent. File may be corrupted or malformed.", "details": out}), 500
     except Exception as e:
         logger.error(f"Unexpected error processing agent data for {device_name}: {e}", exc_info=True)
-        return json_result(500, "", f"An unexpected error occurred while processing data for {device_name}.", None)
+        return jsonify({"ok": False, "error": f"An unexpected error occurred while processing agent data for {device_name}."}), 500
+
+@pstools_bp.route('/psinfo', methods=['POST'])
+def api_psinfo():
+    """Public endpoint for psinfo, now just a wrapper."""
+    return api_psinfo_internal()
 
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
@@ -770,3 +810,4 @@ def api_enable_snmp():
 
 
     
+

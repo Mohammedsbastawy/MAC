@@ -42,11 +42,12 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const [error, setError] = React.useState<string | null>(null);
   const [deviceName, setDeviceName] = React.useState('');
   const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
+  const MAX_HISTORY_POINTS = 30; // Keep the last 30 data points on the chart
 
   const deviceId = decodeURIComponent(params.id);
 
-  const fetchHistory = React.useCallback(async (isInitialLoad = false) => {
-      if (isInitialLoad) setIsLoading(true);
+   const fetchInitialHistory = React.useCallback(async () => {
+      setIsLoading(true);
       setError(null);
       try {
         const res = await fetch("/api/network/get-historical-data", {
@@ -70,36 +71,72 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       } catch (err) {
         setError("An error occurred while fetching data from the server.");
       } finally {
-        if (isInitialLoad) setIsLoading(false);
+        setIsLoading(false);
       }
+  }, [deviceId]);
+
+  const fetchLiveData = React.useCallback(async () => {
+    try {
+        const res = await fetch("/api/network/fetch-live-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: deviceId }),
+        });
+        const data = await res.json();
+
+        if(data.ok && data.liveData) {
+            const newPoint = {
+                ...data.liveData,
+                displayTime: new Date(data.liveData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                cpuUsage: parseFloat(data.liveData.cpuUsage?.toFixed(2) || 0),
+                usedMemoryGB: parseFloat(data.liveData.usedMemoryGB?.toFixed(2) || 0),
+            };
+            
+            setHistory(prevHistory => {
+                // Avoid adding duplicate points
+                if(prevHistory.some(p => p.timestamp === newPoint.timestamp)) {
+                    return prevHistory;
+                }
+                const updatedHistory = [...prevHistory, newPoint];
+                // Limit the number of points on the chart
+                if(updatedHistory.length > MAX_HISTORY_POINTS) {
+                    return updatedHistory.slice(updatedHistory.length - MAX_HISTORY_POINTS);
+                }
+                return updatedHistory;
+            });
+             setError(null);
+        } else if (!data.ok) {
+            setError(data.error || "Failed to fetch live update.");
+        }
+    } catch (err) {
+        setError("An error occurred while fetching live data from the server.");
+    }
   }, [deviceId]);
 
 
   React.useEffect(() => {
-    // Extract device name from DN for display
     try {
         const nameMatch = deviceId.match(/CN=([^,]+)/);
         if(nameMatch && nameMatch[1]) {
             setDeviceName(nameMatch[1]);
         }
     } catch(e) {
-        // fallback
         setDeviceName(deviceId);
     }
   }, [deviceId]);
 
   React.useEffect(() => {
-    fetchHistory(true);
-  }, [fetchHistory]);
+    fetchInitialHistory();
+  }, [fetchInitialHistory]);
 
   React.useEffect(() => {
-    if (isAutoRefresh) {
+    if (!isLoading && isAutoRefresh) {
         const intervalId = setInterval(() => {
-            fetchHistory(false);
+            fetchLiveData();
         }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
-  }, [isAutoRefresh, fetchHistory]);
+  }, [isAutoRefresh, isLoading, fetchLiveData]);
 
   const yAxisDomain = [0, 100];
 
@@ -166,7 +203,6 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                     axisLine={false}
                     tickMargin={8}
                     tickFormatter={(value, index) => {
-                      // Show fewer ticks to avoid clutter
                       return index % Math.ceil(history.length / 10) === 0 ? value : '';
                     }}
                   />

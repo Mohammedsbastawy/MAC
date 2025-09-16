@@ -559,8 +559,45 @@ def get_historical_data():
         logger.error(f"Failed to read or parse history file for {device_name}: {e}")
         return jsonify({"ok": False, "error": f"Failed to read history log: {str(e)}"}), 500
 
+
+@network_bp.route('/api/network/fetch-live-data', methods=['POST'])
+def fetch_live_data():
+    """
+    Fetches the latest performance data directly from the agent file on a remote device.
+    """
+    data = request.get_json() or {}
+    device_id = data.get("id")
+    if not device_id:
+        return jsonify({"ok": False, "error": "Device ID (DN) is required."}), 400
+
+    try:
+        device_name = device_id.split(',')[0].split('=')[1]
+        
+        # We need the IP address, which should be stored in AD.
+        # This is a bit inefficient but necessary if we only have the DN.
+        # A better approach would be to pass the IP from the frontend.
+        # Let's assume the frontend will pass it for now.
+        # If not, we'd have to do an AD lookup here.
+        
+        # Temporary: This is a placeholder as the frontend doesn't pass it yet.
+        # We will make the psinfo call do the lookup. This is inefficient.
+        # A better long-term solution is to cache device IP/DN mappings.
+        from Tools.routes.pstools import api_psinfo_internal
+        live_data_response = api_psinfo_internal(dn=device_id)
+
+        return live_data_response
+
+
+    except IndexError:
+        logger.warning(f"Could not parse device name from DN: {device_id}")
+        return jsonify({"ok": False, "error": "Invalid Device ID format."}), 400
+    except Exception as e:
+        logger.error(f"Unexpected error in fetch_live_data for {device_id}: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": "An unexpected server error occurred."}), 500
     
 
     
 
     
+
+```
