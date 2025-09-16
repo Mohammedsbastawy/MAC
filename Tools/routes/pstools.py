@@ -659,34 +659,21 @@ def api_enable_snmp():
 
     logger.info(f"Starting SNMP configuration on {ip} to send traps to {server_ip}.")
     
-    try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
-        
-        with open(script_path, 'r', encoding='utf-8') as f:
-            script_content_template = f.read()
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
 
-    except Exception as e:
-        logger.error(f"Error reading or finding SNMP script: {e}")
-        return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
-    
-    # Replace the placeholder with the actual server IP
-    script_content = script_content_template.replace('$SERVER_IP_PLACEHOLDER$', server_ip)
-    
-    # Encode the finalized script for reliable execution
-    encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
-    
-    # The arguments for psexec are powershell.exe and its own arguments
+    # This is the reliable way to call a script with arguments
     ps_args = [
         "powershell.exe",
         "-ExecutionPolicy", "Bypass",
-        "-EncodedCommand", encoded_script
+        "-File", script_path,
+        "-TrapDestination", server_ip
     ]
-
+    
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, ps_args, timeout=300)
-
+    
     full_details = (out or "") + "\n" + (err or "")
-
+    
     if rc == 0:
         logger.info(f"SNMP configuration script executed successfully on {ip}.")
         return jsonify({
@@ -701,3 +688,5 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": full_details.strip()
         }), 500
+    
+    
