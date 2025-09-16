@@ -165,6 +165,10 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                     tickLine={false}
                     axisLine={false}
                     tickMargin={8}
+                    tickFormatter={(value, index) => {
+                      // Show fewer ticks to avoid clutter
+                      return index % Math.ceil(history.length / 10) === 0 ? value : '';
+                    }}
                   />
                   <YAxis domain={yAxisDomain} tickLine={false} axisLine={false} />
                   <ChartTooltip
@@ -208,8 +212,11 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                     tickLine={false}
                     axisLine={false}
                     tickMargin={8}
+                    tickFormatter={(value, index) => {
+                       return index % Math.ceil(history.length / 10) === 0 ? value : '';
+                    }}
                   />
-                  <YAxis tickLine={false} axisLine={false}/>
+                  <YAxis tickLine={false} axisLine={false} domain={['dataMin', 'dataMax']}/>
                    <ChartTooltip
                     cursor={false}
                     content={<ChartTooltipContent labelFormatter={(value, payload) => {
@@ -242,3 +249,5 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 };
 
 export default DeviceDashboardPage;
+
+    

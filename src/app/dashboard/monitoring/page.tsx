@@ -103,11 +103,9 @@ export default function MonitoringPage() {
   const [deploymentLog, setDeploymentLog] = React.useState("");
   
   const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]) => {
-      // This function now only updates, it doesn't reset.
       const agentChecks = devicesToCheck.map(async (device) => {
         if (device.status !== 'online') {
-            // Return null if we don't need to check, so we can filter it out.
-            return null;
+            return { id: device.id, isAgentDeployed: false };
         }
         const res = await fetch("/api/pstools/psinfo", {
           method: "POST",
@@ -168,7 +166,6 @@ export default function MonitoringPage() {
               });
               
               if(onlineDevices.length > 0) {
-                // Fire and forget agent status check
                 checkAgentStatus(onlineDevices);
               }
               
@@ -278,8 +275,8 @@ export default function MonitoringPage() {
                 </p>
             </div>
              <div className="flex items-center gap-2">
-                <Button onClick={() => checkOnlineStatus(devices)} disabled={devices.some(d => d.isLoadingDetails)}>
-                    {devices.some(d => d.isLoadingDetails) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                <Button onClick={() => fetchAllDevices()} disabled={isLoading || devices.some(d => d.isLoadingDetails)}>
+                    {isLoading || devices.some(d => d.isLoadingDetails) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Refresh Status
                 </Button>
             </div>
@@ -380,3 +377,5 @@ export default function MonitoringPage() {
     </>
   );
 }
+
+    

@@ -18,6 +18,10 @@ import datetime
 
 network_bp = Blueprint('network', __name__)
 
+LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
+LOG_RETENTION_HOURS = 24
+
+
 @network_bp.before_request
 def require_login():
     # حماية جميع مسارات الشبكة
@@ -490,8 +494,6 @@ def api_check_winrm():
     return jsonify({"ok": True, "results": results})
 
 
-LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-
 @network_bp.route('/api/network/get-historical-data', methods=['POST'])
 def get_historical_data():
     """
@@ -521,8 +523,37 @@ def get_historical_data():
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
             history = json.load(f)
-        logger.info(f"Successfully loaded {len(history)} data points for {device_name}.")
-        return jsonify({"ok": True, "history": history}), 200
+        
+        # Filter out old entries on read
+        retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+        now = datetime.datetime.utcnow()
+        
+        # Use a timezone-aware 'now' for comparison
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+        def parse_iso_with_timezone(ts_str):
+            # Handles both 'Z' and '+00:00' suffixes for UTC
+            return datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+
+        valid_history = [
+            entry for entry in history
+            if "timestamp" in entry and (now_utc - parse_iso_with_timezone(entry["timestamp"])) < retention_delta
+        ]
+        
+        # If filtering resulted in changes, rewrite the file to keep it clean.
+        if len(valid_history) < len(history):
+            logger.info(f"Pruning old log entries for {device_name}. Before: {len(history)}, After: {len(valid_history)}")
+            try:
+                with open(log_file, 'w', encoding='utf-8') as f_write:
+                    json.dump(valid_history, f_write)
+            except IOError as e_write:
+                logger.error(f"Failed to write pruned history file for {device_name}: {e_write}")
+
+
+        logger.info(f"Successfully loaded and filtered {len(valid_history)} data points for {device_name}.")
+        return jsonify({"ok": True, "history": valid_history}), 200
     except (IOError, json.JSONDecodeError) as e:
         logger.error(f"Failed to read or parse history file for {device_name}: {e}")
         return jsonify({"ok": False, "error": f"Failed to read history log: {str(e)}"}), 500
+
+    

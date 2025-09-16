@@ -245,29 +245,34 @@ def api_psinfo():
             except (IOError, json.JSONDecodeError):
                 history = []
         
-        history.append({
-            "timestamp": perf_data.get("timestamp", datetime.datetime.utcnow().isoformat()),
-            "cpuUsage": perf_data.get("cpuUsage"),
-            "usedMemoryGB": perf_data.get("usedMemoryGB")
-        })
+        current_timestamp = datetime.datetime.fromisoformat(perf_data["timestamp"].replace('Z', '+00:00'))
+        
+        # Check if the last entry has the same timestamp. If so, do not append.
+        if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
+            history.append({
+                "timestamp": perf_data.get("timestamp"),
+                "cpuUsage": perf_data.get("cpuUsage"),
+                "usedMemoryGB": perf_data.get("usedMemoryGB")
+            })
 
-        retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
-        now = datetime.datetime.utcnow()
-        try:
+            # Prune old entries after appending
+            retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            
+            def parse_iso_with_timezone(ts_str):
+                return datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+
             history = [
                 entry for entry in history
-                if now - datetime.datetime.fromisoformat(entry["timestamp"].replace('Z','+00:00')) < retention_delta
+                if "timestamp" in entry and (now_utc - parse_iso_with_timezone(entry["timestamp"])) < retention_delta
             ]
-        except (TypeError, ValueError):
-             history = history[-500:]
-
-        
-        try:
-            os.makedirs(LOGS_DIR, exist_ok=True)
-            with open(log_file, 'w') as f:
-                json.dump(history, f)
-        except IOError as e:
-            logger.error(f"Failed to write history log for {device_name}: {e}")
+            
+            try:
+                os.makedirs(LOGS_DIR, exist_ok=True)
+                with open(log_file, 'w') as f:
+                    json.dump(history, f)
+            except IOError as e:
+                logger.error(f"Failed to write history log for {device_name}: {e}")
 
         return json_result(0, json.dumps(perf_data), "", structured_data)
 
@@ -698,3 +703,6 @@ def api_deploy_agent():
             "details": full_details.strip()
         }), 500
         
+
+
+    
