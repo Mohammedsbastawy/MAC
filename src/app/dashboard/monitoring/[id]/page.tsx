@@ -251,3 +251,5 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 export default DeviceDashboardPage;
 
     
+
+    

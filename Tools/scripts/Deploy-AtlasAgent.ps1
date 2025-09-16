@@ -1,19 +1,16 @@
 #Requires -RunAsAdministrator
-
 # This script deploys and configures the Atlas performance monitoring agent.
 # It creates a scheduled task that runs every minute to collect performance data.
 
 $ErrorActionPreference = 'Stop'
-
 try {
     # --- Configuration ---
     $TaskName = "AtlasAgentPerfMonitor"
     $TaskDescription = "Collects system performance data (CPU, Memory, Disk) for Atlas Control Panel."
     $AtlasDir = "C:\Atlas"
-
     # Get the computer name to use in the output file
     $DeviceName = $env:COMPUTERNAME
-
+    
     # --- Ensure Atlas Directory Exists ---
     if (-not (Test-Path -Path $AtlasDir)) {
         Write-Host "Creating directory: $AtlasDir"
@@ -25,7 +22,6 @@ try {
     $CommandToRun = {
         # Suppress errors within the task itself to prevent it from failing silently
         $ErrorActionPreference = 'SilentlyContinue'
-
         $DeviceName = $env:COMPUTERNAME
         $OutputFile = "C:\Atlas\$($DeviceName).json"
 
@@ -69,12 +65,11 @@ try {
 
 
     # --- Scheduled Task Creation ---
-
     # Convert the script block to a string correctly and then encode it for the task argument
     # We get the string content of the script block, not the block itself.
     $CommandString = $CommandToRun.ToString()
     $EncodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($CommandString))
-
+    
     # Define the action for the scheduled task
     # This runs PowerShell without a profile, in a hidden window, executing the encoded command.
     $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $EncodedCommand"
@@ -84,7 +79,7 @@ try {
 
     # Define the principal (who runs the task) - SYSTEM for reliability
     $TaskPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-
+    
     # Define task settings
     $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
 
@@ -97,6 +92,7 @@ try {
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $TaskPrincipal -Settings $TaskSettings -Description $TaskDescription -Force
 
     Write-Host "Atlas Agent scheduled task has been created/updated successfully."
+    
     # Optional: Display task info for verification
     Get-ScheduledTask -TaskName $TaskName
 
@@ -105,3 +101,5 @@ try {
     # Exit with a non-zero status code to indicate failure to PsExec
     exit 1
 }
+
+    

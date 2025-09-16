@@ -11,18 +11,19 @@ export type Device = {
   isDomainMember: boolean;
   isLoadingDetails: boolean;
   source: 'ad' | 'scan';
+  isAgentDeployed?: boolean;
 };
 
 export type PerformanceData = {
+  timestamp: string;
   cpuUsage: number;
-  totalMemoryGB: number;
   usedMemoryGB: number;
+  totalMemoryGB: number;
   diskInfo: {
     volume: string;
     sizeGB: number;
     freeGB: number;
   }[];
-  timestamp: string;
 };
 
 export type MonitoredDevice = {
@@ -105,3 +106,4 @@ export type SnmpLogEntry = {
     log: string;
     status: 'pending' | 'success' | 'error';
 }
+    
