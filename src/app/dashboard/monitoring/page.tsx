@@ -104,8 +104,9 @@ export default function MonitoringPage() {
   
   const checkAgentStatus = React.useCallback(async (devicesToCheck: Device[]) => {
       const agentChecks = devicesToCheck.map(async (device) => {
+        // We only check agent status for online devices
         if (device.status !== 'online') {
-            return { id: device.id, isAgentDeployed: false };
+            return { id: device.id, isAgentDeployed: device.isAgentDeployed }; // Return current state if offline
         }
         const res = await fetch("/api/pstools/psinfo", {
           method: "POST",
@@ -119,17 +120,17 @@ export default function MonitoringPage() {
       const results = await Promise.allSettled(agentChecks);
       
       setDevices(prevDevices => {
-          const updatedDevices = [...prevDevices];
+          const newDevices = [...prevDevices]; // Create a mutable copy
           results.forEach(result => {
               if (result.status === 'fulfilled' && result.value) {
                   const { id, isAgentDeployed } = result.value;
-                  const deviceIndex = updatedDevices.findIndex(d => d.id === id);
+                  const deviceIndex = newDevices.findIndex(d => d.id === id);
                   if (deviceIndex > -1) {
-                      updatedDevices[deviceIndex].isAgentDeployed = isAgentDeployed;
+                      newDevices[deviceIndex].isAgentDeployed = isAgentDeployed;
                   }
               }
           });
-          return updatedDevices;
+          return newDevices; // Return the updated array
       });
   }, []);
 
@@ -140,6 +141,7 @@ export default function MonitoringPage() {
         return;
       };
 
+      // Set only loading state, do not reset agent deployment status
       setDevices(prev => prev.map(d => ({ ...d, isLoadingDetails: true, status: 'unknown' })));
 
       try {
@@ -377,5 +379,7 @@ export default function MonitoringPage() {
     </>
   );
 }
+
+    
 
     
