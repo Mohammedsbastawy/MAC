@@ -26,10 +26,11 @@ try {
         # This samples the processor usage over a brief period.
         $CpuCounter = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1 -MaxSamples 2).CounterSamples | Select-Object -Last 1
         $CpuUsage = if ($CpuCounter) { [math]::Round($CpuCounter.CookedValue, 2) } else { 0 }
-        # Get Memory Info
+        # Get Memory Info - Win32_OperatingSystem returns values in KB
         $MemoryInfo = Get-CimInstance -ClassName Win32_OperatingSystem
-        $TotalMemoryGB = [math]::Round($MemoryInfo.TotalVisibleMemorySize / 1MB, 2)
-        $UsedMemoryGB = [math]::Round(($MemoryInfo.TotalVisibleMemorySize - $MemoryInfo.FreePhysicalMemory) / 1MB, 2)
+        # Correctly convert from KB to GB
+        $TotalMemoryGB = [math]::Round($MemoryInfo.TotalVisibleMemorySize / (1024*1024), 2)
+        $UsedMemoryGB = [math]::Round(($MemoryInfo.TotalVisibleMemorySize - $MemoryInfo.FreePhysicalMemory) / (1024*1024), 2)
         
         # Get Disk Info for all fixed disks
         $DiskInfo = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and -not [string]::IsNullOrWhiteSpace($_.DriveLetter) } | ForEach-Object {
@@ -65,9 +66,7 @@ try {
     # This runs PowerShell without a profile, in a hidden window, executing the encoded command.
     $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $EncodedCommand"
     # Define the trigger: Run every 1 minute indefinitely
-    # Use a very long timespan that is compatible with XML format. [Timespan]::MaxValue is not.
-    $RepetitionDuration = (New-TimeSpan -Days 9999)
-    $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration $RepetitionDuration
+    $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 9999)
     # Define the principal (who runs the task) - SYSTEM for reliability
     $TaskPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     
@@ -81,6 +80,8 @@ try {
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $TaskPrincipal -Settings $TaskSettings -Description $TaskDescription -Force
     Write-Host "Atlas Agent scheduled task has been created/updated successfully."
     
+    # Optional: Display task info for verification
+    Get-ScheduledTask -TaskName $TaskName
 } catch {
     Write-Error "Agent deployment failed: $_"
     # Exit with a non-zero status code to indicate failure to PsExec
