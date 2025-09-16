@@ -106,15 +106,19 @@ export default function MonitoringPage() {
       const agentChecks = devicesToCheck.map(async (device) => {
         // We only check agent status for online devices
         if (device.status !== 'online') {
-            return { id: device.id, isAgentDeployed: device.isAgentDeployed };
+            return null; // Return null to indicate no check was performed
         }
-        const res = await fetch("/api/pstools/psinfo", {
-          method: "POST",
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ip: device.ipAddress, name: device.name })
-        });
-        const data = await res.json();
-        return { id: device.id, isAgentDeployed: data.ok };
+        try {
+            const res = await fetch("/api/pstools/psinfo", {
+              method: "POST",
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ip: device.ipAddress, name: device.name })
+            });
+            const data = await res.json();
+            return { id: device.id, isAgentDeployed: data.ok };
+        } catch {
+            return { id: device.id, isAgentDeployed: false };
+        }
       });
 
       const results = await Promise.allSettled(agentChecks);
@@ -318,7 +322,7 @@ export default function MonitoringPage() {
                                 <TableCell>
                                      <Badge variant={device.isAgentDeployed ? 'default' : 'destructive'} className={cn(device.isAgentDeployed && 'bg-blue-600')}>
                                         {device.isAgentDeployed ? "Deployed" : "Not Deployed"}
-                                    </Badge>
+                                     </Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
                                      <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online'}>
@@ -379,3 +383,6 @@ export default function MonitoringPage() {
     </>
   );
 }
+
+
+    

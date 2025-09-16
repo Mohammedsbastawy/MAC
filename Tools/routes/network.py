@@ -1,4 +1,5 @@
 
+
 # كود فحص الشبكة (ARP Scan, Ping Sweep, ...)
 import os
 import ipaddress
@@ -526,9 +527,6 @@ def get_historical_data():
         
         # Filter out old entries on read
         retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
-        now = datetime.datetime.utcnow()
-        
-        # Use a timezone-aware 'now' for comparison
         now_utc = datetime.datetime.now(datetime.timezone.utc)
 
         def parse_iso_with_timezone(ts_str):
@@ -555,5 +553,7 @@ def get_historical_data():
     except (IOError, json.JSONDecodeError) as e:
         logger.error(f"Failed to read or parse history file for {device_name}: {e}")
         return jsonify({"ok": False, "error": f"Failed to read history log: {str(e)}"}), 500
+
+    
 
     
