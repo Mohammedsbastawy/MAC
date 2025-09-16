@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -51,6 +52,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -156,7 +158,38 @@ const DeviceCard: React.FC<{ device: Device, onSelect: () => void }> = ({ device
     );
 };
 
-export default function DeviceList({ onSelectDevice }: DeviceListProps) {
+const DeviceList: React.FC<DeviceListProps & { devices: Device[], isLoading: boolean }> = ({ onSelectDevice, devices, isLoading }) => {
+    const getUniqueKey = (device: Device) => device.id;
+    if (isLoading) {
+        return (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="h-40" />
+                ))}
+            </div>
+        )
+    }
+
+     if (devices.length === 0) {
+        return (
+             <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40">
+              <h3 className="text-lg font-semibold text-foreground">No devices found</h3>
+              <p className="mt-2 text-sm text-muted-foreground">Scan the network to discover devices.</p>
+          </div>
+        )
+    }
+
+    return (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {devices.map((device) => (
+                  <DeviceCard key={getUniqueKey(device)} device={device} onSelect={() => onSelectDevice(device)} />
+              ))}
+        </div>
+    )
+}
+
+
+export default function DevicesPage() {
   const [isAdLoading, setIsAdLoading] = React.useState(true);
   const [isScanLoading, setIsScanLoading] = React.useState(false);
   const [domainDevices, setDomainDevices] = React.useState<Device[]>([]);
@@ -176,6 +209,14 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   const [isSnmpConfiguring, setIsSnmpConfiguring] = React.useState(false);
   const [snmpLogs, setSnmpLogs] = React.useState<SnmpLogEntry[]>([]);
 
+  // State for side panel
+  const [selectedDevice, setSelectedDevice] = React.useState<Device | null>(null);
+  const [isPanelOpen, setIsPanelOpen] = React.useState(false);
+
+  const handleSelectDevice = (device: Device) => {
+    setSelectedDevice(device);
+    setIsPanelOpen(true);
+  };
 
   // Fetch initial data (AD computers and network interfaces) on mount
   React.useEffect(() => {
@@ -465,89 +506,6 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
   };
 
   const allDevices = [...domainDevices, ...workgroupDevices];
-  const getUniqueKey = (device: Device) => device.id;
-
-  const renderContent = () => {
-    return (
-      <div className="space-y-8">
-        {allDevices.length > 0 ? (
-           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {allDevices.map((device) => (
-                  <DeviceCard key={getUniqueKey(device)} device={device} onSelect={() => onSelectDevice(device)} />
-              ))}
-          </div>
-        ) : isAdLoading ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {Array.from({ length: 8 }).map((_, i) => (
-                    <Skeleton key={i} className="h-40" />
-                ))}
-            </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40">
-              <h3 className="text-lg font-semibold text-foreground">No devices found</h3>
-              <p className="mt-2 text-sm text-muted-foreground">Scan the network to discover devices.</p>
-          </div>
-        )}
-
-        <Separator />
-         <div>
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                <div>
-                     <CardTitle className="mb-1 text-xl flex items-center gap-2">
-                        <Briefcase /> Discover Workgroup Devices
-                    </CardTitle>
-                    <CardDescription className="mb-4">
-                        Use the network scanner to find devices that are not in the domain.
-                    </CardDescription>
-                </div>
-                 <div className="flex flex-wrap items-center gap-2 mb-4 md:mb-0">
-                    <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isScanLoading}>
-                        <SelectTrigger className="h-11 min-w-[250px] justify-between">
-                            <div className="flex items-center gap-2">
-                                <Network className="h-4 w-4" />
-                                <SelectValue placeholder={networkError ? "No networks found" : "Select a Network"} />
-                            </div>
-                        </SelectTrigger>
-                        <SelectContent>
-                            {interfaces.map(iface => (
-                                <SelectItem key={iface.id} value={iface.cidr}>
-                                    {iface.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Button onClick={handleDiscoverWorkgroup} disabled={isScanLoading || !selectedCidr} size="lg" className="h-11">
-                        {isScanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                        Scan Network
-                    </Button>
-                </div>
-            </div>
-            { isScanLoading && (
-                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                        <Skeleton key={i} className="h-40" />
-                    ))}
-                </div>
-            )}
-            { scanError?.isError && (
-                <Alert variant="destructive" className="mt-4">
-                    <Siren className="h-4 w-4" />
-                    <AlertTitle>{scanError.title}</AlertTitle>
-                    <AlertDescription>
-                        {scanError.message}
-                         {scanError.details && (
-                            <Button variant="secondary" size="sm" className="mt-2" onClick={() => setErrorDialog({isOpen: true, title: "Error Log", content: scanError.details ?? "No details available."})}>
-                                <FileText className="mr-2 h-4 w-4" />
-                                Show Error Log
-                            </Button>
-                        )}
-                    </AlertDescription>
-                </Alert>
-            )}
-        </div>
-      </div>
-    );
-  };
   
   return (
     <>
@@ -658,8 +616,74 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
             </Dialog>
         </div>
       </div>
-      {renderContent()}
+      
+        <div className="space-y-8">
+            <DeviceList onSelectDevice={handleSelectDevice} devices={allDevices} isLoading={isAdLoading}/>
+
+            <Separator />
+            <div>
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <CardTitle className="mb-1 text-xl flex items-center gap-2">
+                            <Briefcase /> Discover Workgroup Devices
+                        </CardTitle>
+                        <CardDescription className="mb-4">
+                            Use the network scanner to find devices that are not in the domain.
+                        </CardDescription>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mb-4 md:mb-0">
+                        <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isScanLoading}>
+                            <SelectTrigger className="h-11 min-w-[250px] justify-between">
+                                <div className="flex items-center gap-2">
+                                    <Network className="h-4 w-4" />
+                                    <SelectValue placeholder={networkError ? "No networks found" : "Select a Network"} />
+                                </div>
+                            </SelectTrigger>
+                            <SelectContent>
+                                {interfaces.map(iface => (
+                                    <SelectItem key={iface.id} value={iface.cidr}>
+                                        {iface.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Button onClick={handleDiscoverWorkgroup} disabled={isScanLoading || !selectedCidr} size="lg" className="h-11">
+                            {isScanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                            Scan Network
+                        </Button>
+                    </div>
+                </div>
+                { isScanLoading && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                            <Skeleton key={i} className="h-40" />
+                        ))}
+                    </div>
+                )}
+                { scanError?.isError && (
+                    <Alert variant="destructive" className="mt-4">
+                        <Siren className="h-4 w-4" />
+                        <AlertTitle>{scanError.title}</AlertTitle>
+                        <AlertDescription>
+                            {scanError.message}
+                            {scanError.details && (
+                                <Button variant="secondary" size="sm" className="mt-2" onClick={() => setErrorDialog({isOpen: true, title: "Error Log", content: scanError.details ?? "No details available."})}>
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Show Error Log
+                                </Button>
+                            )}
+                        </AlertDescription>
+                    </Alert>
+                )}
+            </div>
+        </div>
     </div>
+
+    <DeviceActionsPanel 
+        device={selectedDevice}
+        isOpen={isPanelOpen}
+        onClose={() => setIsPanelOpen(false)}
+    />
 
     <AlertDialog open={errorDialog.isOpen} onOpenChange={(open) => !open && setErrorDialog({isOpen: false, title:'', content:''})}>
         <AlertDialogContent className="max-w-2xl">
@@ -686,3 +710,5 @@ export default function DeviceList({ onSelectDevice }: DeviceListProps) {
     </>
   );
 }
+
+    
