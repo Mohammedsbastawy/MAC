@@ -9,8 +9,13 @@ from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, par
 from Tools.utils.logger import logger
 import datetime
 import json
+from .activedirectory import get_ldap_connection
 
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
+
+LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
+LOG_RETENTION_HOURS = 24
+
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
     # Ensure stdout is serializable
@@ -40,9 +45,9 @@ def json_result(rc, out, err, structured_data=None, extra_data={}):
 
 def get_auth_from_request(data):
     """Safely gets auth credentials from request JSON or falls back to session."""
-    user = data.get("username") or session.get("user")
-    domain = data.get("domain") or session.get("domain")
-    pwd = data.get("pwd") or session.get("password")
+    user = data.get("username") if data else session.get("user")
+    domain = data.get("domain") if data else session.get("domain")
+    pwd = data.get("password") if data else session.get("password")
     
     if not user or not pwd:
         return None, None, None, None
@@ -53,20 +58,23 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    if request.endpoint in ['pstools.api_enable_snmp']:
+    # Special handling for endpoints that might not have a body and rely on session
+    endpoints_without_body = ['pstools.api_deploy_agent', 'pstools.api_enable_snmp']
+    if request.endpoint in endpoints_without_body:
         if 'user' not in session:
-             return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return
-        
+            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return  # Proceed with session auth
+
+    # For all other endpoints, try to get JSON, but fall back to session if no JSON body exists
     data = request.get_json(silent=True)
     if data is None:
         if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return
-
+            return jsonify({'ok': False, 'error': 'Request is missing a body, and no active session was found.'}), 401
+        return # Proceed with session auth
+        
     user, _, _, _ = get_auth_from_request(data)
     if not user:
-         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
 
 @pstools_bp.route('/psexec', methods=['POST'])
@@ -206,19 +214,95 @@ def api_psloglist():
     return json_result(rc, out, err, structured_data)
 
 
+def api_psinfo_internal(ip=None, name=None):
+    """
+    Internal function to fetch agent data.
+    It reads the performance data JSON file from the remote host.
+    """
+    if not ip or not name:
+        return jsonify({"ok": False, "error": "IP address and device name are required."}), 400
+
+    user, domain, pwd, winrm_user = get_auth_from_request(request.get_json(silent=True) or {})
+    if not user: # Fallback to session if no body
+         user = session.get("user")
+         domain = session.get("domain")
+         pwd = session.get("password")
+         if user and domain:
+            winrm_user = f"{user}@{domain}" if '@' not in user else user
+         else:
+             winrm_user = None
+
+    if not all([user, domain, pwd, winrm_user]):
+        return jsonify({"ok": False, "error": "Authentication required to fetch agent data."}), 401
+
+    logger.info(f"Reading performance data for '{name}' from agent file on {ip}.")
+    
+    remote_file_path = f"C:\\Atlas\\{name}.json"
+    ps_command = f"Get-Content -Path '{remote_file_path}' -Raw"
+
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=30)
+    
+    if rc != 0:
+        logger.warning(f"Failed to read agent file from {ip} for {name}. Error: {err}")
+        return jsonify({"ok": False, "error": "Could not read agent data file.", "details": err})
+
+    try:
+        perf_data = json.loads(out)
+        
+        log_file = os.path.join(LOGS_DIR, f"{name}.json")
+        history = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+            except (IOError, json.JSONDecodeError):
+                history = []
+        
+        current_timestamp = datetime.datetime.fromisoformat(perf_data["timestamp"].replace('Z', '+00:00'))
+        
+        if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
+            history.append({
+                "timestamp": perf_data.get("timestamp"),
+                "cpuUsage": perf_data.get("cpuUsage"),
+                "usedMemoryGB": perf_data.get("usedMemoryGB")
+            })
+
+            retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            
+            def parse_iso_with_timezone(ts_str):
+                dt = datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    return dt.replace(tzinfo=datetime.timezone.utc)
+                return dt
+
+            history = [
+                entry for entry in history
+                if "timestamp" in entry and (now_utc - parse_iso_with_timezone(entry["timestamp"])) < retention_delta
+            ]
+            
+            try:
+                os.makedirs(LOGS_DIR, exist_ok=True)
+                with open(log_file, 'w') as f:
+                    json.dump(history, f)
+            except IOError as e:
+                logger.error(f"Failed to write history log for {name}: {e}")
+
+        # Return live data directly
+        return jsonify({"ok": True, "liveData": perf_data})
+
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"Error decoding JSON from agent file for {name}: {e}. Raw data: {out}")
+        return jsonify({"ok": False, "error": f"Failed to parse data file from agent. File may be corrupted or malformed.", "details": out}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error processing agent data for {name}: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": f"An unexpected error occurred while processing agent data for {name}."}), 500
+
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
+    """Public endpoint for psinfo, now just a wrapper for the internal function."""
     data = request.get_json() or {}
-    ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
-    logger.info(f"Executing psinfo on {ip}.")
-    
-    rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
-    structured_data = None
-    if rc == 0 and out:
-        structured_data = parse_psinfo_output(out)
-
-    return json_result(rc, out, err, structured_data)
+    return api_psinfo_internal(ip=data.get("ip"), name=data.get("name"))
 
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
@@ -589,6 +673,62 @@ def api_set_network_private():
             "details": err or out
         }), 500
 
+@pstools_bp.route('/deploy-agent', methods=['POST'])
+def api_deploy_agent():
+    data = request.get_json(silent=True) or {}
+    ip = data.get("ip")
+    device_name = data.get("name")
+    
+    user = session.get("user")
+    domain = session.get("domain")
+    pwd = session.get("password")
+
+    if not all([ip, device_name, user, domain, pwd]):
+        return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
+
+    logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
+    
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(current_dir, '..', 'scripts', 'Deploy-AtlasAgent.ps1')
+        
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_content = f.read()
+
+    except FileNotFoundError as e:
+        logger.error(f"Error reading or finding agent deployment script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error: The agent deployment script 'Deploy-AtlasAgent.ps1' was not found in the 'Tools/scripts' directory. Details: {e}"}), 500
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while reading the agent script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
+    
+    encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
+    
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
+
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
+    
+    full_details = (out or "") + "\n" + (err or "")
+    
+    if rc == 0:
+        logger.info(f"Agent deployment script executed successfully on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": f"Atlas Agent deployment finished on {ip}.",
+            "details": full_details.strip(),
+            "stdout": out
+        })
+    else:
+        logger.error(f"Failed to execute agent script on {ip}. RC={rc}. Details: {full_details.strip()}")
+        return jsonify({
+            "ok": False,
+            "error": f"Failed to execute agent script on {ip}.",
+            "details": full_details.strip(),
+            "rc": rc,
+            "stdout": out,
+            "stderr": err
+        }), 500
+
 @pstools_bp.route('/enable-snmp', methods=['POST'])
 def api_enable_snmp():
     data = request.get_json() or {}
@@ -636,6 +776,16 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": full_details.strip()
         }), 500
+        
+
+
+    
+
+    
+
+
+
+
 
     
 

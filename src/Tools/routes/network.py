@@ -14,9 +14,14 @@ from Tools.utils.helpers import is_valid_ip, get_tools_path, run_ps_command, par
 from .activedirectory import _get_ad_computers_data
 from Tools.utils.logger import logger
 import datetime
+from datetime import timezone
 from Tools.snmp_listener import get_current_traps
 
 network_bp = Blueprint('network', __name__)
+
+LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
+LOG_RETENTION_HOURS = 24
+
 
 @network_bp.before_request
 def require_login():
@@ -490,6 +495,98 @@ def api_check_winrm():
     return jsonify({"ok": True, "results": results})
 
 
+@network_bp.route('/api/network/get-historical-data', methods=['POST'])
+def get_historical_data():
+    """
+    API endpoint to fetch historical performance data for a specific device.
+    """
+    data = request.get_json() or {}
+    device_id = data.get("id") # This is the DN of the computer
+    if not device_id:
+        return jsonify({"ok": False, "error": "Device ID (DN) is required."}), 400
+
+    # Sanitize the device ID to create a safe filename
+    # CN=IT02,CN=Computers,DC=Prismafoods,DC=co -> IT02
+    try:
+        device_name = device_id.split(',')[0].split('=')[1]
+    except IndexError:
+        logger.warning(f"Could not parse device name from DN: {device_id}")
+        return jsonify({"ok": False, "error": "Invalid Device ID format."}), 400
+
+    logger.info(f"Received request for historical data for device: {device_name}")
+
+    log_file = os.path.join(LOGS_DIR, f"{device_name}.json")
+
+    if not os.path.exists(log_file):
+        logger.info(f"No history file found for {device_name}.")
+        return jsonify({"ok": True, "history": []}), 200
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+        
+        # Filter out old entries on read
+        retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+        now_utc = datetime.datetime.now(timezone.utc)
+
+        def parse_iso_with_timezone(ts_str):
+            # Handles both 'Z' and '+00:00' suffixes for UTC
+            dt_obj = datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+            # Ensure the object is timezone-aware for comparison
+            if dt_obj.tzinfo is None:
+                return dt_obj.replace(tzinfo=timezone.utc)
+            return dt_obj
+
+        valid_history = [
+            entry for entry in history
+            if "timestamp" in entry and (now_utc - parse_iso_with_timezone(entry["timestamp"])) < retention_delta
+        ]
+        
+        # If filtering resulted in changes, rewrite the file to keep it clean.
+        if len(valid_history) < len(history):
+            logger.info(f"Pruning old log entries for {device_name}. Before: {len(history)}, After: {len(valid_history)}")
+            try:
+                with open(log_file, 'w', encoding='utf-8') as f_write:
+                    json.dump(valid_history, f_write)
+            except IOError as e_write:
+                logger.error(f"Failed to write pruned history file for {device_name}: {e_write}")
+
+
+        logger.info(f"Successfully loaded and filtered {len(valid_history)} data points for {device_name}.")
+        return jsonify({"ok": True, "history": valid_history}), 200
+    except (IOError, json.JSONDecodeError) as e:
+        logger.error(f"Failed to read or parse history file for {device_name}: {e}")
+        return jsonify({"ok": False, "error": f"Failed to read history log: {str(e)}"}), 500
+
+
+@network_bp.route('/api/network/fetch-live-data', methods=['POST'])
+def fetch_live_data():
+    """
+    Fetches the latest performance data directly from the agent file on a remote device.
+    """
+    data = request.get_json() or {}
+    device_id = data.get("id")
+    device_ip = data.get("ip")
+
+    if not device_id or not device_ip:
+        return jsonify({"ok": False, "error": "Device ID (DN) and IP address are required."}), 400
+
+    try:
+        device_name = device_id.split(',')[0].split('=')[1]
+        
+        from Tools.routes.pstools import api_psinfo_internal
+        # Pass the IP address directly to the internal function
+        live_data_response = api_psinfo_internal(ip=device_ip, name=device_name)
+
+        return live_data_response
+
+    except IndexError:
+        logger.warning(f"Could not parse device name from DN: {device_id}")
+        return jsonify({"ok": False, "error": "Invalid Device ID format."}), 400
+    except Exception as e:
+        logger.error(f"Unexpected error in fetch_live_data for {device_id}: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": "An unexpected server error occurred."}), 500
+        
 @network_bp.route('/api/network/get-snmp-traps', methods=['GET'])
 def get_snmp_traps_data():
     """

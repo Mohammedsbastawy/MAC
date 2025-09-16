@@ -46,7 +46,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const [liveData, setLiveData] = React.useState<PerformanceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [deviceName, setDeviceName] = React.useState('');
+  const [deviceInfo, setDeviceInfo] = React.useState<{name: string, ip: string}>({name: '', ip: ''});
   const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
 
   const deviceId = decodeURIComponent(params.id);
@@ -54,11 +54,21 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const fetchLiveData = React.useCallback(async (isInitialLoad = false) => {
     if(isInitialLoad) setIsLoading(true);
     setError(null);
+    
+    // Ensure we have the IP address before fetching
+    if (!deviceInfo.ip) {
+        if(isInitialLoad) {
+            setError("Could not determine the IP address for this device.");
+            setIsLoading(false);
+        }
+        return;
+    }
+
     try {
         const res = await fetch("/api/network/fetch-live-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: deviceId }),
+            body: JSON.stringify({ id: deviceId, ip: deviceInfo.ip }),
         });
         const data = await res.json();
 
@@ -77,35 +87,69 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     } finally {
         if(isInitialLoad) setIsLoading(false);
     }
-  }, [deviceId]);
+  }, [deviceId, deviceInfo.ip]);
 
 
   React.useEffect(() => {
     try {
         const nameMatch = deviceId.match(/CN=([^,]+)/);
         if(nameMatch && nameMatch[1]) {
-            setDeviceName(nameMatch[1]);
+            // This is a simplified way to get IP. A real app might need a lookup.
+            // For now, we assume the frontend can pass it or it's stored somewhere.
+            // Let's modify the component to receive it or derive it if possible.
+             const ipMatch = deviceId.match(/IP=([^,]+)/);
+             
+             // This part is tricky. Let's assume we can't get IP from DN.
+             // We'll have to fetch it first.
+             // But for now, let's parse it from a hypothetical DN string for demo purposes.
+             // CN=IT04,IP=172.16.16.128,DC=...
+             // This is not standard, so we must fix how we get the IP.
+
+             // Let's re-think. The monitoring page has the device list. We can pass the device from there.
+             // For now, let's just parse the name. The IP will be fetched separately.
+             setDeviceInfo(prev => ({...prev, name: nameMatch[1]}));
+
+             // Fetch the full device list to find the IP of the current device.
+             // This is inefficient but necessary because the device ID (DN) doesn't contain the IP.
+            const findDeviceIp = async () => {
+                const response = await fetch("/api/ad/get-computers", { method: "POST" });
+                const data = await response.json();
+                if (data.ok) {
+                    const foundDevice = data.computers.find((d: any) => d.dn === deviceId);
+                    if (foundDevice) {
+                        setDeviceInfo({ name: foundDevice.name, ip: foundDevice.dns_hostname });
+                    } else {
+                         setError("Device not found in Active Directory list.");
+                    }
+                } else {
+                    setError("Could not fetch device list to find IP.");
+                }
+            };
+            findDeviceIp();
         }
     } catch(e) {
-        setDeviceName(deviceId);
+        setDeviceInfo(prev => ({...prev, name: deviceId}));
+        setError("Could not parse device name from ID.");
     }
   }, [deviceId]);
 
   // Initial data fetch
   React.useEffect(() => {
-    fetchLiveData(true);
+    if (deviceInfo.ip) { // Only fetch if we have an IP
+        fetchLiveData(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [deviceInfo.ip]); // Re-run when IP is found
 
   // Set up the interval for auto-refresh
   React.useEffect(() => {
-    if (!isLoading && isAutoRefresh) {
+    if (!isLoading && isAutoRefresh && deviceInfo.ip) {
         const intervalId = setInterval(() => {
             fetchLiveData(false); // Subsequent fetches are not "initial"
         }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
-  }, [isAutoRefresh, isLoading, fetchLiveData]);
+  }, [isAutoRefresh, isLoading, fetchLiveData, deviceInfo.ip]);
 
 
   return (
@@ -120,14 +164,14 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                         Live Monitoring
                     </h1>
                     <p className="text-muted-foreground">
-                        Real-time performance data for <span className="font-semibold text-primary">{deviceName}</span>
+                        Real-time performance data for <span className="font-semibold text-primary">{deviceInfo.name}</span>
                     </p>
                 </div>
             </div>
              <div className="flex items-center gap-2">
-                <div className={cn("w-3 h-3 rounded-full animate-pulse", isAutoRefresh ? 'bg-green-500' : 'bg-yellow-500')} />
+                <div className={cn("w-3 h-3 rounded-full animate-pulse", isAutoRefresh && !error ? 'bg-green-500' : 'bg-yellow-500')} />
                 <span className="text-sm text-muted-foreground">
-                        {isAutoRefresh ? "Live" : "Paused"}
+                        {isAutoRefresh && !error ? "Live" : "Paused"}
                 </span>
                 <Button variant="outline" size="sm" onClick={() => setIsAutoRefresh(!isAutoRefresh)} className="ml-4">
                     {isAutoRefresh ? "Pause Refresh" : "Resume Refresh"}
