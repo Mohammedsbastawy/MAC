@@ -93,7 +93,6 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 
   const deviceId = decodeURIComponent(params.id);
   
-  // Find the device from the global context
   const device = React.useMemo(() => devices.find(d => d.id === deviceId), [devices, deviceId]);
 
   const fetchLiveDataAndHistory = React.useCallback(async (isInitialLoad = false) => {
@@ -105,7 +104,6 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     }
 
     try {
-        // Fetch historical data first
         const historyRes = await fetch("/api/network/get-historical-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -114,11 +112,10 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         const historyData = await historyRes.json();
         if (historyData.ok) {
             setHistory(historyData.history);
-        } else {
+        } else if (isInitialLoad) {
             throw new Error(historyData.error || "Failed to fetch historical data.");
         }
 
-        // Then fetch the latest live data point
         const liveRes = await fetch("/api/network/fetch-live-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -133,22 +130,20 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 usedMemoryGB: parseFloat(liveDataResult.liveData.usedMemoryGB?.toFixed(2) || 0),
             };
             
-            // Set the live data for non-graph components (like disk usage)
             setLiveData(newPoint);
             
-            // Add the new point to history if it's not already there
             setHistory(prev => {
-                if (prev.length > 0 && prev[prev.length - 1].timestamp === newPoint.timestamp) {
-                    return prev;
-                }
+                const existingPoint = prev.find(p => p.timestamp === newPoint.timestamp);
+                if (existingPoint) return prev; // Avoid duplicates
+                
                 const newHistory = [...prev, newPoint];
-                return newHistory.slice(-20160); // Keep roughly 7 days of 1-minute intervals
+                 const maxHistoryLength = (24 * 60 * 7) + 1; // 7 days of 1-minute intervals
+                return newHistory.slice(-maxHistoryLength);
             });
             
             updateDeviceData(deviceId, { agentLastUpdate: newPoint.timestamp });
-            setError(null);
+            if (isInitialLoad) setError(null);
         } else if (isInitialLoad) {
-            // Only set error on initial load if fetching live data fails and we have no history
             if (historyData.history.length === 0) {
                  setError(liveDataResult.error || "Failed to fetch any performance data.");
             }
@@ -160,41 +155,60 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     }
   }, [deviceId, device, updateDeviceData]);
 
-  // Effect to get initial data when device is found in context
   React.useEffect(() => {
     if (device) {
         fetchLiveDataAndHistory(true);
-    } else {
-        setIsLoading(true); 
+    } else if (devices.length > 0 && !device) {
+      // If devices are loaded but this specific one is not found
+      setError("The specified device could not be found. It may have been removed from Active Directory.");
+      setIsLoading(false);
     }
-  }, [device, fetchLiveDataAndHistory]);
+  }, [device, devices, fetchLiveDataAndHistory]);
 
-  // Set up the interval for auto-refresh
   React.useEffect(() => {
-    if (!isLoading && isAutoRefresh && device?.ipAddress) {
-        const intervalId = setInterval(() => {
-            fetchLiveDataAndHistory(false);
-        }, 60000); // Refresh every 1 minute
-        return () => clearInterval(intervalId);
-    }
-  }, [isAutoRefresh, isLoading, fetchLiveDataAndHistory, device]);
+    if (!isAutoRefresh || !device?.ipAddress) return;
+
+    const intervalId = setInterval(() => {
+        fetchLiveDataAndHistory(false);
+    }, 60000); // Refresh every 1 minute
+    
+    return () => clearInterval(intervalId);
+  }, [isAutoRefresh, device, fetchLiveDataAndHistory]);
   
-  if (!device && isLoading) {
+  if (isLoading) {
      return (
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="ml-2">Loading device information...</p>
+        <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                 <div className="flex items-center gap-4">
+                    <Button asChild variant="outline" size="icon">
+                        <Link href="/dashboard/monitoring"><ArrowLeft /></Link>
+                    </Button>
+                    <div>
+                        <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">
+                            Live Monitoring
+                        </h1>
+                        <p className="text-muted-foreground">
+                            Loading data for device...
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                 <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+                 <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+                 <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+            </div>
         </div>
       )
   }
 
-  if (!device && !isLoading) {
+  if (error && history.length === 0) {
       return (
          <Alert variant="destructive">
           <ServerCrash className="h-4 w-4" />
-          <AlertTitle>Device Not Found</AlertTitle>
+          <AlertTitle>Error Loading Data</AlertTitle>
           <AlertDescription>
-            The specified device could not be found. It may have been removed from Active Directory.
+            {error}
             <Button asChild variant="link" className="p-0 h-auto ml-2">
                 <Link href="/dashboard/monitoring">Return to list</Link>
             </Button>
@@ -231,20 +245,8 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 </Button>
             </div>
         </div>
-
-      {isLoading ? (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-             <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
-             <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
-             <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
-        </div>
-      ) : error ? (
-        <Alert variant="destructive">
-          <ServerCrash className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : history.length === 0 && !liveData ? (
+      
+      {history.length === 0 && !liveData ? (
          <Alert>
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>No Data Available</AlertTitle>
@@ -265,11 +267,11 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 <ChartCard
                     icon={MemoryStick}
                     title="Used Memory"
-                    currentValue={`${latestDataPoint?.usedMemoryGB?.toFixed(2) ?? 'N/A'} MB`}
-                    description={`Total: ${latestDataPoint?.totalMemoryGB ? latestDataPoint.totalMemoryGB.toFixed(2) : 'N/A'} MB`}
+                    currentValue={`${latestDataPoint?.usedMemoryGB?.toFixed(2) ?? 'N/A'} GB`}
+                    description={`Total: ${latestDataPoint?.totalMemoryGB ? latestDataPoint.totalMemoryGB.toFixed(2) : 'N/A'} GB`}
                     data={history}
                     dataKey="usedMemoryGB"
-                    unit="MB"
+                    unit="GB"
                 />
             </div>
             <Card className="lg:col-span-1">
