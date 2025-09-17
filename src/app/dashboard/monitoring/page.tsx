@@ -76,6 +76,8 @@ export default function MonitoringPage() {
     fetchLiveData,
     isUpdating,
     updateProgress,
+    checkAllAgentStatus,
+    refreshAllDeviceStatus,
   } = useDeviceContext();
   const { toast } = useToast();
   const router = useRouter();
@@ -102,11 +104,16 @@ export default function MonitoringPage() {
   };
 
   React.useEffect(() => {
+    // If devices are not loaded, fetch them.
     if (devices.length === 0 && !isLoading) {
       fetchAllDevices();
     }
+    // If devices ARE loaded, but agent status has not been checked for any, check them.
+    else if (devices.length > 0 && devices.every(d => d.agentLastUpdate === null && !d.isAgentDeployed)) {
+        checkAllAgentStatus();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [devices.length, isLoading]);
   
   const handleDeployAgent = async () => {
     if (!deploymentState.device) return;
@@ -183,9 +190,13 @@ export default function MonitoringPage() {
                 </p>
             </div>
              <div className="flex items-center gap-2">
-                <Button onClick={() => fetchAllDevices()} disabled={isLoading || isUpdating}>
-                    {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                    Refresh Status
+                <Button onClick={() => refreshAllDeviceStatus()} disabled={isUpdating}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Refresh Online Status
+                </Button>
+                <Button onClick={() => checkAllAgentStatus()} disabled={isUpdating}>
+                    {isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Refresh Agent Status
                 </Button>
             </div>
         </div>
@@ -197,7 +208,7 @@ export default function MonitoringPage() {
                 {isUpdating && (
                   <div className="pt-2 space-y-1">
                     <Progress value={updateProgress} className="h-2 w-full bg-primary/20" />
-                    <p className="text-xs text-muted-foreground">Updating devices... ({updateProgress}%)</p>
+                    <p className="text-xs text-muted-foreground">Checking agent status on online devices... ({updateProgress}%)</p>
                   </div>
                 )}
             </CardHeader>
@@ -208,7 +219,7 @@ export default function MonitoringPage() {
                             <TableHead>Device Name</TableHead>
                             <TableHead>IP Address</TableHead>
                             <TableHead>Online Status</TableHead>
-                            <TableHead>Last Status Update</TableHead>
+                            <TableHead>Agent Status</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -218,20 +229,16 @@ export default function MonitoringPage() {
                                 <TableCell className="font-medium">{device.name}</TableCell>
                                 <TableCell className="font-mono text-xs">{device.ipAddress}</TableCell>
                                 <TableCell>
-                                    {device.isLoadingDetails ? (
-                                        <div className="flex items-center text-xs text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Checking...</div>
-                                    ) : (
-                                        <Badge variant={device.status === 'online' ? 'default' : 'secondary'} className={cn(device.status === 'online' && 'bg-green-600')}>
-                                            {device.status === 'online' ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <XCircle className="mr-1 h-3 w-3" />}
-                                            {device.status}
-                                        </Badge>
-                                    )}
+                                    <Badge variant={device.status === 'online' ? 'default' : 'secondary'} className={cn(device.status === 'online' && 'bg-green-600')}>
+                                        {device.status === 'online' ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <XCircle className="mr-1 h-3 w-3" />}
+                                        {device.status}
+                                    </Badge>
                                 </TableCell>
                                 <TableCell>
-                                     {device.isAgentDeployed && device.agentLastUpdate ? (
+                                     {device.isAgentDeployed ? (
                                         <>
                                         <Badge variant="default" className='bg-blue-600 hover:bg-blue-700'>Deployed</Badge>
-                                        <p className="text-xs text-muted-foreground mt-1">{`Last update: ${new Date(device.agentLastUpdate).toLocaleTimeString()}`}</p>
+                                        {device.agentLastUpdate && <p className="text-xs text-muted-foreground mt-1">{`Last update: ${new Date(device.agentLastUpdate).toLocaleTimeString()}`}</p>}
                                         </>
                                     ) : (
                                         <Badge variant="destructive">Not Deployed</Badge>
