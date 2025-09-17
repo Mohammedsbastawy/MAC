@@ -1484,7 +1484,7 @@ export default function DeviceActionsPanel({
                  <h4 className="font-semibold text-foreground">Remote Management</h4>
                  <Dialog open={isDiagnosticsOpen} onOpenChange={setIsDiagnosticsOpen}>
                     <DialogTrigger asChild>
-                        <Button variant="outline" className="justify-start w-full" onClick={handleOpenDiagnostics}>
+                         <Button id={`diagnostics-trigger-${device.id}`} variant="outline" className="justify-start w-full" onClick={handleOpenDiagnostics}>
                              <ShieldCheck className="mr-2 h-4 w-4" />
                             <span>WinRM Diagnostics</span>
                              <ChevronRight className="ml-auto h-4 w-4" />
@@ -1630,6 +1630,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 

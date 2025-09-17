@@ -25,6 +25,7 @@ import {
   ChevronRight,
   ShieldCheck,
   ServerCrash,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,6 +63,7 @@ import {
 } from "@/components/ui/table";
 import { useRouter } from "next/navigation";
 import { useDeviceContext } from "@/hooks/use-device-context";
+import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
 
 
 export default function MonitoringPage() {
@@ -79,7 +81,24 @@ export default function MonitoringPage() {
   const [deploymentState, setDeploymentState] = React.useState<{isOpen: boolean, device: Device | null}>({isOpen: false, device: null});
   const [isDeploying, setIsDeploying] = React.useState(false);
   const [deploymentLog, setDeploymentLog] = React.useState("");
-  
+  const [showDiagnosticsButton, setShowDiagnosticsButton] = React.useState(false);
+
+  // State for side panel
+  const [selectedDevice, setSelectedDevice] = React.useState<Device | null>(null);
+  const [isPanelOpen, setIsPanelOpen] = React.useState(false);
+
+  const handleSelectDevice = (device: Device, openDiagnostics = false) => {
+    setSelectedDevice(device);
+    setIsPanelOpen(true);
+    // TODO: This is a bit of a hack to open diagnostics. A better way would be to pass a prop to the panel.
+    if (openDiagnostics) {
+        setTimeout(() => {
+            const trigger = document.getElementById(`diagnostics-trigger-${device.id}`);
+            trigger?.click();
+        }, 100);
+    }
+  };
+
   React.useEffect(() => {
     if (devices.length === 0 && !isLoading) {
       fetchAllDevices();
@@ -90,7 +109,8 @@ export default function MonitoringPage() {
   const handleDeployAgent = async () => {
     if (!deploymentState.device) return;
     setIsDeploying(true);
-    setDeploymentLog("Starting deployment...");
+    setShowDiagnosticsButton(false);
+    setDeploymentLog("Starting statics update...");
 
     try {
         const res = await fetch("/api/pstools/deploy-agent", {
@@ -99,17 +119,25 @@ export default function MonitoringPage() {
             body: JSON.stringify({ ip: deploymentState.device.ipAddress, name: deploymentState.device.name })
         });
         const data = await res.json();
-        setDeploymentLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + (data.details || data.stdout || JSON.stringify(data, null, 2)));
+        const logOutput = data.details || data.stdout || JSON.stringify(data, null, 2);
+        setDeploymentLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + logOutput);
+
         if (data.ok) {
             toast({ title: "Update Successful", description: `Statics script has been run on ${deploymentState.device.name}.`});
             // Immediately fetch the new status for this device
             fetchLiveData(deploymentState.device);
         } else {
              toast({ variant: "destructive", title: "Update Failed", description: data.error || "An unknown error occurred."});
+             if (logOutput.includes("Couldn't access") || logOutput.includes("Connecting to") || logOutput.includes("transport error")) {
+                setShowDiagnosticsButton(true);
+             }
         }
     } catch (err: any) {
          setDeploymentLog(prev => prev + `\n\n--- CLIENT ERROR ---\n` + err.message);
          toast({ variant: "destructive", title: "Client Error", description: "Failed to send request to the server."});
+         if (err.message.includes("network") || err.message.includes("failed to fetch")) {
+            setShowDiagnosticsButton(true);
+         }
     }
 
     setIsDeploying(false);
@@ -192,11 +220,13 @@ export default function MonitoringPage() {
                                     )}
                                 </TableCell>
                                 <TableCell>
-                                     <Badge variant={device.isAgentDeployed ? 'default' : 'destructive'} className={cn(device.isAgentDeployed && 'bg-blue-600')}>
-                                         {device.isAgentDeployed ? "Deployed" : "Not Deployed"}
-                                     </Badge>
-                                      {device.agentLastUpdate && (
+                                     {device.isAgentDeployed && device.agentLastUpdate ? (
+                                        <>
+                                        <Badge variant="default" className='bg-blue-600 hover:bg-blue-700'>Deployed</Badge>
                                         <p className="text-xs text-muted-foreground mt-1">{`Last update: ${new Date(device.agentLastUpdate).toLocaleTimeString()}`}</p>
+                                        </>
+                                    ) : (
+                                        <Badge variant="destructive">Not Deployed</Badge>
                                     )}
                                 </TableCell>
                                 <TableCell className="text-right">
@@ -246,6 +276,14 @@ export default function MonitoringPage() {
             )}
 
             <AlertDialogFooter>
+                {showDiagnosticsButton && deploymentState.device && (
+                    <Button variant="destructive" onClick={() => {
+                        handleSelectDevice(deploymentState.device!, true);
+                        setDeploymentState({isOpen: false, device: null});
+                    }}>
+                        <Zap className="mr-2 h-4 w-4" /> Run WinRM Diagnostics
+                    </Button>
+                )}
                 <AlertDialogCancel>Close</AlertDialogCancel>
                 <AlertDialogAction onClick={handleDeployAgent} disabled={isDeploying}>
                     {isDeploying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -254,6 +292,12 @@ export default function MonitoringPage() {
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
+
+     <DeviceActionsPanel 
+        device={selectedDevice}
+        isOpen={isPanelOpen}
+        onClose={() => setIsPanelOpen(false)}
+    />
     
     </>
   );
