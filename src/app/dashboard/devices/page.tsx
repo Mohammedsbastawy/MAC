@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import * as React from "react";
@@ -48,6 +49,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
 import { useDeviceContext } from "@/hooks/use-device-context";
+import { Progress } from "@/components/ui/progress";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -161,6 +163,7 @@ export default function DevicesPage() {
     devices, 
     isLoading: isAdLoading, 
     isUpdating,
+    updateProgress,
     error,
     fetchAllDevices,
     refreshAllDeviceStatus 
@@ -326,70 +329,95 @@ export default function DevicesPage() {
       </div>
       
         <div className="space-y-8">
-            {error && <Alert variant="destructive">
-                <Siren className="h-4 w-4" />
-                <AlertTitle>{error.title}</AlertTitle>
-                <AlertDescription>{error.message}</AlertDescription>
-            </Alert>}
-            <DeviceList onSelectDevice={handleSelectDevice} devices={devices} isLoading={isAdLoading && devices.length === 0}/>
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Users /> Domain Devices
+                    </CardTitle>
+                    <CardDescription>
+                        All computer objects found in Active Directory.
+                    </CardDescription>
+                    {isUpdating && (
+                    <div className="pt-2 space-y-1">
+                        <Progress value={updateProgress} className="h-2 w-full bg-primary/20" />
+                        <p className="text-xs text-muted-foreground">Updating devices... ({updateProgress}%)</p>
+                    </div>
+                    )}
+                </CardHeader>
+                <CardContent>
+                    {error && <Alert variant="destructive">
+                        <Siren className="h-4 w-4" />
+                        <AlertTitle>{error.title}</AlertTitle>
+                        <AlertDescription>{error.message}</AlertDescription>
+                    </Alert>}
+                    <DeviceList onSelectDevice={handleSelectDevice} devices={devices} isLoading={isAdLoading && devices.length === 0}/>
+                </CardContent>
+            </Card>
+
 
             <Separator />
-            <div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                    <div>
-                        <CardTitle className="mb-1 text-xl flex items-center gap-2">
-                            <Briefcase /> Discover Workgroup Devices
-                        </CardTitle>
-                        <CardDescription className="mb-4">
-                            Use the network scanner to find devices that are not in the domain.
-                        </CardDescription>
+            
+            <Card>
+                <CardHeader>
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <CardTitle className="mb-1 text-xl flex items-center gap-2">
+                                <Briefcase /> Discover Workgroup Devices
+                            </CardTitle>
+                            <CardDescription className="mb-4">
+                                Use the network scanner to find devices that are not in the domain.
+                            </CardDescription>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mb-4 md:mb-0">
+                            <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isScanLoading}>
+                                <SelectTrigger className="h-11 min-w-[250px] justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Network className="h-4 w-4" />
+                                        <SelectValue placeholder={networkError ? "No networks found" : "Select a Network"} />
+                                    </div>
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {interfaces.map(iface => (
+                                        <SelectItem key={iface.id} value={iface.cidr}>
+                                            {iface.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button onClick={handleDiscoverWorkgroup} disabled={isScanLoading || !selectedCidr} size="lg" className="h-11">
+                                {isScanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                                Scan Network
+                            </Button>
+                        </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 mb-4 md:mb-0">
-                        <Select value={selectedCidr} onValueChange={setSelectedCidr} disabled={interfaces.length === 0 || isScanLoading}>
-                            <SelectTrigger className="h-11 min-w-[250px] justify-between">
-                                <div className="flex items-center gap-2">
-                                    <Network className="h-4 w-4" />
-                                    <SelectValue placeholder={networkError ? "No networks found" : "Select a Network"} />
-                                </div>
-                            </SelectTrigger>
-                            <SelectContent>
-                                {interfaces.map(iface => (
-                                    <SelectItem key={iface.id} value={iface.cidr}>
-                                        {iface.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button onClick={handleDiscoverWorkgroup} disabled={isScanLoading || !selectedCidr} size="lg" className="h-11">
-                            {isScanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                            Scan Network
-                        </Button>
-                    </div>
-                </div>
-                 { isScanLoading ? (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
-                        {Array.from({ length: 4 }).map((_, i) => (
-                            <Skeleton key={i} className="h-40" />
-                        ))}
-                    </div>
-                ) : scanError?.isError ? (
-                    <Alert variant="destructive" className="mt-4">
-                        <Siren className="h-4 w-4" />
-                        <AlertTitle>{scanError.title}</AlertTitle>
-                        <AlertDescription>
-                            {scanError.message}
-                            {scanError.details && (
-                                <Button variant="secondary" size="sm" className="mt-2" onClick={() => setErrorDialog({isOpen: true, title: "Error Log", content: scanError.details ?? "No details available."})}>
-                                    <FileText className="mr-2 h-4 w-4" />
-                                    Show Error Log
-                                </Button>
-                            )}
-                        </AlertDescription>
-                    </Alert>
-                ) : (
-                     <DeviceList onSelectDevice={handleSelectDevice} devices={workgroupDevices} isLoading={false} />
-                )}
-            </div>
+                </CardHeader>
+                <CardContent>
+                    { isScanLoading ? (
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mt-4">
+                            {Array.from({ length: 4 }).map((_, i) => (
+                                <Skeleton key={i} className="h-40" />
+                            ))}
+                        </div>
+                    ) : scanError?.isError ? (
+                        <Alert variant="destructive" className="mt-4">
+                            <Siren className="h-4 w-4" />
+                            <AlertTitle>{scanError.title}</AlertTitle>
+                            <AlertDescription>
+                                {scanError.message}
+                                {scanError.details && (
+                                    <Button variant="secondary" size="sm" className="mt-2" onClick={() => setErrorDialog({isOpen: true, title: "Error Log", content: scanError.details ?? "No details available."})}>
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        Show Error Log
+                                    </Button>
+                                )}
+                            </AlertDescription>
+                        </Alert>
+                    ) : (
+                        <DeviceList onSelectDevice={handleSelectDevice} devices={workgroupDevices} isLoading={false} />
+                    )}
+                </CardContent>
+            </Card>
+
         </div>
     </div>
 
@@ -424,3 +452,5 @@ export default function DevicesPage() {
     </>
   );
 }
+
+    
