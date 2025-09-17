@@ -1648,7 +1648,39 @@ export default function DeviceActionsPanel({
                     <ActionButton icon={Zap} label="Force GPUpdate" onClick={() => handleGenericAction('psexec', { cmd: 'gpupdate /force' })} />
                     <AlertDialog>
                         <AlertDialogTrigger asChild>
-                            <Button variant="outline" className="justify-start">
+                            <Button variant="outline" className="justify-start w-full">
+                                <Zap className="mr-2 h-4 w-4" />
+                                <span>Open Application</span>
+                                <ChevronRight className="ml-auto h-4 w-4" />
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                const formData = new FormData(e.currentTarget);
+                                const app = formData.get('application') as string;
+                                (e.currentTarget.closest('[data-radix-popper-content-wrapper]')?.previousSibling as HTMLElement)?.click();
+                                handleGenericAction('psexec', { cmd: app, isInteractive: true });
+                            }}>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Open Remote Application</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        Enter the name of the application to run interactively on {device.name} (e.g., notepad.exe, calc.exe).
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <div className="my-4">
+                                    <Input name="application" placeholder="e.g. notepad.exe" />
+                                </div>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction type="submit">Run Application</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </form>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                    <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                            <Button variant="outline" className="justify-start w-full">
                                 <Terminal className="mr-2 h-4 w-4" />
                                 <span>Execute Command</span>
                                 <ChevronRight className="ml-auto h-4 w-4" />

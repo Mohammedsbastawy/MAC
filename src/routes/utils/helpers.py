@@ -141,12 +141,13 @@ def run_winrm_command(host, user, password, command, timeout=20, type='powershel
         return 1, "", err_msg
 
 
-def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90, suppress_errors=False):
+def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_args=[], timeout=90, suppress_errors=False, is_interactive=False):
     """
     A centralized function to build and run any PsTools command.
     tool_name should be 'psexec', 'psinfo', etc. (without .exe)
     ip can be a hostname or an IP address.
     suppress_errors will prevent logging decoding errors, useful for quick checks.
+    is_interactive adds the -i flag for psexec.
     """
     exe_name = tool_name.capitalize() + ".exe" if not tool_name.lower().endswith('.exe') else tool_name
     
@@ -168,6 +169,10 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
 
         if pwd:
             cred_args += ["-p", pwd]
+        
+        # Add interactive flag if requested for psexec
+        if tool_name.lower() == 'psexec' and is_interactive:
+            cmd_list.append("-i")
 
         # Build target arg
         target_arg = []
@@ -417,4 +422,5 @@ def parse_query_user_output(output):
     
 
     
+
 
