@@ -59,7 +59,6 @@ import {
   Upload,
   Wrench,
   LogOut,
-  Sparkles,
 } from "lucide-react";
 import {
   Sheet,
@@ -111,6 +110,7 @@ import { Badge } from "../ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
+import { Sparkles } from "lucide-react";
 
 
 type DeviceActionsPanelProps = {
@@ -989,7 +989,7 @@ const CommandOutputDialog: React.FC<{
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
     const isLoggedOnView = state.structuredData?.psloggedon && Array.isArray(state.structuredData.psloggedon);
-    const isCleanTempView = state.structuredData?.cleanTemp || isCleaning;
+    const isCleanTempView = isCleaning || state.structuredData?.cleanTemp !== undefined;
     
     const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !isCleanTempView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
@@ -998,87 +998,80 @@ const CommandOutputDialog: React.FC<{
         <AlertDialogContent className={cn(
             "max-w-2xl",
             (isBrowseView || isProcessView || isInfoView || isLoggedOnView) && "max-w-4xl",
-            isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
+            isHackerTheme && !isCleanTempView && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
-                <AlertDialogTitle className={cn(isHackerTheme && "text-green-400")}>{state.title}</AlertDialogTitle>
-                <AlertDialogDescription className={cn(isHackerTheme && "text-green-400/80")}>
+                <AlertDialogTitle className={cn(isHackerTheme && !isCleanTempView && "text-green-400")}>{state.title}</AlertDialogTitle>
+                <AlertDialogDescription className={cn(isHackerTheme && !isCleanTempView && "text-green-400/80")}>
                     {state.description}
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
-                {isCleanTempView && (
+                {isCleanTempView ? (
                     <CleaningProgress
                         progress={cleaningProgress ?? 0}
-                        isFinished={!isCleaning && state.structuredData?.cleanTemp !== undefined}
+                        isFinished={!isCleaning}
                         freedMb={state.structuredData?.cleanTemp?.freedMb ?? null}
                     />
-                )}
-                {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
-                {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
-                {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
-                {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
-                {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
-                    <PsServiceResult 
-                        data={state.structuredData.psservice} 
-                        onAction={onServiceAction}
-                        onInfo={onServiceInfo}
-                    />
-                }
-                {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
-                {isBrowseView && onBrowseNavigate && onBrowseAction && browsePath &&
-                    <PsBrowseResult 
-                        data={state.structuredData!.psbrowse!}
-                        currentPath={browsePath}
-                        isLoading={isLoading}
-                        onNavigate={onBrowseNavigate}
-                        onAction={(action, params) => {
-                            if (action === 'delete') {
-                                const confirmation = confirm(`Are you sure you want to delete ${params.isFolder ? 'the folder' : 'the file'} "${params.name}"? This cannot be undone.`);
-                                if (confirmation) {
-                                    handleModificationAction(action, params);
-                                }
-                            } else {
-                                handleModificationAction(action, params);
-                            }
-                        }}
-                    />
-                }
-
-
-                {/* Raw output for non-structured data or if there's an error */}
-                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView || isCleanTempView) && (
+                ) : (
                     <>
-                    {(state.output && !isHackerTheme) && (
-                         <details className="mt-4">
-                            <summary className="text-xs text-muted-foreground cursor-pointer">Show Raw Output</summary>
-                            <Textarea readOnly value={state.output} className="mt-1 h-48 font-mono text-xs bg-muted" />
-                        </details>
-                    )}
-                    {state.output && isHackerTheme && (
-                        <div>
-                            <Label className={cn(isHackerTheme && "text-green-400")}>C:\&gt; Output</Label>
-                            <Textarea 
-                                readOnly 
-                                value={state.output} 
-                                className={cn("mt-1 h-64 font-mono text-xs", isHackerTheme && "bg-black text-green-400 border-green-500/30 focus-visible:ring-green-500")}
+                        {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
+                        {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
+                        {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
+                        {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
+                        {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
+                            <PsServiceResult 
+                                data={state.structuredData.psservice} 
+                                onAction={onServiceAction}
+                                onInfo={onServiceInfo}
                             />
-                        </div>
-                    )}
-                     {state.error && (
-                         <div>
-                            <Label className={cn(isHackerTheme ? "text-red-400" : "text-destructive")}>C:\&gt; Error</Label>
-                            <Textarea 
-                                readOnly 
-                                value={state.error} 
-                                className={cn(
-                                    "mt-1 h-32 font-mono text-xs", 
-                                    isHackerTheme ? "bg-black text-red-400 border-red-500/30 focus-visible:ring-red-500" : "bg-destructive/10 text-destructive"
-                                )}
+                        }
+                        {state.structuredData?.psloglist && <PsLogListResult data={state.structuredData.psloglist} />}
+                        {isBrowseView && onBrowseNavigate && onBrowseAction && browsePath &&
+                            <PsBrowseResult 
+                                data={state.structuredData!.psbrowse!}
+                                currentPath={browsePath}
+                                isLoading={isLoading}
+                                onNavigate={onBrowseNavigate}
+                                onAction={(action, params) => {
+                                    if (action === 'delete') {
+                                        const confirmation = confirm(`Are you sure you want to delete ${params.isFolder ? 'the folder' : 'the file'} "${params.name}"? This cannot be undone.`);
+                                        if (confirmation) {
+                                            handleModificationAction(action, params);
+                                        }
+                                    } else {
+                                        handleModificationAction(action, params);
+                                    }
+                                }}
                             />
-                        </div>
-                    )}
+                        }
+
+                        {isHackerTheme && state.output && (
+                            <div>
+                                <Label className="text-green-400">C:\&gt; Output</Label>
+                                <Textarea 
+                                    readOnly 
+                                    value={state.output} 
+                                    className="mt-1 h-64 font-mono text-xs bg-black text-green-400 border-green-500/30 focus-visible:ring-green-500"
+                                />
+                            </div>
+                        )}
                     </>
+                )}
+
+
+                {state.error && (
+                     <div>
+                        <Label className={cn(isHackerTheme ? "text-red-400" : "text-destructive")}>C:\&gt; Error</Label>
+                        <Textarea 
+                            readOnly 
+                            value={state.error} 
+                            className={cn(
+                                "mt-1 h-32 font-mono text-xs", 
+                                isHackerTheme ? "bg-black text-red-400 border-red-500/30 focus-visible:ring-red-500" : "bg-destructive/10 text-destructive"
+                            )}
+                        />
+                    </div>
                 )}
                  {state.error && isCleanTempView && (
                      <Alert variant="destructive">
@@ -1092,7 +1085,7 @@ const CommandOutputDialog: React.FC<{
                 <AlertDialogClose asChild>
                     <Button 
                         variant="outline"
-                        className={cn(isHackerTheme && "text-green-400 border-green-500/50 hover:bg-green-900/50 hover:text-green-300")}>
+                        className={cn(isHackerTheme && !isCleanTempView && "text-green-400 border-green-500/50 hover:bg-green-900/50 hover:text-green-300")}>
                         Close
                     </Button>
                 </AlertDialogClose>
@@ -1236,15 +1229,6 @@ export default function DeviceActionsPanel({
             body: JSON.stringify(body),
         });
 
-        if (!response.ok) {
-            let errorDetails = `The server returned an error (HTTP ${response.status}).`;
-            try {
-                const errorJson = await response.json();
-                errorDetails = errorJson.error || errorJson.message || errorDetails;
-            } catch (e) { /* Ignore if body is not JSON */ }
-            return { ok: false, error: errorDetails, stderr: errorDetails, structured_data: null };
-        }
-        
         return await response.json();
 
     } catch (err: any) {
@@ -1394,7 +1378,7 @@ export default function DeviceActionsPanel({
         description: `Running cleanup on ${device.name}...`,
         output: '',
         error: '',
-        structuredData: null,
+        structuredData: { cleanTemp: null }, // Initialize with cleanTemp
     });
 
     const progressInterval = setInterval(() => {
@@ -1404,13 +1388,23 @@ export default function DeviceActionsPanel({
     const result = await runApiAction('clean-temp-files', {}, false);
     clearInterval(progressInterval);
     setCleaningProgress(100);
-    setIsCleaning(false);
+    
 
-    setDialogState(prev => ({
-        ...prev,
-        error: result?.ok ? '' : (result?.error || 'An unknown error occurred.'),
-        structuredData: { cleanTemp: result?.structured_data?.cleanTemp || null },
-    }));
+    if (result && result.ok && result.structured_data) {
+         setDialogState(prev => ({
+            ...prev,
+            error: '',
+            structuredData: { ...prev.structuredData, cleanTemp: result.structured_data.cleanTemp },
+        }));
+    } else {
+         setDialogState(prev => ({
+            ...prev,
+            error: result?.error || 'An unknown error occurred during cleanup.',
+            structuredData: { ...prev.structuredData, cleanTemp: null }
+        }));
+    }
+    // This needs to be delayed slightly to allow the final state to render
+    setTimeout(() => setIsCleaning(false), 500);
   };
 
     const handleServiceAction = async (svc: string, action: 'start' | 'stop' | 'restart') => {
