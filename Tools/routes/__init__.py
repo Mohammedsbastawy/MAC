@@ -6,6 +6,7 @@ from .pstools import pstools_bp
 from .auth import auth_bp
 from .activedirectory import ad_bp
 from .logs import logs_bp
+from .settings import settings_bp
 import os
 
 def create_app():
@@ -17,6 +18,7 @@ def create_app():
     app.register_blueprint(auth_bp)
     app.register_blueprint(ad_bp)
     app.register_blueprint(logs_bp)
+    app.register_blueprint(settings_bp)
 
     @app.route("/")
     def index():

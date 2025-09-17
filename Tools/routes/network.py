@@ -17,11 +17,11 @@ from Tools.utils.logger import logger
 import datetime
 from datetime import timezone
 from Tools.snmp_listener import get_current_traps
+from Tools.utils.settings_manager import get_setting
 
 network_bp = Blueprint('network', __name__)
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-LOG_RETENTION_HOURS = 24
 
 
 @network_bp.before_request
@@ -527,7 +527,8 @@ def get_historical_data():
             history = json.load(f)
         
         # Filter out old entries on read
-        retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+        log_retention_hours = get_setting('log_retention_hours')
+        retention_delta = datetime.timedelta(hours=log_retention_hours)
         now_utc = datetime.datetime.now(timezone.utc)
 
         def parse_iso_with_timezone(ts_str):
@@ -593,3 +594,5 @@ def get_snmp_traps_data():
     logger.info("Received request for /api/network/get-snmp-traps.")
     traps = get_current_traps()
     return jsonify({"ok": True, "traps": traps}), 200
+
+    

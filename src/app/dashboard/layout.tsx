@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import DashboardHeader from "@/components/dashboard/header";
@@ -100,6 +101,14 @@ const AppSidebar = () => {
                                     </SidebarMenuItem>
                                 </SidebarSubContent>
                             </SidebarSub>
+                        </SidebarMenuItem>
+                        <SidebarMenuItem>
+                            <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/settings')} onClick={closeSidebar}>
+                                <Link href="/dashboard/settings">
+                                    <Settings />
+                                    <span className={cn(state === 'collapsed' && "hidden")}>Settings</span>
+                                </Link>
+                            </SidebarMenuButton>
                         </SidebarMenuItem>
                    </SidebarMenu>
                 </SidebarGroup>
