@@ -86,6 +86,7 @@ const ChartCard: React.FC<{
 const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const { devices, updateDeviceData } = useDeviceContext();
   const [history, setHistory] = React.useState<PerformanceData[]>([]);
+  const [liveData, setLiveData] = React.useState<PerformanceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
@@ -95,86 +96,88 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   // Find the device from the global context
   const device = React.useMemo(() => devices.find(d => d.id === deviceId), [devices, deviceId]);
 
-  const fetchLiveData = React.useCallback(async (initialLoad = false) => {
+  const fetchLiveDataAndHistory = React.useCallback(async (isInitialLoad = false) => {
     if (!device?.ipAddress) return;
 
+    if (isInitialLoad) {
+        setIsLoading(true);
+        setError(null);
+    }
+
     try {
-        const res = await fetch("/api/network/fetch-live-data", {
+        // Fetch historical data first
+        const historyRes = await fetch("/api/network/get-historical-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: deviceId }),
+        });
+        const historyData = await historyRes.json();
+        if (historyData.ok) {
+            setHistory(historyData.history);
+        } else {
+            throw new Error(historyData.error || "Failed to fetch historical data.");
+        }
+
+        // Then fetch the latest live data point
+        const liveRes = await fetch("/api/network/fetch-live-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: deviceId, ip: device.ipAddress }),
         });
-        const data = await res.json();
-
-        if(data.ok && data.liveData) {
-             const newPoint = {
-                ...data.liveData,
-                cpuUsage: parseFloat(data.liveData.cpuUsage?.toFixed(2) || 0),
-                usedMemoryGB: parseFloat(data.liveData.usedMemoryGB?.toFixed(2) || 0),
+        const liveDataResult = await liveRes.json();
+        
+        if (liveDataResult.ok && liveDataResult.liveData) {
+            const newPoint = {
+                ...liveDataResult.liveData,
+                cpuUsage: parseFloat(liveDataResult.liveData.cpuUsage?.toFixed(2) || 0),
+                usedMemoryGB: parseFloat(liveDataResult.liveData.usedMemoryGB?.toFixed(2) || 0),
             };
-            if (!initialLoad) {
-                 setHistory(prev => {
-                    const newHistory = [...prev, newPoint];
-                    return newHistory.slice(-1440); // Keep last ~24h of 1-min intervals
-                });
-            }
+            
+            // Set the live data for non-graph components (like disk usage)
+            setLiveData(newPoint);
+            
+            // Add the new point to history if it's not already there
+            setHistory(prev => {
+                if (prev.length > 0 && prev[prev.length - 1].timestamp === newPoint.timestamp) {
+                    return prev;
+                }
+                const newHistory = [...prev, newPoint];
+                return newHistory.slice(-20160); // Keep roughly 7 days of 1-minute intervals
+            });
+            
             updateDeviceData(deviceId, { agentLastUpdate: newPoint.timestamp });
             setError(null);
-        } else if (initialLoad) {
-            // Only set error on initial load if fetching live data fails
-            setError(data.error || "Failed to fetch live update.");
+        } else if (isInitialLoad) {
+            // Only set error on initial load if fetching live data fails and we have no history
+            if (historyData.history.length === 0) {
+                 setError(liveDataResult.error || "Failed to fetch any performance data.");
+            }
         }
-    } catch (err) {
-        if(initialLoad) setError("An error occurred while fetching live data from the server.");
+    } catch (err: any) {
+        if(isInitialLoad) setError(err.message || "An error occurred while fetching data from the server.");
+    } finally {
+        if(isInitialLoad) setIsLoading(false);
     }
   }, [deviceId, device, updateDeviceData]);
-
-  const fetchInitialData = React.useCallback(async () => {
-    if (!device) return;
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/network/get-historical-data", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: deviceId }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setHistory(data.history);
-        if (data.history.length === 0) {
-            // If no history, fetch live data immediately to populate
-            await fetchLiveData(true);
-        }
-      } else {
-        throw new Error(data.error || "Failed to fetch historical data.");
-      }
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [deviceId, device, fetchLiveData]);
 
   // Effect to get initial data when device is found in context
   React.useEffect(() => {
     if (device) {
-        fetchInitialData();
+        fetchLiveDataAndHistory(true);
     } else {
         setIsLoading(true); 
     }
-  }, [device, fetchInitialData]);
+  }, [device, fetchLiveDataAndHistory]);
 
   // Set up the interval for auto-refresh
   React.useEffect(() => {
     if (!isLoading && isAutoRefresh && device?.ipAddress) {
         const intervalId = setInterval(() => {
-            fetchLiveData(false);
+            fetchLiveDataAndHistory(false);
         }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
-  }, [isAutoRefresh, isLoading, fetchLiveData, device]);
+  }, [isAutoRefresh, isLoading, fetchLiveDataAndHistory, device]);
   
   if (!device && isLoading) {
      return (
@@ -200,8 +203,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       )
   }
 
-
-  const latestData = history.length > 0 ? history[history.length - 1] : null;
+  const latestDataPoint = liveData || (history.length > 0 ? history[history.length - 1] : null);
 
   return (
     <div className="space-y-6">
@@ -222,7 +224,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
              <div className="flex items-center gap-2">
                 <div className={cn("w-3 h-3 rounded-full animate-pulse", isAutoRefresh && !error ? 'bg-green-500' : 'bg-yellow-500')} />
                 <span className="text-sm text-muted-foreground">
-                        {isAutoRefresh && !error ? `Live (Updated: ${latestData ? new Date(latestData.timestamp).toLocaleTimeString() : 'N/A'})` : "Paused"}
+                        {isAutoRefresh && !error ? `Live (Updated: ${latestDataPoint ? new Date(latestDataPoint.timestamp).toLocaleTimeString() : 'N/A'})` : "Paused"}
                 </span>
                 <Button variant="outline" size="sm" onClick={() => setIsAutoRefresh(!isAutoRefresh)} className="ml-4">
                     {isAutoRefresh ? "Pause Refresh" : "Resume Refresh"}
@@ -242,7 +244,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-      ) : history.length === 0 ? (
+      ) : history.length === 0 && !liveData ? (
          <Alert>
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>No Data Available</AlertTitle>
@@ -254,8 +256,8 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 <ChartCard
                     icon={Cpu}
                     title="CPU Usage"
-                    currentValue={`${latestData?.cpuUsage?.toFixed(2) ?? 'N/A'}%`}
-                    description={`Last updated: ${latestData ? new Date(latestData.timestamp).toLocaleTimeString() : 'N/A'}`}
+                    currentValue={`${latestDataPoint?.cpuUsage?.toFixed(2) ?? 'N/A'}%`}
+                    description={`Last updated: ${latestDataPoint ? new Date(latestDataPoint.timestamp).toLocaleTimeString() : 'N/A'}`}
                     data={history}
                     dataKey="cpuUsage"
                     unit="%"
@@ -263,8 +265,8 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 <ChartCard
                     icon={MemoryStick}
                     title="Used Memory"
-                    currentValue={`${latestData?.usedMemoryGB?.toFixed(2) ?? 'N/A'} MB`}
-                    description={`Total: ${latestData?.totalMemoryGB ? latestData.totalMemoryGB.toFixed(2) : 'N/A'} MB`}
+                    currentValue={`${latestDataPoint?.usedMemoryGB?.toFixed(2) ?? 'N/A'} MB`}
+                    description={`Total: ${latestDataPoint?.totalMemoryGB ? latestDataPoint.totalMemoryGB.toFixed(2) : 'N/A'} MB`}
                     data={history}
                     dataKey="usedMemoryGB"
                     unit="MB"
@@ -281,7 +283,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {latestData?.diskInfo && latestData.diskInfo.length > 0 ? latestData.diskInfo.map(disk => {
+                    {latestDataPoint?.diskInfo && latestDataPoint.diskInfo.length > 0 ? latestDataPoint.diskInfo.map(disk => {
                         const usedSpace = disk.sizeGB - disk.freeGB;
                         const usagePercentage = (usedSpace / disk.sizeGB) * 100;
                         return (

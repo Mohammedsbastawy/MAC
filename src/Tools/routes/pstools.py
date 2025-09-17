@@ -14,7 +14,7 @@ from .activedirectory import get_ldap_connection
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-LOG_RETENTION_HOURS_RAW = 168 # 7 days
+LOG_RETENTION_HOURS = 168 # 7 days
 
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
@@ -248,7 +248,7 @@ def api_psinfo_internal(ip=None, name=None):
     try:
         perf_data = json.loads(out)
         
-        # Save historical data
+        # Save historical data for graphs (CPU and Memory only)
         log_file = os.path.join(LOGS_DIR, f"{name}.json")
         history = []
         if os.path.exists(log_file):
@@ -263,17 +263,15 @@ def api_psinfo_internal(ip=None, name=None):
             current_timestamp = datetime.datetime.fromisoformat(current_timestamp_str.replace('Z', '+00:00'))
 
             if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
-                # Add all relevant data for historical view
+                # Only log the data needed for graphs
                 history.append({
                     "timestamp": perf_data.get("timestamp"),
                     "cpuUsage": perf_data.get("cpuUsage"),
                     "usedMemoryGB": perf_data.get("usedMemoryGB"),
-                    "totalMemoryGB": perf_data.get("totalMemoryGB"),
-                    "diskInfo": perf_data.get("diskInfo")
                 })
 
-                # Prune old data
-                retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS_RAW)
+                # Prune old data based on retention setting
+                retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
                 now_utc = datetime.datetime.now(datetime.timezone.utc)
                 
                 def parse_iso_with_timezone(ts_str):
@@ -292,7 +290,7 @@ def api_psinfo_internal(ip=None, name=None):
                 except IOError as e:
                     logger.error(f"Failed to write history log for {name}: {e}")
 
-        # Return live data directly
+        # Return live data directly to the frontend (includes disk info)
         return jsonify({"ok": True, "liveData": perf_data})
 
     except (json.JSONDecodeError, KeyError) as e:
@@ -801,3 +799,4 @@ def api_enable_snmp():
 
 
     
+
