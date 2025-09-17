@@ -1648,9 +1648,7 @@ export default function DeviceActionsPanel({
                 </div>
                 <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogClose asChild>
-                        <Button type="submit">Authenticate</Button>
-                    </AlertDialogClose>
+                    <AlertDialogAction type="submit">Authenticate</AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>
         </form>
@@ -1697,6 +1695,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 

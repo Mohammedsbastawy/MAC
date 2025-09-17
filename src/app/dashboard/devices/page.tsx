@@ -445,9 +445,6 @@ export default function DevicesPage() {
                     className="mt-2 h-60 font-mono text-xs bg-muted"
                 />
             </div>
-            <AlertDialogFooter>
-                <Button variant="secondary" onClick={() => setErrorDialog({isOpen: false, title:'', content:''})}>Close</Button>
-            </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
     </>

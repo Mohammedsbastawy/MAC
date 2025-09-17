@@ -12,8 +12,6 @@ const AlertDialogTrigger = AlertDialogPrimitive.Trigger
 
 const AlertDialogPortal = AlertDialogPrimitive.Portal
 
-const AlertDialogClose = AlertDialogPrimitive.Close
-
 const AlertDialogOverlay = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Overlay>
@@ -127,6 +125,8 @@ const AlertDialogCancel = React.forwardRef<
   />
 ))
 AlertDialogCancel.displayName = AlertDialogPrimitive.Cancel.displayName
+
+const AlertDialogClose = AlertDialogPrimitive.Close
 
 export {
   AlertDialog,
