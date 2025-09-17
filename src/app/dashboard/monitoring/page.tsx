@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   ServerCrash,
   Zap,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -187,6 +188,35 @@ export default function MonitoringPage() {
     )
   }
 
+  const AgentStatusCell: React.FC<{device: Device}> = ({ device }) => {
+    if (device.isAgentDeployed) {
+      return (
+        <div>
+          <Badge variant="default" className='bg-blue-600 hover:bg-blue-700'>Deployed</Badge>
+          {device.agentLastUpdate && <p className="text-xs text-muted-foreground mt-1">{`Last update: ${new Date(device.agentLastUpdate).toLocaleTimeString()}`}</p>}
+        </div>
+      );
+    }
+    
+    if (device.agentStatusError && (device.agentStatusError.includes('WinRM') || device.agentStatusError.includes('5985') || device.agentStatusError.includes('timed out'))) {
+        return (
+            <div className='flex items-center gap-2'>
+                <Badge variant="destructive"><AlertCircle className="mr-1 h-3 w-3" /> WinRM Error</Badge>
+                 <Button variant="ghost" size="sm" className="h-auto p-1 text-xs" onClick={() => handleSelectDevice(device, true)}>
+                    <Zap className="mr-1 h-3 w-3"/>
+                    Diagnostics
+                </Button>
+            </div>
+        );
+    }
+
+    if (device.status === 'offline') {
+        return <Badge variant="secondary">Offline</Badge>
+    }
+
+    return <Badge variant="destructive">Not Deployed</Badge>;
+  };
+
   return (
     <>
     <div className="space-y-6">
@@ -243,14 +273,7 @@ export default function MonitoringPage() {
                                     </Badge>
                                 </TableCell>
                                 <TableCell>
-                                     {device.isAgentDeployed ? (
-                                        <>
-                                        <Badge variant="default" className='bg-blue-600 hover:bg-blue-700'>Deployed</Badge>
-                                        {device.agentLastUpdate && <p className="text-xs text-muted-foreground mt-1">{`Last update: ${new Date(device.agentLastUpdate).toLocaleTimeString()}`}</p>}
-                                        </>
-                                    ) : (
-                                        <Badge variant="destructive">Not Deployed</Badge>
-                                    )}
+                                     <AgentStatusCell device={device} />
                                 </TableCell>
                                 <TableCell className="text-right">
                                      <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setShowDiagnosticsButton(false); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online' || isUpdating}>

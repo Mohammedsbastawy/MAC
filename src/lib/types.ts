@@ -13,6 +13,7 @@ export type Device = {
   source: 'ad' | 'scan';
   isAgentDeployed?: boolean;
   agentLastUpdate?: string | null;
+  agentStatusError?: string | null;
 };
 
 export type PerformanceData = {

@@ -152,8 +152,8 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 
     const intervalId = setInterval(async () => {
         try {
-            const liveDataResult = await fetchLiveData(deviceId, device.ipAddress);
-            if (liveDataResult) {
+            const { success } = await fetchLiveData(deviceId, device.ipAddress);
+            if (success) {
                 // If fetchLiveData was successful, it updated the context.
                 // Now we need to update the local state for the chart.
                 // We'll refetch history which now includes the latest point.
