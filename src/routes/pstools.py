@@ -39,9 +39,9 @@ pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 def get_auth_from_request(data):
     """Safely gets auth credentials from request JSON or falls back to session."""
-    user = data.get("username") or session.get("user")
-    domain = data.get("domain") or session.get("domain")
-    pwd = data.get("pwd") or session.get("password")
+    user = data.get("username") if data else session.get("user")
+    domain = data.get("domain") if data else session.get("domain")
+    pwd = data.get("password") if data else session.get("password")
     
     if not user or not pwd:
         return None, None, None, None
@@ -52,9 +52,23 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    user, _, _, _ = get_auth_from_request(request.get_json(silent=True) or {})
+    # Special handling for endpoints that might not have a body and rely on session
+    endpoints_without_body = ['pstools.api_deploy_agent', 'pstools.api_enable_snmp', 'pstools.api_enable_winrm', 'pstools.api_enable_prereqs']
+    if request.endpoint in endpoints_without_body:
+        if 'user' not in session:
+            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return  # Proceed with session auth
+
+    # For all other endpoints, try to get JSON, but fall back to session if no JSON body exists
+    data = request.get_json(silent=True)
+    if data is None:
+        if 'user' not in session:
+            return jsonify({'ok': False, 'error': 'Request is missing a body, and no active session was found.'}), 401
+        return # Proceed with session auth
+        
+    user, _, _, _ = get_auth_from_request(data)
     if not user:
-         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
 
 @pstools_bp.route('/psexec', methods=['POST'])
@@ -197,70 +211,17 @@ def api_psloglist():
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
     data = request.get_json() or {}
-    ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
-    logger.info(f"Executing hardware and OS info query (WinRM) on {ip}.")
+    ip = data.get("ip")
+    user, domain, pwd, _ = get_auth_from_request(data)
+    logger.info(f"Executing psinfo on {ip}.")
+    rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
 
-    ps_command = """
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem
-    $cs = Get-CimInstance -ClassName Win32_ComputerSystem
-    $proc = Get-CimInstance -ClassName Win32_Processor
-    $gpu = Get-CimInstance -ClassName Win32_VideoController
-    
-    # Performance Data
-    $cpuUsage = (Get-Counter -Counter "\Processor(_Total)\% Processor Time" -SampleInterval 1).CounterSamples.CookedValue
-    $totalMemory = $cs.TotalPhysicalMemory
-    $freeMemory = (Get-Counter -Counter "\Memory\Available Bytes").CounterSamples.CookedValue
-    $usedMemory = $totalMemory - $freeMemory
-    
-    $uptime_span = (Get-Date) - $os.LastBootUpTime
-    $uptime_str = "$($uptime_span.Days) days, $($uptime_span.Hours) hours, $($uptime_span.Minutes) minutes"
-    
-    $disks = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object {
-        [pscustomobject]@{
-            volume = $_.DriveLetter;
-            size_gb = [math]::Round($_.Size / 1GB, 2);
-            free_gb = [math]::Round($_.SizeRemaining / 1GB, 2);
-        }
-    }
-
-    $system_info = @{
-        "OS" = $os.Caption;
-        "Kernel version" = $os.Version;
-        "Processor" = $proc.Name;
-        "Total Memory" = "{0:N2}" -f ($totalMemory / 1GB);
-        "Video Card" = $gpu.Name;
-        "Domain" = $cs.Domain;
-        "Uptime" = $uptime_str;
-        "Install date" = $os.InstallDate.ToString('yyyy-MM-dd');
-        "Logged on users" = $cs.NumberOfUsers;
-    }
-    
-    $performance_info = @{
-        "CPU Usage" = "{0:N2}" -f $cpuUsage;
-        "Used Memory" = "{0:N2}" -f ($usedMemory / 1GB);
-    }
-
-    @{
-        psinfo = @{
-            system_info = $system_info.GetEnumerator() | ForEach-Object { @{ key=$_.Name; value=$_.Value } };
-            performance_info = $performance_info.GetEnumerator() | ForEach-Object { @{ key=$_.Name; value=$_.Value } };
-            disk_info = $disks
-        }
-    } | ConvertTo-Json -Depth 4 -Compress
-    """
-    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
-    
     structured_data = None
     if rc == 0 and out:
-        try:
-            parsed_json = json.loads(out)
-            structured_data = parsed_json
-        except json.JSONDecodeError:
-            err = f"Failed to parse JSON from WinRM psinfo. Raw output: {out}"
-            rc = 1
-
+        structured_data = parse_psinfo_output(out)
+    
     return json_result(rc, out, err, structured_data)
+
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
 def api_psloggedon():
@@ -480,18 +441,15 @@ def upload_file():
         return json_result(1, "", "Destination path and file content are required.")
     
     logger.info(f"Initiating upload to '{dest_path}' on {ip}")
-    # We send the content in chunks to avoid PowerShell command length limits
     chunk_size = 8000 
     chunks = [content_b64[i:i + chunk_size] for i in range(0, len(content_b64), chunk_size)]
     
-    # Command to create/overwrite the file
     ps_command_create = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{chunks[0]}'); [System.IO.File]::WriteAllBytes($path, $data)"
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command_create)
     if rc != 0:
         logger.error(f"Upload failed (initial chunk) to {dest_path} on {ip}. Error: {err}")
         return json_result(rc, out, f"Failed to create file on remote host. {err}")
         
-    # Commands to append subsequent chunks
     for chunk in chunks[1:]:
         ps_command_append = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{chunk}'); [System.IO.File]::AppendAllBytes($path, $data)"
         rc_append, out_append, err_append = run_winrm_command(ip, winrm_user, pwd, ps_command_append)
@@ -535,13 +493,12 @@ def create_folder():
 
 @pstools_bp.route('/enable-winrm', methods=['POST'])
 def api_enable_winrm():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ip = data.get("ip")
     user, domain, pwd, _ = get_auth_from_request(data)
 
     logger.info(f"Attempting to robustly enable WinRM on {ip} using PsExec.")
 
-    # Note: Double quotes inside the command need to be escaped for the shell.
     chained_command = (
         'winrm quickconfig -q && '
         'sc config winrm start= auto && '
@@ -553,14 +510,13 @@ def api_enable_winrm():
 
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
     
-    # Check for success messages in stdout, even if RC is non-zero (e.g. service already started)
-    # RC 2 can mean the service was already started, which is not a failure for our goal.
-    if rc == 0 or (rc == 2 and "service has already been started" in err):
+    if rc == 0 or (rc != 0 and "service has already been started" in err):
         logger.info(f"Successfully sent WinRM configuration commands to {ip}.")
+        final_message = out + "\n" + err if err else out
         return jsonify({
             "ok": True,
             "message": "WinRM configuration commands sent successfully. It may take a moment to apply.",
-            "details": out
+            "details": final_message
         })
     else:
         logger.error(f"Failed to enable WinRM on {ip} via PsExec. RC={rc}. Stderr: {err}. Stdout: {out}")
@@ -573,7 +529,7 @@ def api_enable_winrm():
 
 @pstools_bp.route('/enable-prereqs', methods=['POST'])
 def api_enable_prereqs():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ip = data.get("ip")
     user, domain, pwd, _ = get_auth_from_request(data)
 
@@ -615,7 +571,6 @@ def api_set_network_private():
 
     logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
 
-    # This command attempts to run PowerShell with elevated privileges to change the network profile.
     ps_command = 'Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private'
     cmd_args = ["powershell.exe", "-Command", ps_command]
     
@@ -635,6 +590,114 @@ def api_set_network_private():
             "error": "Failed to execute remote command to set network profile.",
             "details": err or out
         }), 500
+
+@pstools_bp.route('/deploy-agent', methods=['POST'])
+def api_deploy_agent():
+    data = request.get_json(silent=True) or {}
+    ip = data.get("ip")
+    device_name = data.get("name")
+    
+    # Get auth from session, NOT from the request body for this endpoint
+    user = session.get("user")
+    domain = session.get("domain")
+    pwd = session.get("password")
+
+    if not all([ip, device_name, user, domain, pwd]):
+        return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
+
+    logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
+    
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(current_dir, '..', 'scripts', 'Deploy-AtlasAgent.ps1')
+        
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_content = f.read()
+
+    except FileNotFoundError as e:
+        logger.error(f"Error reading or finding agent deployment script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error: The agent deployment script 'Deploy-AtlasAgent.ps1' was not found in the 'Tools/scripts' directory. Details: {e}"}), 500
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while reading the agent script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
+    
+    encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
+    
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
+
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
+    
+    full_details = (out or "") + "\n" + (err or "")
+    
+    if rc == 0:
+        logger.info(f"Agent deployment script executed successfully on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": f"Atlas Agent deployment finished on {ip}.",
+            "details": full_details.strip(),
+            "stdout": out
+        })
+    else:
+        logger.error(f"Failed to execute agent script on {ip}. RC={rc}. Details: {full_details.strip()}")
+        return jsonify({
+            "ok": False,
+            "error": f"Failed to execute agent script on {ip}.",
+            "details": full_details.strip(),
+            "rc": rc,
+            "stdout": out,
+            "stderr": err
+        }), 500
+
+@pstools_bp.route('/enable-snmp', methods=['POST'])
+def api_enable_snmp():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    server_ip = data.get("server_ip")
+    user, domain, pwd, _ = get_auth_from_request(data)
+
+    if not ip or not server_ip:
+        return jsonify({"ok": False, "error": "Target IP and Server IP are required."}), 400
+
+    logger.info(f"Starting SNMP configuration on {ip} to send traps to {server_ip}.")
+    
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(current_dir, '..', 'scripts', 'EnableSnmp.ps1')
+        
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_content_template = f.read()
+
+    except Exception as e:
+        logger.error(f"Error reading or finding SNMP script: {e}")
+        return jsonify({"ok": False, "error": f"Server-side error reading the agent script: {e}"}), 500
+    
+    script_content = script_content_template.replace('$SERVER_IP_PLACEHOLDER$', server_ip)
+    
+    encoded_script = base64.b64encode(script_content.encode('utf-16-le')).decode('ascii')
+    
+    cmd_args = ["powershell.exe", "-EncodedCommand", encoded_script]
+
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
+
+    full_details = (out or "") + "\n" + (err or "")
+
+    if rc == 0:
+        logger.info(f"SNMP configuration script executed successfully on {ip}.")
+        return jsonify({
+            "ok": True,
+            "message": f"SNMP configuration finished on {ip}.",
+            "details": full_details.strip()
+        })
+    else:
+        logger.error(f"Failed to execute SNMP script on {ip}. RC={rc}. Details: {full_details.strip()}")
+        return jsonify({
+            "ok": False,
+            "error": f"Failed to execute SNMP script on {ip}.",
+            "details": full_details.strip()
+        }), 500
+        
+
+
     
 
     
@@ -643,10 +706,6 @@ def api_set_network_private():
 
 
 
-
-
-
-
     
 
-    
+

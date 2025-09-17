@@ -1146,7 +1146,6 @@ export default function DeviceActionsPanel({
   onClose,
 }: DeviceActionsPanelProps) {
   const { toast } = useToast();
-  const { user } = useAuth();
   const [dialogState, setDialogState] = React.useState<DialogState>({
       isOpen: false,
       title: "",
@@ -1189,7 +1188,6 @@ export default function DeviceActionsPanel({
           if (!response.ok) {
                 let errorDetails = `The server returned an error (HTTP ${response.status}).`;
                 try {
-                    // Try to get more specific error from the body
                     const errorJson = await response.json();
                     errorDetails = errorJson.error || errorJson.message || errorDetails;
                 } catch (e) {
@@ -1207,7 +1205,7 @@ export default function DeviceActionsPanel({
   }, [device, toast]);
   
   const runWinRMDiagnostics = React.useCallback(async () => {
-    if (!device || !user) return;
+    if (!device) return;
     
     setDiagnosticsState(initialDiagnosticsState);
     
@@ -1239,7 +1237,7 @@ export default function DeviceActionsPanel({
         };
         setDiagnosticsState(errorState);
     }
-  }, [device, user, initialDiagnosticsState]);
+  }, [device, initialDiagnosticsState]);
 
   const handleBrowseAction = React.useCallback(async (action: 'navigate' | 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => {
     if (!device) return;
@@ -1397,7 +1395,7 @@ export default function DeviceActionsPanel({
         setIsEnablingWinRM(true);
         toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
 
-        const result = await runApiAction('enable-winrm', {}, false);
+        const result = await runApiAction('enable-winrm', {ip: device.ipAddress}, false);
 
         if (result?.ok) {
             toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
@@ -1415,7 +1413,7 @@ export default function DeviceActionsPanel({
         setIsEnablingPrereqs(true);
         toast({ title: "Attempting to Enable Prerequisites...", description: `Configuring services and firewall on ${device.name}. This might take a moment.` });
 
-        const result = await runApiAction('enable-prereqs', {}, false);
+        const result = await runApiAction('enable-prereqs', {ip: device.ipAddress}, false);
 
         if (result?.ok) {
             toast({ title: "Commands Sent Successfully", description: "Prerequisites for RPC/WMI access have been configured. Please wait a moment before retrying." });
@@ -1526,7 +1524,7 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">PSTools Actions</h4>
               <div className="grid grid-cols-1 gap-2">
-                <ActionButton icon={Info} label="System Info (WinRM)" onClick={() => handleGenericAction('psinfo')} />
+                <ActionButton icon={Info} label="System Info" onClick={() => handleGenericAction('psinfo')} />
                 <ActionButton icon={Activity} label="Process List (WinRM)" onClick={() => handleGenericAction('pslist')} />
                 <ActionButton icon={Users} label="Logged On Users (WinRM)" onClick={() => handleGenericAction('psloggedon')} />
                 <ActionButton icon={Settings2} label="Manage Services" onClick={() => handleGenericAction('psservice', { action: 'query' })} />
@@ -1630,6 +1628,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 
