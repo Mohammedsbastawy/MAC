@@ -69,12 +69,14 @@ def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
     user, domain, pwd, _ = get_auth_from_session()
+    is_interactive = data.get("isInteractive", False)
     
-    logger.info(f"Executing psexec on {ip} with command: '{cmd}'")
+    logger.info(f"Executing psexec on {ip} with command: '{cmd}' (Interactive: {is_interactive})")
     if not cmd:
         return json_result(2, "", "Command is required")
-    cmd_args = ["cmd", "/c", cmd]
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
+    
+    cmd_args = [cmd] if is_interactive else ["cmd", "/c", cmd]
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, is_interactive=is_interactive)
     return json_result(rc, out, err)
 
 
@@ -116,7 +118,8 @@ def api_psservice():
 def api_pslist():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Executing Get-Process (WinRM) on {ip}.")
     
@@ -170,7 +173,8 @@ def api_pslist():
 def api_pskill():
     data = request.get_json() or {}
     ip, proc_id = data.get("ip",""), data.get("proc","")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     
     logger.info(f"Executing Stop-Process (WinRM) on {ip} for PID: '{proc_id}'.")
     if not proc_id:
@@ -299,7 +303,8 @@ def api_psinfo():
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     
     logger.info(f"Executing quser.exe (WinRM) on {ip}.")
     
@@ -491,7 +496,8 @@ def api_psbrowse():
 def download_file():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     
     if not path:
         return json_result(1, "", "File path is required.")
@@ -507,7 +513,8 @@ def download_file():
 def upload_file():
     data = request.get_json() or {}
     ip, dest_path, content_b64 = data.get("ip"), data.get("destinationPath"), data.get("fileContent")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     
     if not all([dest_path, content_b64]):
         return json_result(1, "", "Destination path and file content are required.")
@@ -536,7 +543,8 @@ def upload_file():
 def delete_item():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     ps_command = f"Remove-Item -Path '{path}' -Recurse -Force -ErrorAction Stop"
     logger.info(f"Attempting to delete '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -546,7 +554,8 @@ def delete_item():
 def rename_item():
     data = request.get_json() or {}
     ip, path, new_name = data.get("ip"), data.get("path"), data.get("newName")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     ps_command = f"Rename-Item -Path '{path}' -NewName '{new_name}' -ErrorAction Stop"
     logger.info(f"Attempting to rename '{path}' to '{new_name}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -556,7 +565,8 @@ def rename_item():
 def create_folder():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     ps_command = f"New-Item -Path '{path}' -ItemType Directory -Force -ErrorAction Stop"
     logger.info(f"Attempting to create folder '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -773,54 +783,53 @@ def api_clean_temp_files():
 
     logger.info(f"Attempting to clean temporary files on {ip}.")
 
-    ps_command = """
+    ps_command = r"""
     $ErrorActionPreference = 'SilentlyContinue'
     
     # 1. Gather all paths to clean
     $pathsToClean = @(
-        "$env:SystemRoot\\Temp",
-        "$env:SystemRoot\\Prefetch"
+        Join-Path $env:SystemRoot "Temp",
+        Join-Path $env:SystemRoot "Prefetch"
     )
-    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile | Where-Object { $_.LocalPath -notlike "*\\Windows" -and $_.LocalPath -notlike "*\\system32*"}
+    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile
     foreach ($profile in $userProfiles) {
-        $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp"
-        if (Test-Path -Path $tempPath -PathType Container) {
-            $pathsToClean += $tempPath
+        $userTempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\Local\Temp"
+        if (Test-Path -Path $userTempPath -PathType Container) {
+            $pathsToClean += $userTempPath
         }
     }
-
+    
     # 2. Calculate size before cleaning
     $totalSizeBefore = 0
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $totalSizeBefore += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+            $totalSizeBefore += (Get-ChildItem $path -Recurse -Force | Measure-Object -Property Length -Sum).Sum
         }
     }
-
-    # 3. Perform cleanup and count failed files
+    
+    # 3. Perform cleanup
     $failedItems = @()
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $items = Get-ChildItem -Path "$path\\*" -Recurse -Force -ErrorAction SilentlyContinue
-            foreach($item in $items) {
-                Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                if ($?) {
-                    # Success
-                } else {
+            $items = Get-ChildItem -Path $path -Recurse -Force
+            foreach ($item in $items) {
+                try {
+                    Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction Stop
+                } catch {
                     $failedItems += $item.FullName
                 }
             }
         }
     }
-
+    
     # 4. Calculate size after cleaning
     $totalSizeAfter = 0
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $totalSizeAfter += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+            $totalSizeAfter += (Get-ChildItem $path -Recurse -Force | Measure-Object -Property Length -Sum).Sum
         }
     }
-
+    
     # 5. Prepare results
     $freedBytes = $totalSizeBefore - $totalSizeAfter
     if ($freedBytes -lt 0) { $freedBytes = 0 }
@@ -829,18 +838,14 @@ def api_clean_temp_files():
         freedMb = [math]::Round($freedBytes / 1MB, 2);
         failedFiles = $failedItems.Count
     }
-    
-    # Return result as JSON string
+
     return $result | ConvertTo-Json -Compress
     """
     
-    # This command needs to run as a single block for PowerShell
     cmd_args = ["powershell.exe", "-Command", ps_command]
     
-    # Using PsExec to run the command
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-    # PsExec often puts its banner in stderr or stdout. We need to find the JSON.
     json_match = re.search(r'\{.*\}', out, re.DOTALL)
     
     if rc == 0 and json_match:
@@ -854,9 +859,50 @@ def api_clean_temp_files():
             logger.error(err_msg)
             return json_result(1, out, err_msg)
     else:
-        # If the script fails or no JSON is found, return the raw error.
         logger.error(f"Cleanup script failed on {ip}. RC={rc}. Error: {err}. Output: {out}")
         return json_result(rc, out, err)
+
+
+@pstools_bp.route('/get-installed-apps', methods=['POST'])
+def api_get_installed_apps():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, winrm_user = get_auth_from_session()
+
+    logger.info(f"Getting installed applications from {ip} via WinRM.")
+
+    ps_command = r"""
+    $ErrorActionPreference = 'SilentlyContinue'
+    $paths = @(
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    $apps = Get-ItemProperty $paths | Where-Object { $_.DisplayName -and $_.UninstallString }
+    
+    $results = @()
+    foreach ($app in $apps) {
+        $exePath = $null
+        if ($app.UninstallString) {
+            $match = [regex]::Match($app.UninstallString, '"(.*?)"')
+            if ($match.Success) {
+                $exePath = $match.Groups[1].Value
+            } else {
+                $exePath = ($app.UninstallString -split ' ')[0]
+            }
+        }
+        
+        $results += [PSCustomObject]@{
+            DisplayName  = $app.DisplayName
+            ExecutablePath = $exePath
+            Publisher    = $app.Publisher
+        }
+    }
+    
+    $results | Sort-Object DisplayName | ConvertTo-Json -Compress
+    """
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
+
+    return json_result(rc, out, err)
         
 
 
@@ -873,6 +919,8 @@ def api_clean_temp_files():
 
 
     
+
+
 
 
 

@@ -59,6 +59,7 @@ import {
   Upload,
   Wrench,
   LogOut,
+  AppWindow,
 } from "lucide-react";
 import {
   Sheet,
@@ -111,6 +112,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { Sparkles } from "lucide-react";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 
 
 type DeviceActionsPanelProps = {
@@ -189,6 +191,11 @@ type CleanTempData = {
   failedFiles: number;
 };
 
+type InstalledApp = {
+    DisplayName: string;
+    ExecutablePath: string;
+    Publisher: string;
+}
 
 type DialogState = {
     isOpen: boolean;
@@ -986,11 +993,11 @@ const CleaningDialogContent: React.FC<{
                     Successfully freed approximately <strong className="text-foreground">{results.freedMb.toFixed(2)} MB</strong> of space.
                 </p>
                 {results.failedFiles > 0 && (
-                    <Alert variant="destructive" className="text-left">
-                        <AlertCircle className="h-4 w-4" />
+                    <Alert variant="default" className="text-left bg-muted">
+                        <InfoIcon className="h-4 w-4" />
                         <AlertTitle>Note</AlertTitle>
                         <AlertDescription>
-                           Could not delete <strong className="text-destructive-foreground">{results.failedFiles} file(s)</strong>. They were likely in use by another process.
+                           Could not delete <strong className="text-foreground">{results.failedFiles} file(s)</strong>. They were likely in use by another process.
                         </AlertDescription>
                     </Alert>
                 )}
@@ -998,7 +1005,7 @@ const CleaningDialogContent: React.FC<{
         );
     }
 
-    return null; // Should not happen
+    return null; 
 };
 
 
@@ -1235,6 +1242,10 @@ export default function DeviceActionsPanel({
   const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
   const [isEnablingPrereqs, setIsEnablingPrereqs] = React.useState(false);
+  const [apps, setApps] = React.useState<InstalledApp[]>([]);
+  const [isLoadingApps, setIsLoadingApps] = React.useState(false);
+  const [openAppDialog, setOpenAppDialog] = React.useState(false);
+  const [selectedApp, setSelectedApp] = React.useState<InstalledApp | null>(null);
   
   const initialDiagnosticsState: WinRMDiagnosticsState = {
         service: { status: 'checking', message: '' },
@@ -1511,6 +1522,34 @@ export default function DeviceActionsPanel({
         setIsEnablingPrereqs(false);
     };
     
+    const handleOpenAppDialog = async () => {
+        setOpenAppDialog(true);
+        setIsLoadingApps(true);
+        setApps([]);
+        const result = await runApiAction('get-installed-apps', {}, false);
+        if (result?.ok) {
+            try {
+                const parsedApps = JSON.parse(result.stdout);
+                setApps(parsedApps);
+            } catch {
+                toast({ variant: "destructive", title: "Error", description: "Failed to parse application list." });
+            }
+        } else {
+            toast({ variant: "destructive", title: "Error", description: result.error || "Could not fetch installed applications." });
+        }
+        setIsLoadingApps(false);
+    }
+    
+    const handleRunApp = () => {
+        if (!selectedApp || !selectedApp.ExecutablePath) {
+            toast({ variant: 'destructive', title: 'No application selected' });
+            return;
+        }
+        handleGenericAction('psexec', { cmd: `"${selectedApp.ExecutablePath}"`, isInteractive: true });
+        setOpenAppDialog(false);
+        setSelectedApp(null);
+    }
+
     const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
 
     // This is the correct place for early returns in a component.
@@ -1646,38 +1685,11 @@ export default function DeviceActionsPanel({
               <h4 className="font-semibold text-foreground">Advanced Actions</h4>
                 <div className="grid grid-cols-1 gap-2">
                     <ActionButton icon={Zap} label="Force GPUpdate" onClick={() => handleGenericAction('psexec', { cmd: 'gpupdate /force' })} />
-                    <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                            <Button variant="outline" className="justify-start w-full">
-                                <Zap className="mr-2 h-4 w-4" />
-                                <span>Open Application</span>
-                                <ChevronRight className="ml-auto h-4 w-4" />
-                            </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <form onSubmit={(e) => {
-                                e.preventDefault();
-                                const formData = new FormData(e.currentTarget);
-                                const app = formData.get('application') as string;
-                                (e.currentTarget.closest('[data-radix-popper-content-wrapper]')?.previousSibling as HTMLElement)?.click();
-                                handleGenericAction('psexec', { cmd: app, isInteractive: true });
-                            }}>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>Open Remote Application</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        Enter the name of the application to run interactively on {device.name} (e.g., notepad.exe, calc.exe).
-                                    </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <div className="my-4">
-                                    <Input name="application" placeholder="e.g. notepad.exe" />
-                                </div>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction type="submit">Run Application</AlertDialogAction>
-                                </AlertDialogFooter>
-                            </form>
-                        </AlertDialogContent>
-                    </AlertDialog>
+                    <Button variant="outline" className="justify-start w-full" onClick={handleOpenAppDialog}>
+                        <AppWindow className="mr-2 h-4 w-4" />
+                        <span>Open Application</span>
+                        <ChevronRight className="ml-auto h-4 w-4" />
+                    </Button>
                     <AlertDialog>
                         <AlertDialogTrigger asChild>
                             <Button variant="outline" className="justify-start w-full">
@@ -1715,6 +1727,43 @@ export default function DeviceActionsPanel({
         </ScrollArea>
       </SheetContent>
     </Sheet>
+    
+    <Dialog open={openAppDialog} onOpenChange={setOpenAppDialog}>
+        <DialogContent className="sm:max-w-[625px]">
+             <DialogHeader>
+                <DialogTitle>Open Remote Application</DialogTitle>
+                <DialogDescription>
+                    Select an installed application to run interactively on {device?.name}.
+                </DialogDescription>
+            </DialogHeader>
+            <Command>
+                <CommandInput placeholder="Search for an application..." />
+                <CommandList>
+                    {isLoadingApps && <div className="py-6 text-center text-sm">Loading applications...</div>}
+                    <CommandEmpty>{!isLoadingApps && "No applications found."}</CommandEmpty>
+                    <CommandGroup>
+                        {apps.map((app) => (
+                            <CommandItem
+                                key={app.DisplayName + app.ExecutablePath}
+                                value={app.DisplayName}
+                                onSelect={() => {
+                                    setSelectedApp(app)
+                                    handleRunApp()
+                                }}
+                            >
+                                <AppWindow className="mr-2 h-4 w-4" />
+                                <div className="flex flex-col">
+                                    <span>{app.DisplayName}</span>
+                                    <span className="text-xs text-muted-foreground">{app.Publisher}</span>
+                                </div>
+                            </CommandItem>
+                        ))}
+                    </CommandGroup>
+                </CommandList>
+            </Command>
+        </DialogContent>
+    </Dialog>
+
 
     {/* Generic Dialog for showing command outputs */}
     <CommandOutputDialog 
