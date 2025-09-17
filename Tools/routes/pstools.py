@@ -764,6 +764,36 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": full_details.strip()
         }), 500
+
+@pstools_bp.route('/clean-temp-files', methods=['POST'])
+def api_clean_temp_files():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, _ = get_auth_from_session()
+
+    logger.info(f"Attempting to clean temporary files on {ip}.")
+
+    # This PowerShell command attempts to delete files and folders in common temp locations.
+    # -Recurse: Deletes subdirectories and files.
+    # -Force: Attempts to delete read-only files.
+    # -ErrorAction SilentlyContinue: If a file is in use or can't be deleted, it skips it and continues.
+    ps_command = """
+    Get-ChildItem -Path $env:SystemRoot\\Temp, $env:TEMP, $env:SystemRoot\\Prefetch -Recurse -ErrorAction SilentlyContinue | 
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Temporary file cleanup command sent to specified locations (C:\\Windows\\Temp, %TEMP%, C:\\Windows\\Prefetch)."
+    Write-Host "Files that were in use may not have been deleted."
+    """
+    
+    cmd_args = ["powershell.exe", "-Command", ps_command]
+    
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
+
+    if rc == 0:
+        logger.info(f"Successfully executed temp file cleanup on {ip}.")
+        return json_result(rc, out, err)
+    else:
+        logger.error(f"Failed to clean temp files on {ip}. RC={rc}. Stderr: {err}. Stdout: {out}")
+        return json_result(rc, out, err)
         
 
 
@@ -780,6 +810,5 @@ def api_enable_snmp():
 
 
     
-
 
 

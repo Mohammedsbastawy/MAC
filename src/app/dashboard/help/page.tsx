@@ -300,7 +300,7 @@ export default function HelpPage() {
                             <AccordionContent className="space-y-2 text-base">
                                <p>1. Go to **Policy & Objects &rarr; Firewall Policy**.</p>
                                <p>2. Click **Create New**.</p>
-                               <p>3. Create a policy allowing traffic from the Dominion machine to the target network segment.</p>
+                               <p>3. Create a policy allowing traffic from the Dominion machine to the target network.</p>
                                <ul className="list-disc pl-6 space-y-1">
                                     <li>**Incoming Interface:** Port connected to the Dominion machine's network.</li>
                                     <li>**Outgoing Interface:** Port connected to the target clients' network.</li>

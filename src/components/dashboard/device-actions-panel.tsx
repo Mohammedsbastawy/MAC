@@ -1323,6 +1323,7 @@ export default function DeviceActionsPanel({
             psservice: "Services",
             psloglist: "Event Log",
             psfile: "Opened Files",
+            "clean-temp-files": "Clean Temporary Files"
         }
         setDialogState({
             isOpen: true,
@@ -1535,6 +1536,15 @@ export default function DeviceActionsPanel({
             <Separator />
             
             <div className="space-y-3">
+              <h4 className="font-semibold text-foreground">System Maintenance</h4>
+                <div className="grid grid-cols-1 gap-2">
+                    <ActionButton icon={Trash2} label="Clean Temp Files" onClick={() => handleGenericAction('clean-temp-files')} />
+                </div>
+            </div>
+
+            <Separator />
+            
+            <div className="space-y-3">
               <h4 className="font-semibold text-foreground">Power Management</h4>
                 <div className="grid grid-cols-1 gap-2">
                     <ActionButton icon={RefreshCw} label="Restart" onClick={() => handleGenericAction('psshutdown', { action: 'restart' })} />
@@ -1627,6 +1637,8 @@ export default function DeviceActionsPanel({
 }
 
     
+
+
 
 
 
