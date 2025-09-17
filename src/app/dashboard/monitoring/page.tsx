@@ -81,11 +81,10 @@ export default function MonitoringPage() {
   const [deploymentLog, setDeploymentLog] = React.useState("");
   
   React.useEffect(() => {
-    // Fetch devices only if they haven't been fetched yet by the context
     if (devices.length === 0 && !isLoading) {
       fetchAllDevices();
     }
-     // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
   const handleDeployAgent = async () => {
@@ -141,15 +140,6 @@ export default function MonitoringPage() {
             </Alert>
         </div>
     )
-  }
-
-  const formatTimestamp = (ts: string | null | undefined) => {
-    if (!ts) return "Not Deployed";
-    try {
-        return `Last updated: ${new Date(ts).toLocaleString()}`;
-    } catch {
-        return "Invalid date";
-    }
   }
 
   return (

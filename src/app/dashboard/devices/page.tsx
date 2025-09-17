@@ -202,7 +202,6 @@ export default function DevicesPage() {
   React.useEffect(() => {
     const fetchInterfaceData = async () => {
         setNetworkError(null);
-        // Fetch network interfaces
         try {
             const res = await fetch("/api/network-interfaces", { method: 'POST' });
             const data = await res.json();

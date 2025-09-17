@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import type { Device, ADComputer } from '@/lib/types';
 import { useToast } from './use-toast';
 
@@ -84,18 +84,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const fetchAllDevices = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    setDevices([]); // Clear previous state
-
     try {
-      // 1. Fetch AD Computers
       const adResponse = await fetch("/api/ad/get-computers", { method: "POST" });
       const adData = await adResponse.json();
       if (!adData.ok) throw adData;
 
       let initialDevices: Device[] = adData.computers.map(mapAdComputerToDevice);
-      setDevices(initialDevices.map(d => ({ ...d, isLoadingDetails: true })));
+      setDevices(initialDevices.map(d => ({ ...d, status: 'unknown' })));
 
-      // 2. Check Online Status
       const onlineCheckResponse = await fetch("/api/network/check-status", {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -108,12 +104,10 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const devicesWithStatus = initialDevices.map(d => ({
           ...d,
           status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-          isLoadingDetails: false
       }));
 
       setDevices(devicesWithStatus);
 
-      // 3. For online devices, check agent status in parallel
       const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
       await Promise.all(onlineDevices.map(device => fetchLiveData(device)));
 
@@ -156,7 +150,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         
         toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} online devices.` });
 
-        // Now check agent status for the newly online devices
         const onlineDevices = updatedDevices.filter(d => d.status === 'online');
         await Promise.all(onlineDevices.map(device => fetchLiveData(device)));
 
@@ -167,9 +160,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [devices, toast, fetchLiveData]);
 
+  const contextValue = useMemo(() => ({
+    devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus
+  }), [devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus]);
 
   return (
-    <DeviceContext.Provider value={{ devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus }}>
+    <DeviceContext.Provider value={contextValue}>
       {children}
     </DeviceContext.Provider>
   );
