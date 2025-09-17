@@ -124,28 +124,22 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <AuthProvider>
-      <SidebarProvider>
-        <DeviceProvider>
-            <DashboardLayoutContent>{children}</DashboardLayoutContent>
-        </DeviceProvider>
-      </SidebarProvider>
-    </AuthProvider>
-  );
-}
-
-const DashboardLayoutContent = ({ children }: { children: React.ReactNode }) => {
   const { state } = useSidebar();
   return (
-    <div className="flex min-h-screen w-full flex-col bg-muted/40">
-        <AppSidebar />
-        <div className={cn("flex flex-col sm:gap-4 sm:py-4 transition-[padding-left]",
-            state === 'expanded' ? "sm:pl-64" : "sm:pl-14"
-        )}>
-        <DashboardHeader />
-        <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
-        </div>
-    </div>
-  )
+    <AuthProvider>
+        <SidebarProvider>
+            <DeviceProvider>
+                <div className="flex min-h-screen w-full flex-col bg-muted/40">
+                    <AppSidebar />
+                    <div className={cn("flex flex-col sm:gap-4 sm:py-4 transition-[padding-left]",
+                        state === 'expanded' ? "sm:pl-64" : "sm:pl-14"
+                    )}>
+                        <DashboardHeader />
+                        <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
+                    </div>
+                </div>
+            </DeviceProvider>
+        </SidebarProvider>
+    </AuthProvider>
+  );
 }
