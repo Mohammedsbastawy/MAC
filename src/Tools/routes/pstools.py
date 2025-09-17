@@ -263,10 +263,13 @@ def api_psinfo_internal(ip=None, name=None):
             current_timestamp = datetime.datetime.fromisoformat(current_timestamp_str.replace('Z', '+00:00'))
 
             if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
+                # Add all relevant data for historical view
                 history.append({
                     "timestamp": perf_data.get("timestamp"),
                     "cpuUsage": perf_data.get("cpuUsage"),
-                    "usedMemoryGB": perf_data.get("usedMemoryGB")
+                    "usedMemoryGB": perf_data.get("usedMemoryGB"),
+                    "totalMemoryGB": perf_data.get("totalMemoryGB"),
+                    "diskInfo": perf_data.get("diskInfo")
                 })
 
                 # Prune old data

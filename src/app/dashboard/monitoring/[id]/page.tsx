@@ -18,6 +18,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useDeviceContext } from "@/hooks/use-device-context";
+import { Progress } from "@/components/ui/progress";
 
 
 const ChartCard: React.FC<{
@@ -144,7 +145,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         setHistory(data.history);
         if (data.history.length === 0) {
             // If no history, fetch live data immediately to populate
-            fetchLiveData(true);
+            await fetchLiveData(true);
         }
       } else {
         throw new Error(data.error || "Failed to fetch historical data.");
@@ -263,7 +264,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                     icon={MemoryStick}
                     title="Used Memory"
                     currentValue={`${latestData?.usedMemoryGB?.toFixed(2) ?? 'N/A'} MB`}
-                    description={`Total: ${latestData?.totalMemoryGB ?? 'N/A'} MB`}
+                    description={`Total: ${latestData?.totalMemoryGB ? latestData.totalMemoryGB.toFixed(2) : 'N/A'} MB`}
                     data={history}
                     dataKey="usedMemoryGB"
                     unit="MB"
@@ -280,20 +281,18 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {latestData?.diskInfo && latestData.diskInfo.length > 0 ? latestData.diskInfo.map(disk => (
+                    {latestData?.diskInfo && latestData.diskInfo.length > 0 ? latestData.diskInfo.map(disk => {
+                        const usedSpace = disk.sizeGB - disk.freeGB;
+                        const usagePercentage = (usedSpace / disk.sizeGB) * 100;
+                        return (
                         <div key={disk.volume}>
                             <div className="flex justify-between items-center mb-1">
-                                <span className="text-sm font-medium">Disk ({disk.volume}:\)</span>
+                                <span className="text-sm font-medium">Disk ({disk.volume})</span>
                                 <span className="text-xs text-muted-foreground">{disk.freeGB.toFixed(2)} GB Free of {disk.sizeGB.toFixed(2)} GB</span>
                             </div>
-                             <div className="w-full bg-muted rounded-full h-2.5">
-                                <div 
-                                    className="bg-primary h-2.5 rounded-full" 
-                                    style={{ width: `${((disk.sizeGB - disk.freeGB) / disk.sizeGB) * 100}%` }}
-                                ></div>
-                            </div>
+                             <Progress value={usagePercentage} className="h-2" />
                         </div>
-                    )) : (
+                    )}) : (
                         <p className="text-sm text-muted-foreground text-center py-8">No disk information available.</p>
                     )}
                 </CardContent>
@@ -305,5 +304,3 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 };
 
 export default DeviceDashboardPage;
-
-    
