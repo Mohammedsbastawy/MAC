@@ -773,39 +773,71 @@ def api_clean_temp_files():
 
     logger.info(f"Attempting to clean temporary files on {ip}.")
 
-    # This PowerShell command gets all user profiles, then cleans their temp folders,
-    # as well as the system-wide Temp and Prefetch folders.
+    # This new PowerShell script is more robust.
+    # It gathers all paths, gets the size, deletes, gets the size again, and calculates the difference.
     ps_command = """
-    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile;
+    $pathsToClean = @(
+        "$env:SystemRoot\\Temp",
+        "$env:SystemRoot\\Prefetch"
+    )
+    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile | Where-Object { $_.LocalPath -notlike "*\\Windows" -and $_.LocalPath -notlike "*\\system32*"}
     foreach ($profile in $userProfiles) {
-        $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp";
-        if (Test-Path -Path $tempPath) {
-            Write-Host "Cleaning user temp folder: $tempPath";
-            Get-ChildItem -Path $tempPath -Recurse -Force -ErrorAction SilentlyContinue | 
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
+        $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp"
+        if (Test-Path -Path $tempPath -PathType Container) {
+            $pathsToClean += $tempPath
         }
     }
+
+    $ErrorActionPreference = 'SilentlyContinue'
     
-    Write-Host "Cleaning system temp folder: $env:SystemRoot\\Temp";
-    Get-ChildItem -Path $env:SystemRoot\\Temp -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
+    function Get-DirectorySize($path) {
+        $size = 0
+        if (Test-Path $path) {
+            $size = (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+        }
+        return [long]$size
+    }
 
-    Write-Host "Cleaning prefetch folder: $env:SystemRoot\\Prefetch";
-    Get-ChildItem -Path $env:SystemRoot\\Prefetch -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
+    $totalSizeBefore = 0
+    foreach ($path in $pathsToClean) {
+        $totalSizeBefore += Get-DirectorySize -path $path
+    }
 
-    Write-Host "Temporary file cleanup command sent to all specified locations.";
-    Write-Host "Files that were in use may not have been deleted, which is normal.";
+    foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+            Remove-Item -Path "$path\\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $totalSizeAfter = 0
+    foreach ($path in $pathsToClean) {
+        $totalSizeAfter += Get-DirectorySize -path $path
+    }
+
+    $freedBytes = $totalSizeBefore - $totalSizeAfter
+    if ($freedBytes -lt 0) { $freedBytes = 0 }
+
+    $result = @{
+        freedMb = [math]::Round($freedBytes / 1MB, 2)
+    }
+    
+    return $result | ConvertTo-Json
     """
     
     cmd_args = ["powershell.exe", "-Command", ps_command]
-    
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-    if rc == 0:
-        logger.info(f"Successfully executed temp file cleanup on {ip}.")
-        return json_result(rc, out, err)
+    if rc == 0 and out:
+        try:
+            # The output is expected to be JSON
+            structured_data = {"cleanTemp": json.loads(out)}
+            return json_result(rc, out, err, structured_data)
+        except json.JSONDecodeError:
+            err = f"Failed to parse JSON from cleanup script: {out}"
+            return json_result(1, out, err)
     else:
-        logger.error(f"Failed to clean temp files on {ip}. RC={rc}. Stderr: {err}. Stdout: {out}")
-        return json_result(rc, out, err)
+        # If the script fails, still return an error in the expected format
+        return json_result(rc, out, err, {"cleanTemp": None})
         
 
 
@@ -822,6 +854,7 @@ def api_clean_temp_files():
 
 
     
+
 
 
 
