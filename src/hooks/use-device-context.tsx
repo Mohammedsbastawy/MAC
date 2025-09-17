@@ -41,6 +41,7 @@ interface DeviceContextType {
   devices: Device[];
   isLoading: boolean;
   isUpdating: boolean;
+  updateProgress: number;
   error: { title: string; message: string; details?: string } | null;
   fetchAllDevices: () => Promise<void>;
   fetchLiveData: (device: Device) => Promise<void>;
@@ -54,6 +55,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [devices, setDevices] = useState<Device[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState(0);
   const [error, setError] = useState<{ title: string; message: string; details?: string } | null>(null);
   const { toast } = useToast();
 
@@ -88,7 +90,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const fetchAllDevices = useCallback(async () => {
     if (isLoading || isUpdating) return;
     setIsLoading(true);
-    setIsUpdating(true); // Set updating true for the whole process
+    setIsUpdating(true);
+    setUpdateProgress(0);
     setError(null);
     try {
       const adResponse = await fetch("/api/ad/get-computers", { method: "POST" });
@@ -99,6 +102,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setDevices(initialDevices.map(d => ({ ...d, status: 'unknown', isAgentDeployed: false, agentLastUpdate: null })));
       
       setIsLoading(false); // AD data is loaded, main loading is false
+      setUpdateProgress(10);
 
       const onlineCheckResponse = await fetch("/api/network/check-status", {
           method: 'POST',
@@ -110,20 +114,27 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       
       const onlineIps = new Set<string>(onlineCheckData.online_ips);
       
-      // Update status in a single batch
-      setDevices(prevDevices => prevDevices.map(d => ({
-          ...d,
-          status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-      })));
-
-      // Now work with the fresh list of devices with correct online status
       const devicesWithStatus = initialDevices.map(d => ({
         ...d,
         status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
       }));
+      
+      setDevices(devicesWithStatus);
+      setUpdateProgress(30);
 
       const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
-      await Promise.all(onlineDevices.map(device => fetchLiveData(device)));
+      let processedCount = 0;
+      const totalOnline = onlineDevices.length;
+
+      const agentCheckPromises = onlineDevices.map(async (device) => {
+        await fetchLiveData(device);
+        processedCount++;
+        const progress = 30 + Math.floor((processedCount / totalOnline) * 70);
+        setUpdateProgress(progress);
+      });
+      
+      await Promise.all(agentCheckPromises);
+
 
     } catch (err: any) {
       setError({
@@ -135,6 +146,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } finally {
       setIsLoading(false);
       setIsUpdating(false);
+      setUpdateProgress(100);
     }
   }, [fetchLiveData, isLoading, isUpdating]);
 
@@ -145,10 +157,12 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
     if (isUpdating) return;
     setIsUpdating(true);
+    setUpdateProgress(0);
     toast({ title: "Refreshing Status...", description: `Checking ${devices.length} devices.` });
 
     try {
         const ipsToCheck = devices.map(d => d.ipAddress).filter(Boolean);
+        setUpdateProgress(10);
         const res = await fetch("/api/network/check-status", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -156,37 +170,44 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "Status check failed.");
-
+        
+        setUpdateProgress(30);
         const onlineIps = new Set(data.online_ips);
         
-        // Use a functional update to get the latest state
-        setDevices(prevDevices => {
-            return prevDevices.map(d => ({
-                ...d,
-                status: onlineIps.has(d.ipAddress) ? 'online' : 'offline'
-            }));
-        });
-        
-        toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} online devices.` });
-
-        const devicesWithStatus = devices.map(d => ({
+        const currentDevices = devices;
+        const devicesWithStatus = currentDevices.map(d => ({
             ...d,
             status: onlineIps.has(d.ipAddress) ? 'online' : 'offline'
         }));
         
+        setDevices(devicesWithStatus);
+        
+        toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} online devices.` });
+
         const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
-        await Promise.all(onlineDevices.map(device => fetchLiveData(device)));
+        let processedCount = 0;
+        const totalOnline = onlineDevices.length;
+
+        const agentCheckPromises = onlineDevices.map(async (device) => {
+          await fetchLiveData(device);
+          processedCount++;
+          const progress = 30 + Math.floor((processedCount / totalOnline) * 70);
+          setUpdateProgress(progress);
+        });
+
+        await Promise.all(agentCheckPromises);
 
     } catch (err: any) {
         toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
     } finally {
         setIsUpdating(false);
+        setUpdateProgress(100);
     }
   }, [devices, toast, fetchLiveData, isUpdating]);
 
   const contextValue = useMemo(() => ({
-    devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData
-  }), [devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus]);
+    devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData
+  }), [devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus]);
 
   return (
     <DeviceContext.Provider value={contextValue}>

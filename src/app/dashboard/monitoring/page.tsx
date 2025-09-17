@@ -64,6 +64,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useDeviceContext } from "@/hooks/use-device-context";
 import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
+import { Progress } from "@/components/ui/progress";
 
 
 export default function MonitoringPage() {
@@ -74,6 +75,7 @@ export default function MonitoringPage() {
     fetchAllDevices, 
     fetchLiveData,
     isUpdating,
+    updateProgress,
   } = useDeviceContext();
   const { toast } = useToast();
   const router = useRouter();
@@ -182,7 +184,7 @@ export default function MonitoringPage() {
             </div>
              <div className="flex items-center gap-2">
                 <Button onClick={() => fetchAllDevices()} disabled={isLoading || isUpdating}>
-                    {isLoading || isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Refresh Status
                 </Button>
             </div>
@@ -192,6 +194,12 @@ export default function MonitoringPage() {
             <CardHeader>
                 <CardTitle>Monitored Devices</CardTitle>
                 <CardDescription>List of all domain computers and their monitoring agent status.</CardDescription>
+                {isUpdating && (
+                  <div className="pt-2 space-y-1">
+                    <Progress value={updateProgress} className="h-2 w-full bg-primary/20" />
+                    <p className="text-xs text-muted-foreground">Updating devices... ({updateProgress}%)</p>
+                  </div>
+                )}
             </CardHeader>
             <CardContent>
                 <Table>
