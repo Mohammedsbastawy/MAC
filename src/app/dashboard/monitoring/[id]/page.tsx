@@ -118,23 +118,31 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
             console.error("Failed to fetch historical data:", historyData.error);
         }
         
-        const liveRes = await fetch("/api/network/fetch-live-data", {
+        const { success, error: liveError } = await fetchLiveData(deviceId, ip);
+        if (!success) {
+           throw new Error(liveError || "Failed to fetch live data.");
+        }
+        
+        // After fetchLiveData, the history might be updated. Refetch it one more time.
+        const finalHistoryRes = await fetch("/api/network/get-historical-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: id, ip: ip }),
+            body: JSON.stringify({ id: id }),
         });
-        const liveDataResult = await liveRes.json();
-        if (liveDataResult.ok && liveDataResult.liveData) {
-            setLiveData(liveDataResult.liveData);
-        } else {
-            throw new Error(liveDataResult.error || "Failed to fetch live data.");
+        const finalHistoryData = await finalHistoryRes.json();
+        if (finalHistoryData.ok) {
+            setHistory(finalHistoryData.history);
+             if (finalHistoryData.history.length > 0) {
+                setLiveData(finalHistoryData.history[finalHistoryData.history.length-1]);
+             }
         }
+
     } catch (err: any) {
         setError(err.message || "An error occurred.");
     } finally {
         setIsLoading(false);
     }
-  }, []);
+  }, [fetchLiveData, deviceId]);
   
   // Effect for initial data load
   React.useEffect(() => {
