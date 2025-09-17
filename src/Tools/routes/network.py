@@ -21,7 +21,7 @@ from Tools.snmp_listener import get_current_traps
 network_bp = Blueprint('network', __name__)
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-LOG_RETENTION_HOURS = 24
+LOG_RETENTION_HOURS = 168 # 7 days
 
 
 @network_bp.before_request

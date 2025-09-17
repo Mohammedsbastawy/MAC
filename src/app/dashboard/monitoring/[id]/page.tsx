@@ -1,6 +1,5 @@
 
 
-
 "use client"
 
 import * as React from "react";
@@ -12,7 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, ServerCrash, Cpu, MemoryStick, ArrowLeft } from "lucide-react";
+import { Loader2, ServerCrash, Cpu, MemoryStick, ArrowLeft, HardDrive } from "lucide-react";
 import type { PerformanceData } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -23,24 +22,30 @@ import { useDeviceContext } from "@/hooks/use-device-context";
 
 const ChartCard: React.FC<{
     title: string;
+    currentValue: string;
     description: string;
     data: any[];
     dataKey: string;
     unit: string;
     icon: React.ElementType;
-}> = ({ title, description, data, dataKey, unit, icon: Icon }) => (
-    <Card className="col-span-1 lg:col-span-2">
+}> = ({ title, currentValue, description, data, dataKey, unit, icon: Icon }) => (
+     <Card>
         <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-                <Icon className="h-5 w-5 text-muted-foreground" />
-                {title}
-            </CardTitle>
-            <CardDescription>{description}</CardDescription>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <Icon className="h-5 w-5 text-muted-foreground" />
+                    <CardTitle>{title}</CardTitle>
+                </div>
+                <div className="text-right">
+                    <p className="text-2xl font-bold">{currentValue}</p>
+                    <p className="text-xs text-muted-foreground">{description}</p>
+                </div>
+            </div>
         </CardHeader>
         <CardContent>
             <div className="h-64 w-full">
                 <ResponsiveContainer>
-                    <AreaChart data={data}>
+                    <AreaChart data={data} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
                         <defs>
                             <linearGradient id={`color${dataKey}`} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
@@ -52,8 +57,10 @@ const ChartCard: React.FC<{
                             dataKey="timestamp" 
                             tickFormatter={(timeStr) => new Date(timeStr).toLocaleTimeString()}
                             fontSize={12}
+                            tickLine={false}
+                            axisLine={false}
                         />
-                        <YAxis unit={unit} fontSize={12} />
+                        <YAxis unit={unit} fontSize={12} tickLine={false} axisLine={false}/>
                         <Tooltip 
                             contentStyle={{ 
                                 backgroundColor: 'hsl(var(--background))', 
@@ -78,7 +85,6 @@ const ChartCard: React.FC<{
 const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const { devices, updateDeviceData } = useDeviceContext();
   const [history, setHistory] = React.useState<PerformanceData[]>([]);
-  const [liveData, setLiveData] = React.useState<PerformanceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
@@ -88,7 +94,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   // Find the device from the global context
   const device = React.useMemo(() => devices.find(d => d.id === deviceId), [devices, deviceId]);
 
-  const fetchLiveData = React.useCallback(async () => {
+  const fetchLiveData = React.useCallback(async (initialLoad = false) => {
     if (!device?.ipAddress) return;
 
     try {
@@ -100,24 +106,25 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         const data = await res.json();
 
         if(data.ok && data.liveData) {
-            const newPoint = {
+             const newPoint = {
                 ...data.liveData,
                 cpuUsage: parseFloat(data.liveData.cpuUsage?.toFixed(2) || 0),
                 usedMemoryGB: parseFloat(data.liveData.usedMemoryGB?.toFixed(2) || 0),
             };
-            setLiveData(newPoint);
-            setHistory(prev => {
-                const newHistory = [...prev, newPoint];
-                return newHistory.slice(-1440); // Keep last ~24h
-            });
-            // Update the global context with the new timestamp
+            if (!initialLoad) {
+                 setHistory(prev => {
+                    const newHistory = [...prev, newPoint];
+                    return newHistory.slice(-1440); // Keep last ~24h of 1-min intervals
+                });
+            }
             updateDeviceData(deviceId, { agentLastUpdate: newPoint.timestamp });
             setError(null);
-        } else {
+        } else if (initialLoad) {
+            // Only set error on initial load if fetching live data fails
             setError(data.error || "Failed to fetch live update.");
         }
     } catch (err) {
-        setError("An error occurred while fetching live data from the server.");
+        if(initialLoad) setError("An error occurred while fetching live data from the server.");
     }
   }, [deviceId, device, updateDeviceData]);
 
@@ -135,11 +142,9 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       const data = await res.json();
       if (data.ok) {
         setHistory(data.history);
-        if (data.history.length > 0) {
-            setLiveData(data.history[data.history.length - 1]);
-        } else {
-            // If no history, fetch live data immediately
-            fetchLiveData();
+        if (data.history.length === 0) {
+            // If no history, fetch live data immediately to populate
+            fetchLiveData(true);
         }
       } else {
         throw new Error(data.error || "Failed to fetch historical data.");
@@ -156,8 +161,6 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     if (device) {
         fetchInitialData();
     } else {
-        // This can happen on a hard refresh, the context might not be populated yet.
-        // The context itself will fetch all devices, and this component will re-render.
         setIsLoading(true); 
     }
   }, [device, fetchInitialData]);
@@ -166,7 +169,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   React.useEffect(() => {
     if (!isLoading && isAutoRefresh && device?.ipAddress) {
         const intervalId = setInterval(() => {
-            fetchLiveData();
+            fetchLiveData(false);
         }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
@@ -197,7 +200,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   }
 
 
-  const latestData = history.length > 0 ? history[history.length-1] : null;
+  const latestData = history.length > 0 ? history[history.length - 1] : null;
 
   return (
     <div className="space-y-6">
@@ -211,14 +214,14 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                         Live Monitoring
                     </h1>
                     <p className="text-muted-foreground">
-                        Real-time & historical performance data for <span className="font-semibold text-primary">{device?.name || "Unknown Device"}</span>
+                        Real-time performance data for <span className="font-semibold text-primary">{device?.name || "Unknown Device"}</span>
                     </p>
                 </div>
             </div>
              <div className="flex items-center gap-2">
                 <div className={cn("w-3 h-3 rounded-full animate-pulse", isAutoRefresh && !error ? 'bg-green-500' : 'bg-yellow-500')} />
                 <span className="text-sm text-muted-foreground">
-                        {isAutoRefresh && !error ? "Live" : "Paused"}
+                        {isAutoRefresh && !error ? `Live (Updated: ${latestData ? new Date(latestData.timestamp).toLocaleTimeString() : 'N/A'})` : "Paused"}
                 </span>
                 <Button variant="outline" size="sm" onClick={() => setIsAutoRefresh(!isAutoRefresh)} className="ml-4">
                     {isAutoRefresh ? "Pause Refresh" : "Resume Refresh"}
@@ -227,9 +230,10 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="ml-2">Fetching performance data...</p>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+             <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+             <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+             <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
         </div>
       ) : error ? (
         <Alert variant="destructive">
@@ -245,25 +249,30 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         </Alert>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            <ChartCard
-                icon={Cpu}
-                title="CPU Usage"
-                description={`Current: ${latestData?.cpuUsage?.toFixed(2) ?? 'N/A'}%`}
-                data={history}
-                dataKey="cpuUsage"
-                unit="%"
-            />
-             <ChartCard
-                icon={MemoryStick}
-                title="Used Memory"
-                description={`Current: ${latestData?.usedMemoryGB?.toFixed(2) ?? 'N/A'} MB / Total: ${latestData?.totalMemoryGB ?? 'N/A'} MB`}
-                data={history}
-                dataKey="usedMemoryGB"
-                unit="MB"
-            />
-             <Card className="md:col-span-2 lg:col-span-1">
+            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <ChartCard
+                    icon={Cpu}
+                    title="CPU Usage"
+                    currentValue={`${latestData?.cpuUsage?.toFixed(2) ?? 'N/A'}%`}
+                    description={`Last updated: ${latestData ? new Date(latestData.timestamp).toLocaleTimeString() : 'N/A'}`}
+                    data={history}
+                    dataKey="cpuUsage"
+                    unit="%"
+                />
+                <ChartCard
+                    icon={MemoryStick}
+                    title="Used Memory"
+                    currentValue={`${latestData?.usedMemoryGB?.toFixed(2) ?? 'N/A'} MB`}
+                    description={`Total: ${latestData?.totalMemoryGB ?? 'N/A'} MB`}
+                    data={history}
+                    dataKey="usedMemoryGB"
+                    unit="MB"
+                />
+            </div>
+            <Card className="lg:col-span-1">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
+                        <HardDrive />
                         Disk Usage
                     </CardTitle>
                      <CardDescription>
@@ -271,11 +280,11 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {latestData?.diskInfo.map(disk => (
+                    {latestData?.diskInfo && latestData.diskInfo.length > 0 ? latestData.diskInfo.map(disk => (
                         <div key={disk.volume}>
                             <div className="flex justify-between items-center mb-1">
-                                <span className="text-sm font-medium">{disk.volume}</span>
-                                <span className="text-xs text-muted-foreground">{disk.freeGB} GB Free</span>
+                                <span className="text-sm font-medium">Disk ({disk.volume}:\)</span>
+                                <span className="text-xs text-muted-foreground">{disk.freeGB.toFixed(2)} GB Free of {disk.sizeGB.toFixed(2)} GB</span>
                             </div>
                              <div className="w-full bg-muted rounded-full h-2.5">
                                 <div 
@@ -284,7 +293,9 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                                 ></div>
                             </div>
                         </div>
-                    ))}
+                    )) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">No disk information available.</p>
+                    )}
                 </CardContent>
              </Card>
         </div>
@@ -294,3 +305,5 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 };
 
 export default DeviceDashboardPage;
+
+    

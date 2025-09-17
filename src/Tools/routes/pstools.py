@@ -14,7 +14,7 @@ from .activedirectory import get_ldap_connection
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-LOG_RETENTION_HOURS_RAW = 24
+LOG_RETENTION_HOURS_RAW = 168 # 7 days
 
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
