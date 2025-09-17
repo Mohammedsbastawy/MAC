@@ -104,6 +104,9 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     }
 
     try {
+        let historyFetchOk = false;
+        let liveFetchOk = false;
+
         const historyRes = await fetch("/api/network/get-historical-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -112,8 +115,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         const historyData = await historyRes.json();
         if (historyData.ok) {
             setHistory(historyData.history);
-        } else if (isInitialLoad) {
-            throw new Error(historyData.error || "Failed to fetch historical data.");
+            historyFetchOk = true;
         }
 
         const liveRes = await fetch("/api/network/fetch-live-data", {
@@ -124,6 +126,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         const liveDataResult = await liveRes.json();
         
         if (liveDataResult.ok && liveDataResult.liveData) {
+            liveFetchOk = true;
             const newPoint = {
                 ...liveDataResult.liveData,
                 cpuUsage: parseFloat(liveDataResult.liveData.cpuUsage?.toFixed(2) || 0),
@@ -134,20 +137,27 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
             
             setHistory(prev => {
                 const existingPoint = prev.find(p => p.timestamp === newPoint.timestamp);
-                if (existingPoint) return prev; // Avoid duplicates
+                if (existingPoint) return prev;
                 
                 const newHistory = [...prev, newPoint];
-                 const maxHistoryLength = (24 * 60 * 7) + 1; // 7 days of 1-minute intervals
+                const maxHistoryLength = (24 * 60 * 7) + 1; // 7 days of 1-minute intervals
                 return newHistory.slice(-maxHistoryLength);
             });
             
             updateDeviceData(deviceId, { agentLastUpdate: newPoint.timestamp });
-            if (isInitialLoad) setError(null);
-        } else if (isInitialLoad) {
-            if (historyData.history.length === 0) {
-                 setError(liveDataResult.error || "Failed to fetch any performance data.");
+        }
+
+        // Only clear the error if at least one of the fetches was successful.
+        if (historyFetchOk || liveFetchOk) {
+            setError(null);
+        } else {
+            // Both failed, set a meaningful error message
+            const finalError = liveDataResult.error || historyData.error || "Failed to fetch any performance data.";
+            if (isInitialLoad) {
+                setError(finalError);
             }
         }
+
     } catch (err: any) {
         if(isInitialLoad) setError(err.message || "An error occurred while fetching data from the server.");
     } finally {
@@ -163,7 +173,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       setError("The specified device could not be found. It may have been removed from Active Directory.");
       setIsLoading(false);
     }
-  }, [device, devices, fetchLiveDataAndHistory]);
+  }, [device, devices.length, fetchLiveDataAndHistory]);
 
   React.useEffect(() => {
     if (!isAutoRefresh || !device?.ipAddress) return;
@@ -175,7 +185,11 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     return () => clearInterval(intervalId);
   }, [isAutoRefresh, device, fetchLiveDataAndHistory]);
   
-  if (isLoading) {
+  const showLoadingState = isLoading;
+  const showErrorState = !isLoading && error && history.length === 0 && !liveData;
+
+
+  if (showLoadingState) {
      return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -202,7 +216,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       )
   }
 
-  if (error && history.length === 0) {
+  if (showErrorState) {
       return (
          <Alert variant="destructive">
           <ServerCrash className="h-4 w-4" />
