@@ -43,13 +43,13 @@ def json_result(rc, out, err, structured_data=None, extra_data={}):
 
 
 
-def get_auth_from_request(data):
-    """Safely gets auth credentials from request JSON or falls back to session."""
-    user = data.get("username") if data else session.get("user")
-    domain = data.get("domain") if data else session.get("domain")
-    pwd = data.get("password") if data else session.get("password")
+def get_auth_from_session():
+    """Safely gets auth credentials from the server-side session."""
+    user = session.get("user")
+    domain = session.get("domain")
+    pwd = session.get("password")
     
-    if not user or not pwd:
+    if not user or not pwd or not domain:
         return None, None, None, None
 
     winrm_user = f"{user}@{domain}" if '@' not in user else user
@@ -58,22 +58,9 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    # Special handling for endpoints that might not have a body and rely on session
-    endpoints_without_body = ['pstools.api_deploy_agent', 'pstools.api_enable_snmp']
-    if request.endpoint in endpoints_without_body:
-        if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return  # Proceed with session auth
-
-    # For all other endpoints, try to get JSON, but fall back to session if no JSON body exists
-    data = request.get_json(silent=True)
-    if data is None:
-        if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Request is missing a body, and no active session was found.'}), 401
-        return # Proceed with session auth
-        
-    user, _, _, _ = get_auth_from_request(data)
-    if not user:
+    user, domain, pwd, _ = get_auth_from_session()
+    if not all([user, domain, pwd]):
+        logger.warning(f"Auth failed for {request.endpoint}: User credentials not found in session.")
         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
 
@@ -81,7 +68,7 @@ def require_login_hook():
 def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     
     logger.info(f"Executing psexec on {ip} with command: '{cmd}'")
     if not cmd:
@@ -95,7 +82,7 @@ def api_psexec():
 def api_psservice():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     svc, action = data.get("svc",""), data.get("action","query")
 
     logger.info(f"Executing psservice on {ip} with action: '{action}' for service: '{svc or 'all'}'")
@@ -129,7 +116,7 @@ def api_psservice():
 def api_pslist():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
 
     logger.info(f"Executing Get-Process (WinRM) on {ip}.")
     
@@ -183,7 +170,7 @@ def api_pslist():
 def api_pskill():
     data = request.get_json() or {}
     ip, proc_id = data.get("ip",""), data.get("proc","")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
     
     logger.info(f"Executing Stop-Process (WinRM) on {ip} for PID: '{proc_id}'.")
     if not proc_id:
@@ -203,7 +190,7 @@ def api_pskill():
 def api_psloglist():
     data = request.get_json() or {}
     ip, kind = data.get("ip",""), data.get("kind","system")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing psloglist on {ip} for log type: '{kind}'.")
     rc, out, err = run_ps_command("psloglist", ip, user, domain, pwd, ["-d", "1", kind], timeout=120)
 
@@ -223,15 +210,11 @@ def api_psinfo_internal(ip=None, name=None):
         return jsonify({"ok": False, "error": "Internal Server Error: IP address and device name are required for api_psinfo_internal."}), 500
 
     # Authentication must come from the session.
-    user = session.get("user")
-    domain = session.get("domain")
-    pwd = session.get("password")
+    user, domain, pwd, winrm_user = get_auth_from_session()
 
     if not all([user, domain, pwd]):
         logger.error(f"Authentication missing in session for internal call to '{name}' on IP '{ip}'.")
         return jsonify({"ok": False, "error": "Authentication required to fetch agent data."}), 401
-    
-    winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     logger.info(f"Reading performance data for '{name}' from agent file on {ip}.")
     
@@ -316,7 +299,7 @@ def api_psinfo():
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
     
     logger.info(f"Executing quser.exe (WinRM) on {ip}.")
     
@@ -372,7 +355,7 @@ def api_psshutdown():
     data = request.get_json() or {}
     ip, action = data.get("ip",""), data.get("action","restart")
     session_id = data.get("session")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_session()
     
     logger.info(f"Executing shutdown/restart/logoff on {ip} with action: '{action}'.")
 
@@ -396,7 +379,7 @@ def api_psshutdown():
 def api_psfile():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing psfile on {ip}.")
     rc, out, err = run_ps_command("psfile", ip, user, domain, pwd, [], timeout=60)
     
@@ -410,7 +393,7 @@ def api_psfile():
 def api_psgetsid():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing psgetsid on {ip}.")
     rc, out, err = run_ps_command("psgetsid", ip, user, domain, pwd, [], timeout=60)
     return json_result(rc, out, err)
@@ -419,7 +402,7 @@ def api_psgetsid():
 def api_pspasswd():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     target_user, new_pass = data.get("targetUser",""), data.get("newpass","")
     logger.info(f"Executing pspasswd on {ip} for user '{target_user}'.")
     if not target_user or not new_pass:
@@ -431,7 +414,7 @@ def api_pspasswd():
 def api_pssuspend():
     data = request.get_json() or {}
     ip, proc = data.get("ip",""), data.get("proc","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing pssuspend on {ip} for process: '{proc}'.")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
@@ -461,7 +444,7 @@ def api_psbrowse():
     data = request.get_json() or {}
     ip = data.get("ip", "")
     path = data.get("path", "")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
 
     logger.info(f"Executing file browse (WinRM) on {ip} for path: '{path or 'drives'}'")
     
@@ -508,7 +491,7 @@ def api_psbrowse():
 def download_file():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
     
     if not path:
         return json_result(1, "", "File path is required.")
@@ -524,7 +507,7 @@ def download_file():
 def upload_file():
     data = request.get_json() or {}
     ip, dest_path, content_b64 = data.get("ip"), data.get("destinationPath"), data.get("fileContent")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
     
     if not all([dest_path, content_b64]):
         return json_result(1, "", "Destination path and file content are required.")
@@ -553,7 +536,7 @@ def upload_file():
 def delete_item():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
     ps_command = f"Remove-Item -Path '{path}' -Recurse -Force -ErrorAction Stop"
     logger.info(f"Attempting to delete '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -563,7 +546,7 @@ def delete_item():
 def rename_item():
     data = request.get_json() or {}
     ip, path, new_name = data.get("ip"), data.get("path"), data.get("newName")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
     ps_command = f"Rename-Item -Path '{path}' -NewName '{new_name}' -ErrorAction Stop"
     logger.info(f"Attempting to rename '{path}' to '{new_name}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -573,7 +556,7 @@ def rename_item():
 def create_folder():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, pwd, winrm_user = get_auth_from_session()
     ps_command = f"New-Item -Path '{path}' -ItemType Directory -Force -ErrorAction Stop"
     logger.info(f"Attempting to create folder '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -584,7 +567,7 @@ def create_folder():
 def api_enable_winrm():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Attempting to robustly enable WinRM on {ip} using PsExec.")
 
@@ -620,7 +603,7 @@ def api_enable_winrm():
 def api_enable_prereqs():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Attempting to enable prerequisites (RPC/WMI) on {ip} using PsExec.")
 
@@ -656,7 +639,7 @@ def api_enable_prereqs():
 def api_set_network_private():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
 
@@ -686,13 +669,10 @@ def api_deploy_agent():
     ip = data.get("ip")
     device_name = data.get("name")
     
-    # Get auth from session, NOT from the request body for this endpoint
-    user = session.get("user")
-    domain = session.get("domain")
-    pwd = session.get("password")
+    user, domain, pwd, _ = get_auth_from_session()
 
-    if not all([ip, device_name, user, domain, pwd]):
-        return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
+    if not all([ip, device_name]):
+        return jsonify({"ok": False, "error": "Target IP and Device Name are required."}), 400
 
     logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
     
@@ -742,7 +722,7 @@ def api_enable_snmp():
     data = request.get_json() or {}
     ip = data.get("ip")
     server_ip = data.get("server_ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     if not ip or not server_ip:
         return jsonify({"ok": False, "error": "Target IP and Server IP are required."}), 400
@@ -800,3 +780,6 @@ def api_enable_snmp():
 
 
     
+
+
+

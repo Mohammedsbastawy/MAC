@@ -11,20 +11,12 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  password?: string;
   isLoading: boolean;
   login: (email: string, password?: string) => Promise<{success: boolean, error?: string}>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// A simple in-memory store for the password.
-// This is NOT secure for production in a multi-user server environment,
-// but for a single-user desktop-like app, it's a pragmatic way
-// to hold the password for backend calls without storing it in cookies or localStorage.
-let sessionPassword: string | undefined = undefined;
-
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -36,22 +28,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await fetch('/api/check-session');
       const data = await response.json();
       if (data.ok) {
-        setUser(data.user);
-        // Important: We retrieve the password from session storage on session load.
-        const storedPassword = sessionStorage.getItem('atlas-session-pwd');
-        if (storedPassword) {
-            sessionPassword = storedPassword;
-        }
+        setUser(data);
       } else {
         setUser(null);
-        sessionPassword = undefined;
-        sessionStorage.removeItem('atlas-session-pwd');
       }
     } catch (error) {
       console.error("Failed to check session", error);
       setUser(null);
-      sessionPassword = undefined;
-      sessionStorage.removeItem('atlas-session-pwd');
     } finally {
       setIsLoading(false);
     }
@@ -73,9 +56,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (data.ok) {
-        // Store password in our in-memory variable AND session storage
-        sessionPassword = password;
-        sessionStorage.setItem('atlas-session-pwd', password);
         setUser(data);
         return { success: true };
       }
@@ -93,13 +73,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error("Logout failed", error);
     } finally {
         setUser(null);
-        sessionPassword = undefined;
-        sessionStorage.removeItem('atlas-session-pwd');
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, password: sessionPassword }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

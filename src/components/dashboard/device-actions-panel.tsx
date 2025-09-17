@@ -78,7 +78,6 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import type { Device, LoggedOnUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/use-auth";
 import * as React from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -1148,7 +1147,6 @@ export default function DeviceActionsPanel({
   onClose,
 }: DeviceActionsPanelProps) {
   const { toast } = useToast();
-  const { user, login } = useAuth();
   const [dialogState, setDialogState] = React.useState<DialogState>({
       isOpen: false,
       title: "",
@@ -1163,8 +1161,6 @@ export default function DeviceActionsPanel({
   const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
   const [isEnablingPrereqs, setIsEnablingPrereqs] = React.useState(false);
-  const [reAuthDialogOpen, setReAuthDialogOpen] = React.useState(false);
-  const [pendingAction, setPendingAction] = React.useState<(() => Promise<void>) | null>(null);
   
   const initialDiagnosticsState: WinRMDiagnosticsState = {
         service: { status: 'checking', message: '' },
@@ -1174,81 +1170,38 @@ export default function DeviceActionsPanel({
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
   
   const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
-    if (!device || !user) {
-        return { ok: false, error: "Authentication details are missing. Please log in again.", stderr: "Authentication details are missing. Please log in again.", structured_data: null };
-    }
-
-    const sessionPassword = sessionStorage.getItem('atlas-session-pwd');
-    if (!sessionPassword) {
-        setPendingAction(() => () => runApiAction(endpoint, params, showToast));
-        setReAuthDialogOpen(true);
-        return null;
-    }
+    if (!device) return null;
 
     if (showToast) {
         toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
     }
 
     try {
-        const body = {
-            ip: device.ipAddress,
-            username: user.user,
-            domain: user.domain,
-            password: sessionPassword,
-            ...params,
-        };
+        const body = { ip: device.ipAddress, ...params };
         const response = await fetch(`/api/pstools/${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
 
-        if (response.status === 401) {
-            setPendingAction(() => () => runApiAction(endpoint, params, showToast));
-            setReAuthDialogOpen(true);
-            return null;
-        }
-
         if (!response.ok) {
             let errorDetails = `The server returned an error (HTTP ${response.status}).`;
             try {
                 const errorJson = await response.json();
                 errorDetails = errorJson.error || errorJson.message || errorDetails;
-            } catch (e) {
-                // Ignore if body is not JSON
-            }
+                if (response.status === 401) {
+                    toast({ variant: 'destructive', title: 'Authentication Failed', description: 'Your session may have expired. Please log in again.' });
+                }
+            } catch (e) { /* Ignore if body is not JSON */ }
             return { ok: false, error: errorDetails, stderr: errorDetails, structured_data: null };
         }
         
-        const result = await response.json();
-        return result;
+        return await response.json();
 
     } catch (err: any) {
         return { ok: false, error: `Client-side error: ${err.message}` };
     }
-  }, [device, toast, user]);
-
-  const handleReAuth = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!user) return;
-
-    const formData = new FormData(event.currentTarget);
-    const password = formData.get('password') as string;
-    
-    // Use the login function from useAuth to validate and store the password
-    const { success, error } = await login(user.email, password);
-
-    if (success) {
-        toast({ title: "Authenticated", description: "Credentials refreshed successfully." });
-        setReAuthDialogOpen(false);
-        if (pendingAction) {
-            await pendingAction();
-            setPendingAction(null);
-        }
-    } else {
-        toast({ variant: "destructive", title: "Authentication Failed", description: error || "Please check your password." });
-    }
-  };
+  }, [device, toast]);
 
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device) return;
@@ -1633,27 +1586,6 @@ export default function DeviceActionsPanel({
       </SheetContent>
     </Sheet>
 
-    <AlertDialog open={reAuthDialogOpen} onOpenChange={setReAuthDialogOpen}>
-        <form onSubmit={handleReAuth}>
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Authentication Required</AlertDialogTitle>
-                    <AlertDialogDescription>
-                        Your session password is missing. Please enter your password to continue.
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <div className="py-4">
-                    <Label htmlFor="password">Password</Label>
-                    <Input id="password" name="password" type="password" required autoFocus />
-                </div>
-                <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction type="submit">Authenticate</AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </form>
-    </AlertDialog>
-
     {/* Generic Dialog for showing command outputs */}
     <CommandOutputDialog 
         state={dialogState}
@@ -1695,6 +1627,8 @@ export default function DeviceActionsPanel({
 }
 
     
+
+
 
 
 

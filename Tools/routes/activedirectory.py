@@ -121,7 +121,7 @@ def _get_ad_computers_data():
             elif isinstance(last_logon_timestamp, (int, float)) and int(last_logon_timestamp) > 0:
                 try:
                     # Value is in 100-nanosecond intervals since Jan 1, 1601
-                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + timezone.timedelta(microseconds=int(last_logon_timestamp) / 10)
+                    last_logon_dt = datetime(1601, 1, 1, tzinfo=timezone.utc) + datetime.timedelta(microseconds=int(last_logon_timestamp) / 10)
                 except Exception:
                     last_logon_dt = None # Reset on error
             
