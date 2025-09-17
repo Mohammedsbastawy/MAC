@@ -773,15 +773,27 @@ def api_clean_temp_files():
 
     logger.info(f"Attempting to clean temporary files on {ip}.")
 
-    # This PowerShell command attempts to delete files and folders in common temp locations.
-    # -Recurse: Deletes subdirectories and files.
-    # -Force: Attempts to delete read-only files.
-    # -ErrorAction SilentlyContinue: If a file is in use or can't be deleted, it skips it and continues.
+    # This PowerShell command gets all user profiles, then cleans their temp folders,
+    # as well as the system-wide Temp and Prefetch folders.
     ps_command = """
-    Get-ChildItem -Path $env:SystemRoot\\Temp, $env:TEMP, $env:SystemRoot\\Prefetch -Recurse -ErrorAction SilentlyContinue | 
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "Temporary file cleanup command sent to specified locations (C:\\Windows\\Temp, %TEMP%, C:\\Windows\\Prefetch)."
-    Write-Host "Files that were in use may not have been deleted."
+    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile;
+    foreach ($profile in $userProfiles) {
+        $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp";
+        if (Test-Path -Path $tempPath) {
+            Write-Host "Cleaning user temp folder: $tempPath";
+            Get-ChildItem -Path $tempPath -Recurse -Force -ErrorAction SilentlyContinue | 
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
+        }
+    }
+    
+    Write-Host "Cleaning system temp folder: $env:SystemRoot\\Temp";
+    Get-ChildItem -Path $env:SystemRoot\\Temp -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
+
+    Write-Host "Cleaning prefetch folder: $env:SystemRoot\\Prefetch";
+    Get-ChildItem -Path $env:SystemRoot\\Prefetch -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue;
+
+    Write-Host "Temporary file cleanup command sent to all specified locations.";
+    Write-Host "Files that were in use may not have been deleted, which is normal.";
     """
     
     cmd_args = ["powershell.exe", "-Command", ps_command]
@@ -810,5 +822,6 @@ def api_clean_temp_files():
 
 
     
+
 
 
