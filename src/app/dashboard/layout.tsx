@@ -3,7 +3,7 @@
 
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarMenuItem, SidebarMenuButton, SidebarProvider, useSidebar, SidebarHeader, SidebarSub, SidebarSubTrigger, SidebarSubContent } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarMenuItem, SidebarMenuButton, SidebarProvider, useSidebar, SidebarHeader, SidebarSub, SidebarSubTrigger, SidebarSubContent, SidebarMenu } from "@/components/ui/sidebar";
 import { Globe, Users, NotebookText, HelpCircle, Settings, File, Briefcase, Monitor } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
