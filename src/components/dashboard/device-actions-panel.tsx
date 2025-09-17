@@ -930,35 +930,61 @@ const PsLoggedOnResult: React.FC<{ data: LoggedOnUser[], onLogoff: (sessionId: s
     </Card>
 );
 
-const CleaningProgress: React.FC<{ progress: number, isFinished: boolean, freedMb: number | null }> = ({ progress, isFinished, freedMb }) => {
-    return (
-        <div className="flex flex-col items-center justify-center text-center p-8 space-y-4">
-            {!isFinished ? (
-                <>
-                    <div className="relative h-24 w-24">
-                        <Trash2 className="h-24 w-24 text-primary animate-pulse" />
-                    </div>
-                    <h3 className="text-lg font-semibold">Cleaning in Progress...</h3>
-                    <p className="text-sm text-muted-foreground">Please wait while temporary files are being deleted.</p>
-                    <Progress value={progress} className="w-full" />
-                </>
-            ) : (
-                <>
-                     <div className="relative h-24 w-24">
-                        <Sparkles className="h-16 w-16 text-yellow-400 absolute -top-4 -left-4 animate-ping opacity-75" />
-                        <Sparkles className="h-10 w-10 text-yellow-400 absolute -bottom-2 -right-2 animate-ping" />
-                        <CheckCircle2 className="h-24 w-24 text-green-500" />
-                    </div>
-                    <h3 className="text-lg font-semibold">Cleanup Complete!</h3>
-                    {freedMb !== null && (
-                         <p className="text-sm text-muted-foreground">
-                            Successfully freed approximately <strong className="text-foreground">{freedMb.toFixed(2)} MB</strong> of space.
-                        </p>
-                    )}
-                </>
-            )}
-        </div>
-    )
+const CleaningDialogContent: React.FC<{
+    isCleaning: boolean,
+    cleaningProgress: number,
+    freedMb: number | null,
+    error: string | null
+}> = ({ isCleaning, cleaningProgress, freedMb, error }) => {
+    
+    if (isCleaning) {
+        return (
+            <div className="flex flex-col items-center justify-center text-center p-8 space-y-4">
+                <div className="relative h-24 w-24">
+                    <Trash2 className="h-24 w-24 text-primary animate-pulse" />
+                </div>
+                <h3 className="text-lg font-semibold">Cleaning in Progress...</h3>
+                <p className="text-sm text-muted-foreground">Please wait while temporary files are being deleted.</p>
+                <Progress value={cleaningProgress} className="w-full" />
+            </div>
+        );
+    }
+    
+    if (error) {
+        return (
+            <div className="p-4 space-y-4">
+                 <div className="flex flex-col items-center justify-center text-center space-y-2">
+                    <XCircle className="h-24 w-24 text-destructive" />
+                    <h3 className="text-lg font-semibold">Cleanup Failed</h3>
+                </div>
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Error Details</AlertTitle>
+                    <AlertDescription>
+                        <pre className="whitespace-pre-wrap font-mono text-xs">{error}</pre>
+                    </AlertDescription>
+                </Alert>
+            </div>
+        );
+    }
+    
+    if (freedMb !== null) {
+        return (
+            <div className="flex flex-col items-center justify-center text-center p-8 space-y-4">
+                <div className="relative h-24 w-24">
+                    <Sparkles className="h-16 w-16 text-yellow-400 absolute -top-4 -left-4 animate-ping opacity-75" />
+                    <Sparkles className="h-10 w-10 text-yellow-400 absolute -bottom-2 -right-2 animate-ping" />
+                    <CheckCircle2 className="h-24 w-24 text-green-500" />
+                </div>
+                <h3 className="text-lg font-semibold">Cleanup Complete!</h3>
+                <p className="text-sm text-muted-foreground">
+                    Successfully freed approximately <strong className="text-foreground">{freedMb.toFixed(2)} MB</strong> of space.
+                </p>
+            </div>
+        );
+    }
+
+    return null; // Should not happen
 };
 
 
@@ -989,7 +1015,7 @@ const CommandOutputDialog: React.FC<{
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
     const isLoggedOnView = state.structuredData?.psloggedon && Array.isArray(state.structuredData.psloggedon);
-    const isCleanTempView = isCleaning || state.structuredData?.cleanTemp !== undefined;
+    const isCleanTempView = state.title === "Clean Temporary Files";
     
     const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !isCleanTempView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
@@ -998,20 +1024,21 @@ const CommandOutputDialog: React.FC<{
         <AlertDialogContent className={cn(
             "max-w-2xl",
             (isBrowseView || isProcessView || isInfoView || isLoggedOnView) && "max-w-4xl",
-            isHackerTheme && !isCleanTempView && "bg-black text-green-400 border-green-500/50 font-mono"
+            isHackerTheme && "bg-black text-green-400 border-green-500/50 font-mono"
         )}>
             <AlertDialogHeader>
-                <AlertDialogTitle className={cn(isHackerTheme && !isCleanTempView && "text-green-400")}>{state.title}</AlertDialogTitle>
-                <AlertDialogDescription className={cn(isHackerTheme && !isCleanTempView && "text-green-400/80")}>
+                <AlertDialogTitle className={cn(isHackerTheme && "text-green-400")}>{state.title}</AlertDialogTitle>
+                <AlertDialogDescription className={cn(isHackerTheme && "text-green-400/80")}>
                     {state.description}
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
                 {isCleanTempView ? (
-                    <CleaningProgress
-                        progress={cleaningProgress ?? 0}
-                        isFinished={!isCleaning}
+                    <CleaningDialogContent
+                        isCleaning={isCleaning ?? false}
+                        cleaningProgress={cleaningProgress ?? 0}
                         freedMb={state.structuredData?.cleanTemp?.freedMb ?? null}
+                        error={state.error || null}
                     />
                 ) : (
                     <>
@@ -1056,36 +1083,24 @@ const CommandOutputDialog: React.FC<{
                                 />
                             </div>
                         )}
+                        {isHackerTheme && state.error && (
+                             <div>
+                                <Label className={"text-red-400"}>C:\&gt; Error</Label>
+                                <Textarea 
+                                    readOnly 
+                                    value={state.error} 
+                                    className={"mt-1 h-32 font-mono text-xs bg-black text-red-400 border-red-500/30 focus-visible:ring-red-500"}
+                                />
+                            </div>
+                        )}
                     </>
-                )}
-
-
-                {state.error && (
-                     <div>
-                        <Label className={cn(isHackerTheme ? "text-red-400" : "text-destructive")}>C:\&gt; Error</Label>
-                        <Textarea 
-                            readOnly 
-                            value={state.error} 
-                            className={cn(
-                                "mt-1 h-32 font-mono text-xs", 
-                                isHackerTheme ? "bg-black text-red-400 border-red-500/30 focus-visible:ring-red-500" : "bg-destructive/10 text-destructive"
-                            )}
-                        />
-                    </div>
-                )}
-                 {state.error && isCleanTempView && (
-                     <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertTitle>Cleanup Failed</AlertTitle>
-                        <AlertDescription>{state.error}</AlertDescription>
-                    </Alert>
                 )}
             </div>
             <AlertDialogFooter>
                 <AlertDialogClose asChild>
                     <Button 
                         variant="outline"
-                        className={cn(isHackerTheme && !isCleanTempView && "text-green-400 border-green-500/50 hover:bg-green-900/50 hover:text-green-300")}>
+                        className={cn(isHackerTheme && "text-green-400 border-green-500/50 hover:bg-green-900/50 hover:text-green-300")}>
                         Close
                     </Button>
                 </AlertDialogClose>
@@ -1378,32 +1393,23 @@ export default function DeviceActionsPanel({
         description: `Running cleanup on ${device.name}...`,
         output: '',
         error: '',
-        structuredData: { cleanTemp: null }, // Initialize with cleanTemp
+        structuredData: { cleanTemp: null },
     });
 
     const progressInterval = setInterval(() => {
         setCleaningProgress(prev => (prev < 90 ? prev + 10 : 90));
-    }, 1000);
+    }, 500);
 
     const result = await runApiAction('clean-temp-files', {}, false);
     clearInterval(progressInterval);
     setCleaningProgress(100);
-    
 
-    if (result && result.ok && result.structured_data) {
-         setDialogState(prev => ({
-            ...prev,
-            error: '',
-            structuredData: { ...prev.structuredData, cleanTemp: result.structured_data.cleanTemp },
-        }));
-    } else {
-         setDialogState(prev => ({
-            ...prev,
-            error: result?.error || 'An unknown error occurred during cleanup.',
-            structuredData: { ...prev.structuredData, cleanTemp: null }
-        }));
-    }
-    // This needs to be delayed slightly to allow the final state to render
+    setDialogState(prev => ({
+        ...prev,
+        error: result?.ok ? '' : result?.error || result?.stderr || 'An unknown error occurred during cleanup.',
+        structuredData: result?.ok ? { ...prev.structuredData, cleanTemp: result.structured_data.cleanTemp } : null,
+    }));
+    
     setTimeout(() => setIsCleaning(false), 500);
   };
 

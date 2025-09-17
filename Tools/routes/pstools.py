@@ -773,13 +773,16 @@ def api_clean_temp_files():
 
     logger.info(f"Attempting to clean temporary files on {ip}.")
 
-    # This new PowerShell script is more robust.
-    # It gathers all paths, gets the size, deletes, gets the size again, and calculates the difference.
+    # This new PowerShell script is more robust and returns structured data.
     ps_command = """
+    $ErrorActionPreference = 'SilentlyContinue'
+    $global:Error.Clear()
+
     $pathsToClean = @(
         "$env:SystemRoot\\Temp",
         "$env:SystemRoot\\Prefetch"
     )
+
     $userProfiles = Get-CimInstance -ClassName Win32_UserProfile | Where-Object { $_.LocalPath -notlike "*\\Windows" -and $_.LocalPath -notlike "*\\system32*"}
     foreach ($profile in $userProfiles) {
         $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp"
@@ -788,12 +791,13 @@ def api_clean_temp_files():
         }
     }
 
-    $ErrorActionPreference = 'SilentlyContinue'
-    
     function Get-DirectorySize($path) {
         $size = 0
         if (Test-Path $path) {
-            $size = (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+            $items = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
+            if ($items) {
+                $size = ($items | Measure-Object -Property Length -Sum).Sum
+            }
         }
         return [long]$size
     }
@@ -805,6 +809,7 @@ def api_clean_temp_files():
 
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
+            # Delete items inside the folder, but not the folder itself
             Remove-Item -Path "$path\\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
@@ -816,12 +821,18 @@ def api_clean_temp_files():
 
     $freedBytes = $totalSizeBefore - $totalSizeAfter
     if ($freedBytes -lt 0) { $freedBytes = 0 }
-
+    
     $result = @{
         freedMb = [math]::Round($freedBytes / 1MB, 2)
     }
+
+    # If there were errors, add them to the output
+    if ($global:Error.Count -gt 0) {
+        $errorMessages = $global:Error | ForEach-Object { $_.ToString() }
+        $result.errors = $errorMessages
+    }
     
-    return $result | ConvertTo-Json
+    return $result | ConvertTo-Json -Depth 3
     """
     
     cmd_args = ["powershell.exe", "-Command", ps_command]
@@ -829,15 +840,21 @@ def api_clean_temp_files():
 
     if rc == 0 and out:
         try:
-            # The output is expected to be JSON
-            structured_data = {"cleanTemp": json.loads(out)}
+            parsed_out = json.loads(out)
+            # If the script itself captured errors, add them to the stderr for the frontend to see.
+            if 'errors' in parsed_out:
+                script_errors = "\\n".join(parsed_out['errors'])
+                err = (err + "\\n" if err else "") + "PowerShell Script Errors:\\n" + script_errors
+
+            structured_data = {"cleanTemp": parsed_out}
+            # If we have errors, we should still return them even if the script "succeeded" (RC=0)
             return json_result(rc, out, err, structured_data)
         except json.JSONDecodeError:
             err = f"Failed to parse JSON from cleanup script: {out}"
             return json_result(1, out, err)
-    else:
-        # If the script fails, still return an error in the expected format
-        return json_result(rc, out, err, {"cleanTemp": None})
+    
+    # If the script fails (non-zero RC), return the error.
+    return json_result(rc, out, err, {"cleanTemp": None})
         
 
 
@@ -854,6 +871,7 @@ def api_clean_temp_files():
 
 
     
+
 
 
 
