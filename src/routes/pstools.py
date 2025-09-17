@@ -1,5 +1,4 @@
 
-
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -769,3 +768,4 @@ def api_clean_temp_files():
             return json_result(1, out, err)
     else:
         return json_result(rc, out, err)
+
