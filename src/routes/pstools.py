@@ -38,10 +38,10 @@ def json_result(rc, out, err, structured_data=None, extra_data={}):
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 def get_auth_from_request(data):
-    """Safely gets auth credentials from request JSON or falls back to session."""
-    user = data.get("username") if data else session.get("user")
-    domain = data.get("domain") if data else session.get("domain")
-    pwd = data.get("password") if data else session.get("password")
+    """Safely gets auth credentials from request JSON."""
+    user = data.get("username")
+    domain = data.get("domain")
+    pwd = data.get("password")
     
     if not user or not pwd:
         return None, None, None, None
@@ -52,22 +52,21 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    # Special handling for endpoints that might not have a body and rely on session
-    endpoints_without_body = ['pstools.api_deploy_agent', 'pstools.api_enable_snmp', 'pstools.api_enable_winrm', 'pstools.api_enable_prereqs']
-    if request.endpoint in endpoints_without_body:
-        if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return  # Proceed with session auth
+    """
+    Strictly enforces that every request to a pstools endpoint has valid
+    authentication data in its JSON body.
+    """
+    if request.method == 'OPTIONS':
+        return
 
-    # For all other endpoints, try to get JSON, but fall back to session if no JSON body exists
     data = request.get_json(silent=True)
     if data is None:
-        if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Request is missing a body, and no active session was found.'}), 401
-        return # Proceed with session auth
+        logger.warning(f"Auth failed for {request.endpoint}: Request body is missing or not JSON.")
+        return jsonify({'ok': False, 'error': 'Authentication required. Request must contain a JSON body with credentials.'}), 401
         
-    user, _, _, _ = get_auth_from_request(data)
-    if not user:
+    user, _, pwd, _ = get_auth_from_request(data)
+    if not user or not pwd:
+        logger.warning(f"Auth failed for {request.endpoint}: Username or password missing in request body.")
         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
 
@@ -493,7 +492,7 @@ def create_folder():
 
 @pstools_bp.route('/enable-winrm', methods=['POST'])
 def api_enable_winrm():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json() or {}
     ip = data.get("ip")
     user, domain, pwd, _ = get_auth_from_request(data)
 
@@ -529,7 +528,7 @@ def api_enable_winrm():
 
 @pstools_bp.route('/enable-prereqs', methods=['POST'])
 def api_enable_prereqs():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json() or {}
     ip = data.get("ip")
     user, domain, pwd, _ = get_auth_from_request(data)
 
@@ -593,17 +592,14 @@ def api_set_network_private():
 
 @pstools_bp.route('/deploy-agent', methods=['POST'])
 def api_deploy_agent():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json() or {}
     ip = data.get("ip")
     device_name = data.get("name")
     
-    # Get auth from session, NOT from the request body for this endpoint
-    user = session.get("user")
-    domain = session.get("domain")
-    pwd = session.get("password")
+    user, domain, pwd, _ = get_auth_from_request(data)
 
-    if not all([ip, device_name, user, domain, pwd]):
-        return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
+    if not all([ip, device_name]):
+        return jsonify({"ok": False, "error": "Target IP and Device Name are required."}), 400
 
     logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
     
@@ -708,4 +704,7 @@ def api_enable_snmp():
 
     
 
+
+
+    
 

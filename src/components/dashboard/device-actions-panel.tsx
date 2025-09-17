@@ -1146,6 +1146,7 @@ export default function DeviceActionsPanel({
   onClose,
 }: DeviceActionsPanelProps) {
   const { toast } = useToast();
+  const { user, password } = useAuth();
   const [dialogState, setDialogState] = React.useState<DialogState>({
       isOpen: false,
       title: "",
@@ -1169,20 +1170,26 @@ export default function DeviceActionsPanel({
   const [diagnosticsState, setDiagnosticsState] = React.useState<WinRMDiagnosticsState>(initialDiagnosticsState);
   
   const runApiAction = React.useCallback(async (endpoint: string, params: Record<string, any> = {}, showToast = true) => {
-      if (!device) return null;
+      if (!device || !user || !password) {
+        return { ok: false, error: "Authentication details are missing. Please log in again.", stderr: "Authentication details are missing. Please log in again.", structured_data: null };
+      }
 
       if (showToast) {
           toast({ title: "Sending Command...", description: `Requesting ${endpoint} on ${device.name}` });
       }
 
       try {
+          const body = {
+              ip: device.ipAddress,
+              username: user.user,
+              domain: user.domain,
+              password: password,
+              ...params,
+          };
           const response = await fetch(`/api/pstools/${endpoint}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  ip: device.ipAddress,
-                  ...params,
-              }),
+              body: JSON.stringify(body),
           });
 
           if (!response.ok) {
@@ -1202,7 +1209,7 @@ export default function DeviceActionsPanel({
       } catch (err: any) {
           return { ok: false, error: `Client-side error: ${err.message}` };
       }
-  }, [device, toast]);
+  }, [device, toast, user, password]);
   
   const runWinRMDiagnostics = React.useCallback(async () => {
     if (!device) return;
@@ -1403,7 +1410,7 @@ export default function DeviceActionsPanel({
             await new Promise(resolve => setTimeout(resolve, 5000));
             await runWinRMDiagnostics();
         } else {
-            toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.details || result?.error });
+            toast({ variant: "destructive", title: "Failed to Enable WinRM", description: result?.error || 'An unknown error occurred.' });
         }
         setIsEnablingWinRM(false);
     };
@@ -1418,7 +1425,7 @@ export default function DeviceActionsPanel({
         if (result?.ok) {
             toast({ title: "Commands Sent Successfully", description: "Prerequisites for RPC/WMI access have been configured. Please wait a moment before retrying." });
         } else {
-            toast({ variant: "destructive", title: "Failed to Enable Prerequisites", description: result?.details || result?.error });
+            toast({ variant: "destructive", title: "Failed to Enable Prerequisites", description: result?.error || 'An unknown error occurred.' });
         }
         setIsEnablingPrereqs(false);
     };
@@ -1628,6 +1635,7 @@ export default function DeviceActionsPanel({
 }
 
     
+
 
 
 
