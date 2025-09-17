@@ -1,4 +1,5 @@
 
+
 # كود فحص الشبكة (ARP Scan, Ping Sweep, ...)
 import os
 import ipaddress
@@ -563,29 +564,26 @@ def get_historical_data():
 def fetch_live_data():
     """
     Fetches the latest performance data directly from the agent file on a remote device.
+    This acts as a proxy to the internal psinfo function.
     """
     data = request.get_json() or {}
-    device_id = data.get("id")
     device_ip = data.get("ip")
-
+    device_id = data.get("id") # DN
+    
     if not device_id or not device_ip:
         return jsonify({"ok": False, "error": "Device ID (DN) and IP address are required."}), 400
 
     try:
         device_name = device_id.split(',')[0].split('=')[1]
-        
-        from Tools.routes.pstools import api_psinfo_internal
-        # Pass the IP address directly to the internal function
-        live_data_response = api_psinfo_internal(ip=device_ip, name=device_name)
-
-        return live_data_response
-
     except IndexError:
         logger.warning(f"Could not parse device name from DN: {device_id}")
         return jsonify({"ok": False, "error": "Invalid Device ID format."}), 400
-    except Exception as e:
-        logger.error(f"Unexpected error in fetch_live_data for {device_id}: {e}", exc_info=True)
-        return jsonify({"ok": False, "error": "An unexpected server error occurred."}), 500
+    
+    from Tools.routes.pstools import api_psinfo_internal
+    
+    # Directly call the internal function, passing the explicit IP and name.
+    # This bypasses any further JSON parsing and ensures the correct target is used.
+    return api_psinfo_internal(ip=device_ip, name=device_name)
         
 @network_bp.route('/api/network/get-snmp-traps', methods=['GET'])
 def get_snmp_traps_data():
@@ -595,3 +593,5 @@ def get_snmp_traps_data():
     logger.info("Received request for /api/network/get-snmp-traps.")
     traps = get_current_traps()
     return jsonify({"ok": True, "traps": traps}), 200
+
+    

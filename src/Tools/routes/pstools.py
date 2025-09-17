@@ -14,7 +14,7 @@ from .activedirectory import get_ldap_connection
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-LOG_RETENTION_HOURS = 24
+LOG_RETENTION_HOURS_RAW = 24
 
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
@@ -216,24 +216,21 @@ def api_psloglist():
 
 def api_psinfo_internal(ip=None, name=None):
     """
-    Internal function to fetch agent data.
-    It reads the performance data JSON file from the remote host.
-    This version is designed to be called internally and takes explicit params.
+    Internal function to fetch agent data by reading the performance JSON file from the remote host.
+    This function must be called with an explicit ip and name, and it relies on the session for auth.
     """
     if not ip or not name:
-        logger.error("Internal call to api_psinfo_internal missing ip or name.")
-        # This returns a Flask response, so it's a valid return path
-        return jsonify({"ok": False, "error": "IP address and device name are required."}), 400
+        return jsonify({"ok": False, "error": "Internal Server Error: IP address and device name are required for api_psinfo_internal."}), 500
 
-    # For internal calls, authentication must come from the session.
+    # Authentication must come from the session.
     user = session.get("user")
     domain = session.get("domain")
     pwd = session.get("password")
-    
-    if not user or not domain or not pwd:
-        logger.error(f"Authentication missing in session for internal call to {name}.")
-        return jsonify({"ok": False, "error": "Authentication required to fetch agent data."}), 401
 
+    if not all([user, domain, pwd]):
+        logger.error(f"Authentication missing in session for internal call to '{name}' on IP '{ip}'.")
+        return jsonify({"ok": False, "error": "Authentication required to fetch agent data."}), 401
+    
     winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     logger.info(f"Reading performance data for '{name}' from agent file on {ip}.")
@@ -241,6 +238,7 @@ def api_psinfo_internal(ip=None, name=None):
     remote_file_path = f"C:\\Atlas\\{name}.json"
     ps_command = f"Get-Content -Path '{remote_file_path}' -Raw"
 
+    # Use a longer timeout to ensure the agent has time to collect data
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=30)
     
     if rc != 0:
@@ -250,29 +248,66 @@ def api_psinfo_internal(ip=None, name=None):
     try:
         perf_data = json.loads(out)
         
-        # OMITTING a portion of the code that saves historical data to simplify.
-        # This part of the code is not directly relevant to the user's current request.
+        # Save historical data
+        log_file = os.path.join(LOGS_DIR, f"{name}.json")
+        history = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+            except (IOError, json.JSONDecodeError):
+                history = []
+        
+        current_timestamp_str = perf_data.get("timestamp")
+        if current_timestamp_str:
+            current_timestamp = datetime.datetime.fromisoformat(current_timestamp_str.replace('Z', '+00:00'))
+
+            if not history or datetime.datetime.fromisoformat(history[-1]["timestamp"].replace('Z', '+00:00')) != current_timestamp:
+                history.append({
+                    "timestamp": perf_data.get("timestamp"),
+                    "cpuUsage": perf_data.get("cpuUsage"),
+                    "usedMemoryGB": perf_data.get("usedMemoryGB")
+                })
+
+                # Prune old data
+                retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS_RAW)
+                now_utc = datetime.datetime.now(datetime.timezone.utc)
+                
+                def parse_iso_with_timezone(ts_str):
+                    dt = datetime.datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                    return dt.replace(tzinfo=datetime.timezone.utc) if dt.tzinfo is None else dt
+
+                history = [
+                    entry for entry in history
+                    if "timestamp" in entry and (now_utc - parse_iso_with_timezone(entry["timestamp"])) < retention_delta
+                ]
+                
+                try:
+                    os.makedirs(LOGS_DIR, exist_ok=True)
+                    with open(log_file, 'w') as f:
+                        json.dump(history, f)
+                except IOError as e:
+                    logger.error(f"Failed to write history log for {name}: {e}")
 
         # Return live data directly
         return jsonify({"ok": True, "liveData": perf_data})
 
     except (json.JSONDecodeError, KeyError) as e:
         logger.error(f"Error decoding JSON from agent file for {name}: {e}. Raw data: {out}")
-        return jsonify({"ok": False, "error": f"Failed to parse data file from agent. File may be corrupted or malformed.", "details": out}), 500
+        return jsonify({"ok": False, "error": "Failed to parse data file from agent.", "details": out}), 500
     except Exception as e:
         logger.error(f"Unexpected error processing agent data for {name}: {e}", exc_info=True)
-        return jsonify({"ok": False, "error": f"An unexpected error occurred while processing agent data for {name}."}), 500
+        return jsonify({"ok": False, "error": "An unexpected error occurred."}), 500
 
 @pstools_bp.route('/psinfo', methods=['POST'])
 def api_psinfo():
     """
-    Public endpoint for psinfo. It now acts as a wrapper for the internal function,
-    ensuring consistent logic whether called publicly or internally.
+    Public endpoint for psinfo. This is now a wrapper that gets params from the request body
+    and passes them to the internal function. This is mainly for legacy/direct calls.
+    The main monitoring flow should use /api/network/fetch-live-data.
     """
     data = request.get_json() or {}
-    ip = data.get("ip")
-    name = data.get("name")
-    return api_psinfo_internal(ip=ip, name=name)
+    return api_psinfo_internal(ip=data.get("ip"), name=data.get("name"))
 
 
 @pstools_bp.route('/psloggedon', methods=['POST'])
@@ -649,6 +684,7 @@ def api_deploy_agent():
     ip = data.get("ip")
     device_name = data.get("name")
     
+    # Get auth from session, NOT from the request body for this endpoint
     user = session.get("user")
     domain = session.get("domain")
     pwd = session.get("password")
@@ -759,3 +795,6 @@ def api_enable_snmp():
 
     
 
+
+
+    

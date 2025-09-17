@@ -16,33 +16,65 @@ import type { PerformanceData } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const GaugeCard: React.FC<{
-    icon: React.ElementType,
-    title: string,
-    value: string | number,
-    unit: string,
-    description: string,
-}> = ({ icon: Icon, title, value, unit, description }) => (
-    <Card>
+
+const ChartCard: React.FC<{
+    title: string;
+    description: string;
+    data: any[];
+    dataKey: string;
+    unit: string;
+    icon: React.ElementType;
+}> = ({ title, description, data, dataKey, unit, icon: Icon }) => (
+    <Card className="col-span-1 lg:col-span-2">
         <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-muted-foreground font-medium">
-                <Icon className="h-5 w-5" />
+            <CardTitle className="flex items-center gap-2">
+                <Icon className="h-5 w-5 text-muted-foreground" />
                 {title}
             </CardTitle>
+            <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
-            <div className="flex items-baseline gap-2">
-                <p className="text-6xl font-bold tracking-tight">{value}</p>
-                <span className="text-2xl text-muted-foreground">{unit}</span>
+            <div className="h-64 w-full">
+                <ResponsiveContainer>
+                    <AreaChart data={data}>
+                        <defs>
+                            <linearGradient id={`color${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
+                                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                            </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                            dataKey="timestamp" 
+                            tickFormatter={(timeStr) => new Date(timeStr).toLocaleTimeString()}
+                            fontSize={12}
+                        />
+                        <YAxis unit={unit} fontSize={12} />
+                        <Tooltip 
+                            contentStyle={{ 
+                                backgroundColor: 'hsl(var(--background))', 
+                                border: '1px solid hsl(var(--border))'
+                            }}
+                            labelFormatter={(label) => new Date(label).toLocaleString()}
+                        />
+                        <Area 
+                            type="monotone" 
+                            dataKey={dataKey} 
+                            stroke="hsl(var(--primary))" 
+                            fillOpacity={1} 
+                            fill={`url(#color${dataKey})`} 
+                        />
+                    </AreaChart>
+                </ResponsiveContainer>
             </div>
-            <p className="text-sm text-muted-foreground mt-2">{description}</p>
         </CardContent>
     </Card>
 );
 
-
 const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
+  const [history, setHistory] = React.useState<PerformanceData[]>([]);
   const [liveData, setLiveData] = React.useState<PerformanceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -51,17 +83,9 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 
   const deviceId = decodeURIComponent(params.id);
 
-  const fetchLiveData = React.useCallback(async (isInitialLoad = false) => {
-    if(isInitialLoad) setIsLoading(true);
+  const fetchLiveData = React.useCallback(async () => {
     setError(null);
-    
-    if (!deviceInfo.ip) {
-        if(isInitialLoad) {
-            setError("Could not determine the IP address for this device. Please go back and select the device again.");
-            setIsLoading(false);
-        }
-        return;
-    }
+    if (!deviceInfo.ip) return;
 
     try {
         const res = await fetch("/api/network/fetch-live-data", {
@@ -72,10 +96,16 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         const data = await res.json();
 
         if(data.ok && data.liveData) {
-            setLiveData({
+            const newPoint = {
                 ...data.liveData,
                 cpuUsage: parseFloat(data.liveData.cpuUsage?.toFixed(2) || 0),
                 usedMemoryGB: parseFloat(data.liveData.usedMemoryGB?.toFixed(2) || 0),
+            };
+            setLiveData(newPoint);
+            setHistory(prev => {
+                const newHistory = [...prev, newPoint];
+                // Keep only the last ~24h of data (assuming 1-minute intervals)
+                return newHistory.slice(-1440);
             });
              setError(null);
         } else {
@@ -83,25 +113,50 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         }
     } catch (err) {
         setError("An error occurred while fetching live data from the server.");
-    } finally {
-        if(isInitialLoad) setIsLoading(false);
     }
   }, [deviceId, deviceInfo.ip]);
 
+  const fetchInitialData = React.useCallback(async (ip: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/network/get-historical-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: deviceId }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setHistory(data.history);
+        if (data.history.length > 0) {
+            setLiveData(data.history[data.history.length - 1]);
+        } else {
+            // If no history, fetch live data immediately
+            fetchLiveData();
+        }
+      } else {
+        throw new Error(data.error || "Failed to fetch historical data.");
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [deviceId, fetchLiveData]);
 
   // Effect to get device name and IP on initial load
   React.useEffect(() => {
-    // Fetch the full device list to find the IP of the current device.
     const findDeviceIp = async () => {
         try {
             const response = await fetch("/api/ad/get-computers", { method: "POST" });
             const data = await response.json();
             if (data.ok) {
                 const foundDevice = data.computers.find((d: any) => d.dn === deviceId);
-                if (foundDevice) {
+                if (foundDevice && foundDevice.dns_hostname) {
                     setDeviceInfo({ name: foundDevice.name, ip: foundDevice.dns_hostname });
+                    fetchInitialData(foundDevice.dns_hostname);
                 } else {
-                     setError("Device not found in Active Directory list.");
+                     setError("Device not found or has no IP address in Active Directory.");
                      setIsLoading(false);
                 }
             } else {
@@ -114,25 +169,19 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         }
     };
     findDeviceIp();
-  }, [deviceId]);
-
-  // Initial data fetch once IP is available
-  React.useEffect(() => {
-    if (deviceInfo.ip) {
-        fetchLiveData(true);
-    }
-  }, [deviceInfo.ip, fetchLiveData]); 
+  }, [deviceId, fetchInitialData]);
 
   // Set up the interval for auto-refresh
   React.useEffect(() => {
     if (!isLoading && isAutoRefresh && deviceInfo.ip) {
         const intervalId = setInterval(() => {
-            fetchLiveData(false);
+            fetchLiveData();
         }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
   }, [isAutoRefresh, isLoading, fetchLiveData, deviceInfo.ip]);
 
+  const latestData = history.length > 0 ? history[history.length-1] : null;
 
   return (
     <div className="space-y-6">
@@ -146,7 +195,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                         Live Monitoring
                     </h1>
                     <p className="text-muted-foreground">
-                        Real-time performance data for <span className="font-semibold text-primary">{deviceInfo.name || "Unknown Device"}</span>
+                        Real-time & historical performance data for <span className="font-semibold text-primary">{deviceInfo.name || "Unknown Device"}</span>
                     </p>
                 </div>
             </div>
@@ -164,7 +213,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
       {isLoading ? (
         <div className="flex items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="ml-2">Fetching live performance data...</p>
+          <p className="ml-2">Fetching performance data...</p>
         </div>
       ) : error ? (
         <Alert variant="destructive">
@@ -172,39 +221,41 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
-      ) : !liveData ? (
+      ) : history.length === 0 ? (
          <Alert>
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>No Data Available</AlertTitle>
-          <AlertDescription>Could not retrieve performance data for this device. Ensure the agent is deployed and the device is online.</AlertDescription>
+          <AlertDescription>Could not retrieve any performance data for this device. Ensure the agent is deployed and the device is online.</AlertDescription>
         </Alert>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            <GaugeCard
+            <ChartCard
                 icon={Cpu}
                 title="CPU Usage"
-                value={liveData.cpuUsage}
+                description={`Current: ${latestData?.cpuUsage?.toFixed(2) ?? 'N/A'}%`}
+                data={history}
+                dataKey="cpuUsage"
                 unit="%"
-                description={`Last updated: ${new Date(liveData.timestamp).toLocaleTimeString()}`}
             />
-            <GaugeCard
+             <ChartCard
                 icon={MemoryStick}
                 title="Used Memory"
-                value={liveData.usedMemoryGB}
+                description={`Current: ${latestData?.usedMemoryGB?.toFixed(2) ?? 'N/A'} MB / Total: ${latestData?.totalMemoryGB ?? 'N/A'} MB`}
+                data={history}
+                dataKey="usedMemoryGB"
                 unit="MB"
-                description={`Total: ${liveData.totalMemoryGB} MB`}
             />
-             <Card className="lg:col-span-1">
+             <Card className="md:col-span-2 lg:col-span-1">
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-muted-foreground font-medium">
+                    <CardTitle className="flex items-center gap-2">
                         Disk Usage
                     </CardTitle>
                      <CardDescription>
-                        Free space on local drives.
+                        Free space on local drives as of the last update.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {liveData.diskInfo.map(disk => (
+                    {latestData?.diskInfo.map(disk => (
                         <div key={disk.volume}>
                             <div className="flex justify-between items-center mb-1">
                                 <span className="text-sm font-medium">{disk.volume}</span>
@@ -227,3 +278,5 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 };
 
 export default DeviceDashboardPage;
+
+    
