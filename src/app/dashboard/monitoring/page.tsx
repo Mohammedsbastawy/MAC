@@ -65,15 +65,16 @@ import { useRouter } from "next/navigation";
 import { useDeviceContext } from "@/hooks/use-device-context";
 import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
 import { Progress } from "@/components/ui/progress";
+import { useAuth } from "@/hooks/use-auth";
 
 
 export default function MonitoringPage() {
+  const { user } = useAuth();
   const { 
     devices, 
     isLoading, 
     error,
     fetchAllDevices, 
-    fetchLiveData,
     isUpdating,
     updateProgress,
     checkAllAgentStatus,
@@ -104,22 +105,29 @@ export default function MonitoringPage() {
   };
 
   React.useEffect(() => {
-    // If devices are not loaded, fetch them.
-    if (devices.length === 0 && !isLoading) {
-      fetchAllDevices();
-    }
-    // If devices ARE loaded, but agent status has not been checked for any, check them.
-    else if (devices.length > 0 && devices.every(d => d.agentLastUpdate === null && !d.isAgentDeployed)) {
+    const loadData = async () => {
+      // First, fetch devices if they aren't loaded yet.
+      if (user && devices.length === 0 && !isLoading) {
+        await fetchAllDevices();
+      }
+    };
+    loadData();
+  }, [user, devices.length, isLoading, fetchAllDevices]);
+
+  // This effect runs AFTER the devices have been loaded.
+  React.useEffect(() => {
+      // If devices are loaded, but agent status has not been checked for any, check them.
+      if (user && devices.length > 0 && devices.every(d => d.agentLastUpdate === null && !d.isAgentDeployed)) {
         checkAllAgentStatus();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [devices.length, isLoading]);
+  }, [user, devices.length]); // Depends only on devices.length to run once after they load.
   
   const handleDeployAgent = async () => {
     if (!deploymentState.device) return;
     setIsDeploying(true);
     setShowDiagnosticsButton(false);
-    setDeploymentLog("Starting statics update...");
+    setDeploymentLog("Starting agent deployment script...");
 
     try {
         const res = await fetch("/api/pstools/deploy-agent", {
@@ -132,11 +140,11 @@ export default function MonitoringPage() {
         setDeploymentLog(prev => prev + `\n\n--- SERVER RESPONSE ---\n` + logOutput);
 
         if (data.ok) {
-            toast({ title: "Update Successful", description: `Statics script has been run on ${deploymentState.device.name}.`});
-            // Immediately fetch the new status for this device
-            fetchLiveData(deploymentState.device.id, deploymentState.device.ipAddress);
+            toast({ title: "Deployment Successful", description: `Atlas Agent script has been run on ${deploymentState.device.name}.`});
+            // Immediately re-check agent status for this device
+            await checkAllAgentStatus(); // Re-check all, simple way to update one
         } else {
-             toast({ variant: "destructive", title: "Update Failed", description: data.error || "An unknown error occurred."});
+             toast({ variant: "destructive", title: "Deployment Failed", description: data.error || "An unknown error occurred."});
              if (logOutput.includes("Couldn't access") || logOutput.includes("Connecting to") || logOutput.includes("transport error")) {
                 setShowDiagnosticsButton(true);
              }
@@ -246,7 +254,7 @@ export default function MonitoringPage() {
                                 </TableCell>
                                 <TableCell className="text-right">
                                      <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setShowDiagnosticsButton(false); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online' || isUpdating}>
-                                        <RefreshCw className="mr-2 h-4 w-4" /> Update Statics
+                                        <RefreshCw className="mr-2 h-4 w-4" /> Deploy Agent
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)} disabled={!device.isAgentDeployed || isUpdating}>
                                         View Dashboard <ChevronRight className="ml-2 h-4 w-4" />
@@ -269,9 +277,9 @@ export default function MonitoringPage() {
     <AlertDialog open={deploymentState.isOpen} onOpenChange={(open) => !open && setDeploymentState({isOpen: false, device: null})}>
         <AlertDialogContent className="max-w-2xl">
             <AlertDialogHeader>
-                <AlertDialogTitle>Update Statics for {deploymentState.device?.name}</AlertDialogTitle>
+                <AlertDialogTitle>Deploy Agent to {deploymentState.device?.name}</AlertDialogTitle>
                 <AlertDialogDescription>
-                    This will run the script on the target device to create/update the performance data file and ensure the scheduled task is running correctly.
+                    This will run the agent deployment script on the target device. This script copies necessary files and creates a scheduled task to collect performance data.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             
@@ -283,9 +291,9 @@ export default function MonitoringPage() {
             ) : (
                  <Alert className="my-4">
                     <ShieldCheck className="h-4 w-4" />
-                    <AlertTitle>Ready to Update</AlertTitle>
+                    <AlertTitle>Ready to Deploy</AlertTitle>
                     <AlertDescription>
-                        Click &quot;Run Now&quot; to begin the remote execution.
+                        Click &quot;Deploy Now&quot; to begin the remote execution.
                     </AlertDescription>
                 </Alert>
             )}
@@ -302,7 +310,7 @@ export default function MonitoringPage() {
                 <AlertDialogCancel>Close</AlertDialogCancel>
                 <AlertDialogAction onClick={handleDeployAgent} disabled={isDeploying}>
                     {isDeploying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Run Now
+                    Deploy Now
                 </AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>

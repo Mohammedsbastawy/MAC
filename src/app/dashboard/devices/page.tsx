@@ -30,7 +30,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Device, NetworkInterface, ADComputer } from "@/lib/types";
+import type { Device, NetworkInterface } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -42,14 +42,14 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import DeviceActionsPanel from "@/components/dashboard/device-actions-panel";
 import { useDeviceContext } from "@/hooks/use-device-context";
 import { Progress } from "@/components/ui/progress";
+import { useAuth } from "@/hooks/use-auth";
 
 
 const ICONS: Record<Device["type"], React.ElementType> = {
@@ -159,6 +159,7 @@ const DeviceList: React.FC<DeviceListProps & { devices: Device[], isLoading: boo
 
 
 export default function DevicesPage() {
+  const { user } = useAuth();
   const { 
     devices, 
     isLoading: isAdLoading, 
@@ -222,11 +223,11 @@ export default function DevicesPage() {
     };
     
     fetchInterfaceData();
-    if (devices.length === 0) {
+    if (user && devices.length === 0) {
       fetchAllDevices();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
   const handleRefreshStatus = async () => {
       const allIps = [...devices, ...workgroupDevices].map(d => d.ipAddress).filter(Boolean);
@@ -445,7 +446,7 @@ export default function DevicesPage() {
                 />
             </div>
             <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setErrorDialog({isOpen: false, title:'', content:''})}>Close</AlertDialogCancel>
+                <Button variant="secondary" onClick={() => setErrorDialog({isOpen: false, title:'', content:''})}>Close</Button>
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>

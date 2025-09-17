@@ -138,7 +138,6 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   
   // Effect for initial data load
   React.useEffect(() => {
-    // Only run if we have a device and its IP, and we are not already loading
     if (device?.ipAddress && isLoading) {
         fetchInitialData(deviceId, device.ipAddress);
     } else if (devices.length > 0 && !device) {
@@ -153,34 +152,27 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 
     const intervalId = setInterval(async () => {
         try {
-            const liveRes = await fetch("/api/network/fetch-live-data", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: deviceId, ip: device.ipAddress }),
-            });
-            const liveDataResult = await liveRes.json();
-            if (liveDataResult.ok && liveDataResult.liveData) {
-                const newPoint: PerformanceData = {
-                    ...liveDataResult.liveData,
-                    cpuUsage: parseFloat(liveDataResult.liveData.cpuUsage?.toFixed(2) || 0),
-                    usedMemoryGB: parseFloat(liveDataResult.liveData.usedMemoryGB?.toFixed(2) || 0),
-                };
-                setLiveData(newPoint);
-                // Also update history state to include the new point for the chart
-                setHistory(prev => {
-                     // Check if the new point is already in the history to avoid duplicates
-                    if (prev.some(p => p.timestamp === newPoint.timestamp)) {
-                        return prev;
-                    }
-                    const newHistory = [...prev, newPoint];
-                    const maxHistoryLength = (24 * 60 * 7) + 1; // 7 days of 1-minute intervals
-                    return newHistory.slice(-maxHistoryLength);
+            const liveDataResult = await fetchLiveData(deviceId, device.ipAddress);
+            if (liveDataResult) {
+                // If fetchLiveData was successful, it updated the context.
+                // Now we need to update the local state for the chart.
+                // We'll refetch history which now includes the latest point.
+                const historyRes = await fetch("/api/network/get-historical-data", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: deviceId }),
                 });
-                // Update the global context
-                fetchLiveData(deviceId, device.ipAddress);
+                const historyData = await historyRes.json();
+                if (historyData.ok) {
+                    setHistory(historyData.history);
+                    if (historyData.history.length > 0) {
+                      setLiveData(historyData.history[historyData.history.length-1]);
+                    }
+                }
             }
         } catch (e) {
             console.error("Background refresh failed:", e);
+            setIsAutoRefresh(false); // Stop refresh on error
         }
     }, 60000); // Refresh every 1 minute
     
