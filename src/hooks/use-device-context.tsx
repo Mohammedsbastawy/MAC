@@ -2,7 +2,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import type { Device, ADComputer } from '@/lib/types';
+import type { Device, ADComputer, PerformanceData } from '@/lib/types';
 import { useToast } from './use-toast';
 
 // Helper function from devices/page.tsx
@@ -44,6 +44,7 @@ interface DeviceContextType {
   fetchAllDevices: () => Promise<void>;
   fetchLiveData: (device: Device) => Promise<void>;
   refreshAllDeviceStatus: () => Promise<void>;
+  updateDeviceData: (deviceId: string, newData: Partial<Device>) => void;
 }
 
 const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
@@ -55,6 +56,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [error, setError] = useState<{ title: string; message: string; details?: string } | null>(null);
   const { toast } = useToast();
 
+  const updateDeviceData = (deviceId: string, newData: Partial<Device>) => {
+    setDevices(prev => prev.map(d => d.id === deviceId ? { ...d, ...newData } : d));
+  };
+
+
   const fetchLiveData = useCallback(async (deviceToUpdate: Device) => {
     try {
         const res = await fetch("/api/network/fetch-live-data", {
@@ -64,24 +70,18 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
         const data = await res.json();
         
-        setDevices(prev => prev.map(d => {
-            if (d.id === deviceToUpdate.id) {
-                if (data.ok && data.liveData) {
-                    return { ...d, isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp };
-                } else {
-                    return { ...d, isAgentDeployed: false, agentLastUpdate: null };
-                }
-            }
-            return d;
-        }));
+        if (data.ok && data.liveData) {
+            updateDeviceData(deviceToUpdate.id, { isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp });
+        } else {
+            updateDeviceData(deviceToUpdate.id, { isAgentDeployed: false, agentLastUpdate: null });
+        }
     } catch {
-        setDevices(prev => prev.map(d => 
-            d.id === deviceToUpdate.id ? { ...d, isAgentDeployed: false, agentLastUpdate: null } : d
-        ));
+        updateDeviceData(deviceToUpdate.id, { isAgentDeployed: false, agentLastUpdate: null });
     }
   }, []);
 
   const fetchAllDevices = useCallback(async () => {
+    if (isLoading) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -121,7 +121,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } finally {
       setIsLoading(false);
     }
-  }, [fetchLiveData]);
+  }, [fetchLiveData, isLoading]);
 
   const refreshAllDeviceStatus = useCallback(async () => {
     if (devices.length === 0) {
@@ -161,7 +161,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [devices, toast, fetchLiveData]);
 
   const contextValue = useMemo(() => ({
-    devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus
+    devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData
   }), [devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus]);
 
   return (

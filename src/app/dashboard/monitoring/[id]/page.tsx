@@ -1,5 +1,6 @@
 
 
+
 "use client"
 
 import * as React from "react";
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useDeviceContext } from "@/hooks/use-device-context";
 
 
 const ChartCard: React.FC<{
@@ -74,24 +76,26 @@ const ChartCard: React.FC<{
 );
 
 const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
+  const { devices, updateDeviceData } = useDeviceContext();
   const [history, setHistory] = React.useState<PerformanceData[]>([]);
   const [liveData, setLiveData] = React.useState<PerformanceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [deviceInfo, setDeviceInfo] = React.useState<{name: string, ip: string}>({name: '', ip: ''});
   const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
 
   const deviceId = decodeURIComponent(params.id);
+  
+  // Find the device from the global context
+  const device = React.useMemo(() => devices.find(d => d.id === deviceId), [devices, deviceId]);
 
   const fetchLiveData = React.useCallback(async () => {
-    setError(null);
-    if (!deviceInfo.ip) return;
+    if (!device?.ipAddress) return;
 
     try {
         const res = await fetch("/api/network/fetch-live-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: deviceId, ip: deviceInfo.ip }),
+            body: JSON.stringify({ id: deviceId, ip: device.ipAddress }),
         });
         const data = await res.json();
 
@@ -104,19 +108,22 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
             setLiveData(newPoint);
             setHistory(prev => {
                 const newHistory = [...prev, newPoint];
-                // Keep only the last ~24h of data (assuming 1-minute intervals)
-                return newHistory.slice(-1440);
+                return newHistory.slice(-1440); // Keep last ~24h
             });
-             setError(null);
+            // Update the global context with the new timestamp
+            updateDeviceData(deviceId, { agentLastUpdate: newPoint.timestamp });
+            setError(null);
         } else {
             setError(data.error || "Failed to fetch live update.");
         }
     } catch (err) {
         setError("An error occurred while fetching live data from the server.");
     }
-  }, [deviceId, deviceInfo.ip]);
+  }, [deviceId, device, updateDeviceData]);
 
-  const fetchInitialData = React.useCallback(async (ip: string) => {
+  const fetchInitialData = React.useCallback(async () => {
+    if (!device) return;
+
     setIsLoading(true);
     setError(null);
     try {
@@ -142,44 +149,53 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [deviceId, fetchLiveData]);
+  }, [deviceId, device, fetchLiveData]);
 
-  // Effect to get device name and IP on initial load
+  // Effect to get initial data when device is found in context
   React.useEffect(() => {
-    const findDeviceIp = async () => {
-        try {
-            const response = await fetch("/api/ad/get-computers", { method: "POST" });
-            const data = await response.json();
-            if (data.ok) {
-                const foundDevice = data.computers.find((d: any) => d.dn === deviceId);
-                if (foundDevice && foundDevice.dns_hostname) {
-                    setDeviceInfo({ name: foundDevice.name, ip: foundDevice.dns_hostname });
-                    fetchInitialData(foundDevice.dns_hostname);
-                } else {
-                     setError("Device not found or has no IP address in Active Directory.");
-                     setIsLoading(false);
-                }
-            } else {
-                setError("Could not fetch device list to find IP address.");
-                setIsLoading(false);
-            }
-        } catch(e) {
-             setError("Failed to connect to the server to look up device info.");
-             setIsLoading(false);
-        }
-    };
-    findDeviceIp();
-  }, [deviceId, fetchInitialData]);
+    if (device) {
+        fetchInitialData();
+    } else {
+        // This can happen on a hard refresh, the context might not be populated yet.
+        // The context itself will fetch all devices, and this component will re-render.
+        setIsLoading(true); 
+    }
+  }, [device, fetchInitialData]);
 
   // Set up the interval for auto-refresh
   React.useEffect(() => {
-    if (!isLoading && isAutoRefresh && deviceInfo.ip) {
+    if (!isLoading && isAutoRefresh && device?.ipAddress) {
         const intervalId = setInterval(() => {
             fetchLiveData();
         }, 60000); // Refresh every 1 minute
         return () => clearInterval(intervalId);
     }
-  }, [isAutoRefresh, isLoading, fetchLiveData, deviceInfo.ip]);
+  }, [isAutoRefresh, isLoading, fetchLiveData, device]);
+  
+  if (!device && isLoading) {
+     return (
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <p className="ml-2">Loading device information...</p>
+        </div>
+      )
+  }
+
+  if (!device && !isLoading) {
+      return (
+         <Alert variant="destructive">
+          <ServerCrash className="h-4 w-4" />
+          <AlertTitle>Device Not Found</AlertTitle>
+          <AlertDescription>
+            The specified device could not be found. It may have been removed from Active Directory.
+            <Button asChild variant="link" className="p-0 h-auto ml-2">
+                <Link href="/dashboard/monitoring">Return to list</Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )
+  }
+
 
   const latestData = history.length > 0 ? history[history.length-1] : null;
 
@@ -195,7 +211,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                         Live Monitoring
                     </h1>
                     <p className="text-muted-foreground">
-                        Real-time & historical performance data for <span className="font-semibold text-primary">{deviceInfo.name || "Unknown Device"}</span>
+                        Real-time & historical performance data for <span className="font-semibold text-primary">{device?.name || "Unknown Device"}</span>
                     </p>
                 </div>
             </div>
@@ -278,5 +294,3 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
 };
 
 export default DeviceDashboardPage;
-
-    
