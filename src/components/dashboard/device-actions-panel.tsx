@@ -184,6 +184,11 @@ type PsBrowseItem = {
     Mode: string; // e.g., 'd-----', 'a----'
 };
 
+type CleanTempData = {
+  freedMb: number;
+  failedFiles: number;
+};
+
 
 type DialogState = {
     isOpen: boolean;
@@ -199,7 +204,7 @@ type DialogState = {
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
         psbrowse?: PsBrowseItem[] | null;
-        cleanTemp?: { freedMb: number } | null;
+        cleanTemp?: CleanTempData | null;
     } | null;
 }
 
@@ -933,9 +938,9 @@ const PsLoggedOnResult: React.FC<{ data: LoggedOnUser[], onLogoff: (sessionId: s
 const CleaningDialogContent: React.FC<{
     isCleaning: boolean,
     cleaningProgress: number,
-    freedMb: number | null,
+    results: CleanTempData | null,
     error: string | null
-}> = ({ isCleaning, cleaningProgress, freedMb, error }) => {
+}> = ({ isCleaning, cleaningProgress, results, error }) => {
     
     if (isCleaning) {
         return (
@@ -959,16 +964,16 @@ const CleaningDialogContent: React.FC<{
                 </div>
                 <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Error Details</AlertTitle>
+                    <AlertTitle>An error occurred</AlertTitle>
                     <AlertDescription>
-                        <pre className="whitespace-pre-wrap font-mono text-xs">{error}</pre>
+                        {error}
                     </AlertDescription>
                 </Alert>
             </div>
         );
     }
     
-    if (freedMb !== null) {
+    if (results) {
         return (
             <div className="flex flex-col items-center justify-center text-center p-8 space-y-4">
                 <div className="relative h-24 w-24">
@@ -978,8 +983,17 @@ const CleaningDialogContent: React.FC<{
                 </div>
                 <h3 className="text-lg font-semibold">Cleanup Complete!</h3>
                 <p className="text-sm text-muted-foreground">
-                    Successfully freed approximately <strong className="text-foreground">{freedMb.toFixed(2)} MB</strong> of space.
+                    Successfully freed approximately <strong className="text-foreground">{results.freedMb.toFixed(2)} MB</strong> of space.
                 </p>
+                {results.failedFiles > 0 && (
+                    <Alert variant="destructive" className="text-left">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Note</AlertTitle>
+                        <AlertDescription>
+                           Could not delete <strong className="text-destructive-foreground">{results.failedFiles} file(s)</strong>. They were likely in use by another process.
+                        </AlertDescription>
+                    </Alert>
+                )}
             </div>
         );
     }
@@ -1037,7 +1051,7 @@ const CommandOutputDialog: React.FC<{
                     <CleaningDialogContent
                         isCleaning={isCleaning ?? false}
                         cleaningProgress={cleaningProgress ?? 0}
-                        freedMb={state.structuredData?.cleanTemp?.freedMb ?? null}
+                        results={state.structuredData?.cleanTemp ?? null}
                         error={state.error || null}
                     />
                 ) : (

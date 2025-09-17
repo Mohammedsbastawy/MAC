@@ -444,7 +444,7 @@ def api_psbrowse():
     data = request.get_json() or {}
     ip = data.get("ip", "")
     path = data.get("path", "")
-    _, _, pwd, winrm_user = get_auth_from_session()
+    user, domain, pwd, winrm_user = get_auth_from_session()
 
     logger.info(f"Executing file browse (WinRM) on {ip} for path: '{path or 'drives'}'")
     
@@ -773,16 +773,14 @@ def api_clean_temp_files():
 
     logger.info(f"Attempting to clean temporary files on {ip}.")
 
-    # This new PowerShell script is more robust and returns structured data.
     ps_command = """
     $ErrorActionPreference = 'SilentlyContinue'
-    $global:Error.Clear()
-
+    
+    # 1. Gather all paths to clean
     $pathsToClean = @(
         "$env:SystemRoot\\Temp",
         "$env:SystemRoot\\Prefetch"
     )
-
     $userProfiles = Get-CimInstance -ClassName Win32_UserProfile | Where-Object { $_.LocalPath -notlike "*\\Windows" -and $_.LocalPath -notlike "*\\system32*"}
     foreach ($profile in $userProfiles) {
         $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp"
@@ -791,70 +789,74 @@ def api_clean_temp_files():
         }
     }
 
-    function Get-DirectorySize($path) {
-        $size = 0
-        if (Test-Path $path) {
-            $items = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
-            if ($items) {
-                $size = ($items | Measure-Object -Property Length -Sum).Sum
-            }
-        }
-        return [long]$size
-    }
-
+    # 2. Calculate size before cleaning
     $totalSizeBefore = 0
     foreach ($path in $pathsToClean) {
-        $totalSizeBefore += Get-DirectorySize -path $path
-    }
-
-    foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            # Delete items inside the folder, but not the folder itself
-            Remove-Item -Path "$path\\*" -Recurse -Force -ErrorAction SilentlyContinue
+            $totalSizeBefore += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         }
     }
 
-    $totalSizeAfter = 0
+    # 3. Perform cleanup and count failed files
+    $failedItems = @()
     foreach ($path in $pathsToClean) {
-        $totalSizeAfter += Get-DirectorySize -path $path
+        if (Test-Path $path) {
+            $items = Get-ChildItem -Path "$path\\*" -Recurse -Force -ErrorAction SilentlyContinue
+            foreach($item in $items) {
+                Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                if ($?) {
+                    # Success
+                } else {
+                    $failedItems += $item.FullName
+                }
+            }
+        }
     }
 
+    # 4. Calculate size after cleaning
+    $totalSizeAfter = 0
+    foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+            $totalSizeAfter += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        }
+    }
+
+    # 5. Prepare results
     $freedBytes = $totalSizeBefore - $totalSizeAfter
     if ($freedBytes -lt 0) { $freedBytes = 0 }
     
     $result = @{
-        freedMb = [math]::Round($freedBytes / 1MB, 2)
-    }
-
-    # If there were errors, add them to the output
-    if ($global:Error.Count -gt 0) {
-        $errorMessages = $global:Error | ForEach-Object { $_.ToString() }
-        $result.errors = $errorMessages
+        freedMb = [math]::Round($freedBytes / 1MB, 2);
+        failedFiles = $failedItems.Count
     }
     
-    return $result | ConvertTo-Json -Depth 3
+    # Return result as JSON string
+    return $result | ConvertTo-Json -Compress
     """
     
+    # This command needs to run as a single block for PowerShell
     cmd_args = ["powershell.exe", "-Command", ps_command]
+    
+    # Using PsExec to run the command
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-    if rc == 0 and out:
-        try:
-            parsed_out = json.loads(out)
-            # If the script itself captured errors, add them to the stderr for the frontend to see.
-            if 'errors' in parsed_out:
-                script_errors = "\\n".join(parsed_out['errors'])
-                err = (err + "\\n" if err else "") + "PowerShell Script Errors:\\n" + script_errors
-
-            structured_data = {"cleanTemp": parsed_out}
-            # If we have errors, we should still return them even if the script "succeeded" (RC=0)
-            return json_result(rc, out, err, structured_data)
-        except json.JSONDecodeError:
-            err = f"Failed to parse JSON from cleanup script: {out}"
-            return json_result(1, out, err)
+    # PsExec often puts its banner in stderr or stdout. We need to find the JSON.
+    json_match = re.search(r'\{.*\}', out, re.DOTALL)
     
-    # If the script fails (non-zero RC), return the error.
-    return json_result(rc, out, err, {"cleanTemp": None})
+    if rc == 0 and json_match:
+        json_string = json_match.group(0)
+        try:
+            parsed_out = json.loads(json_string)
+            structured_data = {"cleanTemp": parsed_out}
+            return json_result(rc, json_string, err, structured_data)
+        except json.JSONDecodeError:
+            err_msg = f"Failed to parse JSON from cleanup script output. Raw output was: {out}"
+            logger.error(err_msg)
+            return json_result(1, out, err_msg)
+    else:
+        # If the script fails or no JSON is found, return the raw error.
+        logger.error(f"Cleanup script failed on {ip}. RC={rc}. Error: {err}. Output: {out}")
+        return json_result(rc, out, err)
         
 
 
@@ -871,6 +873,7 @@ def api_clean_temp_files():
 
 
     
+
 
 
 
