@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
@@ -62,6 +63,10 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
 
   const fetchLiveData = useCallback(async (deviceToUpdate: Device) => {
+    if (!deviceToUpdate.ipAddress) {
+        updateDeviceData(deviceToUpdate.id, { isAgentDeployed: false, agentLastUpdate: null });
+        return;
+    }
     try {
         const res = await fetch("/api/network/fetch-live-data", {
             method: "POST",
@@ -81,8 +86,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const fetchAllDevices = useCallback(async () => {
-    if (isLoading) return;
+    if (isLoading || isUpdating) return;
     setIsLoading(true);
+    setIsUpdating(true); // Set updating true for the whole process
     setError(null);
     try {
       const adResponse = await fetch("/api/ad/get-computers", { method: "POST" });
@@ -90,7 +96,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!adData.ok) throw adData;
 
       let initialDevices: Device[] = adData.computers.map(mapAdComputerToDevice);
-      setDevices(initialDevices.map(d => ({ ...d, status: 'unknown' })));
+      setDevices(initialDevices.map(d => ({ ...d, status: 'unknown', isAgentDeployed: false, agentLastUpdate: null })));
+      
+      setIsLoading(false); // AD data is loaded, main loading is false
 
       const onlineCheckResponse = await fetch("/api/network/check-status", {
           method: 'POST',
@@ -101,12 +109,18 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!onlineCheckData.ok) throw new Error(onlineCheckData.error || "Status check failed.");
       
       const onlineIps = new Set<string>(onlineCheckData.online_ips);
-      const devicesWithStatus = initialDevices.map(d => ({
+      
+      // Update status in a single batch
+      setDevices(prevDevices => prevDevices.map(d => ({
           ...d,
           status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
-      }));
+      })));
 
-      setDevices(devicesWithStatus);
+      // Now work with the fresh list of devices with correct online status
+      const devicesWithStatus = initialDevices.map(d => ({
+        ...d,
+        status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
+      }));
 
       const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
       await Promise.all(onlineDevices.map(device => fetchLiveData(device)));
@@ -120,14 +134,16 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setDevices([]);
     } finally {
       setIsLoading(false);
+      setIsUpdating(false);
     }
-  }, [fetchLiveData, isLoading]);
+  }, [fetchLiveData, isLoading, isUpdating]);
 
   const refreshAllDeviceStatus = useCallback(async () => {
     if (devices.length === 0) {
         toast({ title: "No devices to refresh" });
         return;
     }
+    if (isUpdating) return;
     setIsUpdating(true);
     toast({ title: "Refreshing Status...", description: `Checking ${devices.length} devices.` });
 
@@ -142,15 +158,23 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (!data.ok) throw new Error(data.error || "Status check failed.");
 
         const onlineIps = new Set(data.online_ips);
-        const updatedDevices = devices.map(d => ({
-            ...d,
-            status: onlineIps.has(d.ipAddress) ? 'online' : 'offline'
-        }));
-        setDevices(updatedDevices);
+        
+        // Use a functional update to get the latest state
+        setDevices(prevDevices => {
+            return prevDevices.map(d => ({
+                ...d,
+                status: onlineIps.has(d.ipAddress) ? 'online' : 'offline'
+            }));
+        });
         
         toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} online devices.` });
 
-        const onlineDevices = updatedDevices.filter(d => d.status === 'online');
+        const devicesWithStatus = devices.map(d => ({
+            ...d,
+            status: onlineIps.has(d.ipAddress) ? 'online' : 'offline'
+        }));
+        
+        const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
         await Promise.all(onlineDevices.map(device => fetchLiveData(device)));
 
     } catch (err: any) {
@@ -158,7 +182,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } finally {
         setIsUpdating(false);
     }
-  }, [devices, toast, fetchLiveData]);
+  }, [devices, toast, fetchLiveData, isUpdating]);
 
   const contextValue = useMemo(() => ({
     devices, isLoading, isUpdating, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData

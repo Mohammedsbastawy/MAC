@@ -230,10 +230,10 @@ export default function MonitoringPage() {
                                     )}
                                 </TableCell>
                                 <TableCell className="text-right">
-                                     <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online'}>
+                                     <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online' || isUpdating}>
                                         <RefreshCw className="mr-2 h-4 w-4" /> Update Statics
                                     </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)} disabled={!device.isAgentDeployed}>
+                                    <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)} disabled={!device.isAgentDeployed || isUpdating}>
                                         View Dashboard <ChevronRight className="ml-2 h-4 w-4" />
                                     </Button>
                                 </TableCell>
