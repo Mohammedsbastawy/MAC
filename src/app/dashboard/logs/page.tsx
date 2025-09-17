@@ -82,14 +82,14 @@ const LogsPage: React.FC = () => {
                     </Button>
                 </div>
             </div>
-            <div className="flex-grow p-4 overflow-y-auto font-mono text-sm text-foreground bg-background">
+            <div className="flex-grow p-4 overflow-y-auto font-mono text-sm bg-gray-900 text-gray-200">
                 {isLoading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
+                    <div className="flex items-center gap-2 text-gray-400">
                         <Loader2 className="animate-spin" />
                         <span>Loading initial logs...</span>
                     </div>
                 ) : error ? (
-                    <pre className="text-destructive whitespace-pre-wrap">{`[ERROR] ${error}`}</pre>
+                    <pre className="text-red-400 whitespace-pre-wrap">{`[ERROR] ${error}`}</pre>
                 ) : (
                     <pre className="whitespace-pre-wrap">{logs}</pre>
                 )}

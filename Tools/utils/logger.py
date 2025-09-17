@@ -1,3 +1,4 @@
+
 # لوجينج بسيط
 import logging
 import os
@@ -20,7 +21,14 @@ class FormattedMemoryHandler(logging.Handler):
 
     def emit(self, record):
         # The record is formatted before being added to the buffer
-        self.buffer.append(self.format(record))
+        # We handle the case where the message might already have formatting (e.g., from werkzeug)
+        try:
+            msg = self.format(record)
+        except Exception:
+            # Fallback for records that might not have standard attributes
+            msg = f"[{record.asctime if hasattr(record, 'asctime') else 'NO_TIMESTAMP'}] {record.levelname}: {record.getMessage()}"
+        self.buffer.append(msg)
+
 
 # Create a single instance of the memory handler to be shared across the app
 memory_handler = FormattedMemoryHandler()
@@ -36,16 +44,31 @@ file_handler.setFormatter(log_formatter)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(log_formatter)
 
-# --- Configure the 'Tools' Logger ---
+# --- Configure the Root Logger to capture everything ---
 # This is the central logger for the entire application.
-# Other modules should get this logger by name: logging.getLogger('Tools')
-logger = logging.getLogger('Tools')
-logger.setLevel(logging.DEBUG)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO) # Set to INFO to capture werkzeug requests
 
 # Avoid adding handlers if they already exist (important in Flask's hot-reload environment)
+if not root_logger.handlers:
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(memory_handler)
+
+# --- Configure the 'Tools' Logger specifically ---
+# We can set this to DEBUG if we want more detailed app-specific logs
+# without flooding the console with DEBUG logs from libraries.
+logger = logging.getLogger('Tools')
+logger.setLevel(logging.DEBUG)
+logger.propagate = False # Prevent 'Tools' logs from being handled by the root logger twice
+
+# Ensure the 'Tools' logger also has the handlers
 if not logger.handlers:
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
     logger.addHandler(memory_handler)
 
-    
+
+# Silence overly verbose loggers if needed
+# logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
