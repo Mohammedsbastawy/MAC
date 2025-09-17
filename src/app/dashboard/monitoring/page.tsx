@@ -127,7 +127,7 @@ export default function MonitoringPage() {
         if (data.ok) {
             toast({ title: "Update Successful", description: `Statics script has been run on ${deploymentState.device.name}.`});
             // Immediately fetch the new status for this device
-            fetchLiveData(deploymentState.device);
+            fetchLiveData(deploymentState.device.id, deploymentState.device.ipAddress);
         } else {
              toast({ variant: "destructive", title: "Update Failed", description: data.error || "An unknown error occurred."});
              if (logOutput.includes("Couldn't access") || logOutput.includes("Connecting to") || logOutput.includes("transport error")) {
@@ -238,7 +238,7 @@ export default function MonitoringPage() {
                                     )}
                                 </TableCell>
                                 <TableCell className="text-right">
-                                     <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online' || isUpdating}>
+                                     <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setShowDiagnosticsButton(false); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online' || isUpdating}>
                                         <RefreshCw className="mr-2 h-4 w-4" /> Update Statics
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)} disabled={!device.isAgentDeployed || isUpdating}>
