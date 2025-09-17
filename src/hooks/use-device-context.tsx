@@ -44,7 +44,7 @@ interface DeviceContextType {
   updateProgress: number;
   error: { title: string; message: string; details?: string } | null;
   fetchAllDevices: () => Promise<void>;
-  fetchLiveData: (device: Device) => Promise<void>;
+  fetchLiveData: (deviceId: string, deviceIp: string) => Promise<boolean>;
   refreshAllDeviceStatus: () => Promise<void>;
   updateDeviceData: (deviceId: string, newData: Partial<Device>) => void;
 }
@@ -59,33 +59,36 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [error, setError] = useState<{ title: string; message: string; details?: string } | null>(null);
   const { toast } = useToast();
 
-  const updateDeviceData = (deviceId: string, newData: Partial<Device>) => {
+  const updateDeviceData = useCallback((deviceId: string, newData: Partial<Device>) => {
     setDevices(prev => prev.map(d => d.id === deviceId ? { ...d, ...newData } : d));
-  };
+  }, []);
 
 
-  const fetchLiveData = useCallback(async (deviceToUpdate: Device) => {
-    if (!deviceToUpdate.ipAddress) {
-        updateDeviceData(deviceToUpdate.id, { isAgentDeployed: false, agentLastUpdate: null });
-        return;
+  const fetchLiveData = useCallback(async (deviceId: string, deviceIp: string): Promise<boolean> => {
+    if (!deviceIp) {
+        updateDeviceData(deviceId, { isAgentDeployed: false, agentLastUpdate: null });
+        return false;
     }
     try {
         const res = await fetch("/api/network/fetch-live-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: deviceToUpdate.id, ip: deviceToUpdate.ipAddress }),
+            body: JSON.stringify({ id: deviceId, ip: deviceIp }),
         });
         const data = await res.json();
         
         if (data.ok && data.liveData) {
-            updateDeviceData(deviceToUpdate.id, { isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp });
+            updateDeviceData(deviceId, { isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp });
+            return true;
         } else {
-            updateDeviceData(deviceToUpdate.id, { isAgentDeployed: false, agentLastUpdate: null });
+            updateDeviceData(deviceId, { isAgentDeployed: false, agentLastUpdate: null });
+            return false;
         }
     } catch {
-        updateDeviceData(deviceToUpdate.id, { isAgentDeployed: false, agentLastUpdate: null });
+        updateDeviceData(deviceId, { isAgentDeployed: false, agentLastUpdate: null });
+        return false;
     }
-  }, []);
+  }, [updateDeviceData]);
 
   const fetchAllDevices = useCallback(async () => {
     if (isLoading || isUpdating) return;
@@ -114,20 +117,24 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       
       const onlineIps = new Set<string>(onlineCheckData.online_ips);
       
+      // Use a functional update to avoid stale state issues
+      setDevices(prevDevices => prevDevices.map(d => ({
+        ...d,
+        status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
+      })));
+      setUpdateProgress(30);
+      
+      // Get the latest state for online devices
       const devicesWithStatus = initialDevices.map(d => ({
         ...d,
         status: onlineIps.has(d.ipAddress) ? 'online' : 'offline',
       }));
-      
-      setDevices(devicesWithStatus);
-      setUpdateProgress(30);
-
       const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
       let processedCount = 0;
       const totalOnline = onlineDevices.length;
 
       const agentCheckPromises = onlineDevices.map(async (device) => {
-        await fetchLiveData(device);
+        await fetchLiveData(device.id, device.ipAddress);
         processedCount++;
         const progress = 30 + Math.floor((processedCount / totalOnline) * 70);
         setUpdateProgress(progress);
@@ -174,22 +181,21 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setUpdateProgress(30);
         const onlineIps = new Set(data.online_ips);
         
-        const currentDevices = devices;
-        const devicesWithStatus = currentDevices.map(d => ({
+        // Use a functional update to avoid stale state
+        setDevices(prevDevices => prevDevices.map(d => ({
             ...d,
             status: onlineIps.has(d.ipAddress) ? 'online' : 'offline'
-        }));
-        
-        setDevices(devicesWithStatus);
+        })));
         
         toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} online devices.` });
 
-        const onlineDevices = devicesWithStatus.filter(d => d.status === 'online');
+        // Re-filter for online devices from the latest state
+        const onlineDevices = devices.filter(d => onlineIps.has(d.ipAddress));
         let processedCount = 0;
         const totalOnline = onlineDevices.length;
 
         const agentCheckPromises = onlineDevices.map(async (device) => {
-          await fetchLiveData(device);
+          await fetchLiveData(device.id, device.ipAddress);
           processedCount++;
           const progress = 30 + Math.floor((processedCount / totalOnline) * 70);
           setUpdateProgress(progress);
@@ -207,7 +213,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const contextValue = useMemo(() => ({
     devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData
-  }), [devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus]);
+  }), [devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData]);
 
   return (
     <DeviceContext.Provider value={contextValue}>

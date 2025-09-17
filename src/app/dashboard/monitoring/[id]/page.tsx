@@ -84,7 +84,7 @@ const ChartCard: React.FC<{
 );
 
 const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
-  const { devices, updateDeviceData } = useDeviceContext();
+  const { devices, fetchLiveData } = useDeviceContext();
   const [history, setHistory] = React.useState<PerformanceData[]>([]);
   const [liveData, setLiveData] = React.useState<PerformanceData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -92,21 +92,15 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const [isAutoRefresh, setIsAutoRefresh] = React.useState(true);
 
   const deviceId = decodeURIComponent(params.id);
-  
   const device = React.useMemo(() => devices.find(d => d.id === deviceId), [devices, deviceId]);
 
-  const fetchLiveDataAndHistory = React.useCallback(async (isInitialLoad = false) => {
-    if (!device?.ipAddress) return;
+  const fetchInitialData = React.useCallback(async () => {
+    if (!device) return;
 
-    if (isInitialLoad) {
-        setIsLoading(true);
-        setError(null);
-    }
+    setIsLoading(true);
+    setError(null);
 
     try {
-        let historyFetchOk = false;
-        let liveFetchOk = false;
-
         const historyRes = await fetch("/api/network/get-historical-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -115,75 +109,77 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         const historyData = await historyRes.json();
         if (historyData.ok) {
             setHistory(historyData.history);
-            historyFetchOk = true;
+        } else {
+            throw new Error(historyData.error || "Failed to fetch historical data.");
         }
-
+        
         const liveRes = await fetch("/api/network/fetch-live-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: deviceId, ip: device.ipAddress }),
         });
         const liveDataResult = await liveRes.json();
-        
         if (liveDataResult.ok && liveDataResult.liveData) {
-            liveFetchOk = true;
-            const newPoint = {
-                ...liveDataResult.liveData,
-                cpuUsage: parseFloat(liveDataResult.liveData.cpuUsage?.toFixed(2) || 0),
-                usedMemoryGB: parseFloat(liveDataResult.liveData.usedMemoryGB?.toFixed(2) || 0),
-            };
-            
-            setLiveData(newPoint);
-            
-            setHistory(prev => {
-                const existingPoint = prev.find(p => p.timestamp === newPoint.timestamp);
-                if (existingPoint) return prev;
-                
-                const newHistory = [...prev, newPoint];
-                const maxHistoryLength = (24 * 60 * 7) + 1; // 7 days of 1-minute intervals
-                return newHistory.slice(-maxHistoryLength);
-            });
-            
-            updateDeviceData(deviceId, { agentLastUpdate: newPoint.timestamp });
-        }
-
-        // Only clear the error if at least one of the fetches was successful.
-        if (historyFetchOk || liveFetchOk) {
-            setError(null);
+            setLiveData(liveDataResult.liveData);
+            // Also update the context
+            fetchLiveData(deviceId, device.ipAddress);
         } else {
-            // Both failed, set a meaningful error message
-            const finalError = liveDataResult.error || historyData.error || "Failed to fetch any performance data.";
-            if (isInitialLoad) {
-                setError(finalError);
-            }
+            throw new Error(liveDataResult.error || "Failed to fetch live data.");
         }
-
     } catch (err: any) {
-        if(isInitialLoad) setError(err.message || "An error occurred while fetching data from the server.");
+        setError(err.message || "An error occurred.");
     } finally {
-        if(isInitialLoad) setIsLoading(false);
+        setIsLoading(false);
     }
-  }, [deviceId, device, updateDeviceData]);
-
+  }, [deviceId, device, fetchLiveData]);
+  
+  // Effect for initial data load
   React.useEffect(() => {
     if (device) {
-        fetchLiveDataAndHistory(true);
+        fetchInitialData();
     } else if (devices.length > 0 && !device) {
-      // If devices are loaded but this specific one is not found
       setError("The specified device could not be found. It may have been removed from Active Directory.");
       setIsLoading(false);
     }
-  }, [device, devices.length, fetchLiveDataAndHistory]);
-
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device, devices.length]);
+  
+  // Effect for periodic refresh
   React.useEffect(() => {
     if (!isAutoRefresh || !device?.ipAddress) return;
 
-    const intervalId = setInterval(() => {
-        fetchLiveDataAndHistory(false);
+    const intervalId = setInterval(async () => {
+        try {
+            const liveRes = await fetch("/api/network/fetch-live-data", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: deviceId, ip: device.ipAddress }),
+            });
+            const liveDataResult = await liveRes.json();
+            if (liveDataResult.ok && liveDataResult.liveData) {
+                const newPoint: PerformanceData = {
+                    ...liveDataResult.liveData,
+                    cpuUsage: parseFloat(liveDataResult.liveData.cpuUsage?.toFixed(2) || 0),
+                    usedMemoryGB: parseFloat(liveDataResult.liveData.usedMemoryGB?.toFixed(2) || 0),
+                };
+                setLiveData(newPoint);
+                setHistory(prev => {
+                    const newHistory = [...prev, newPoint].filter(
+                      (p, index, self) => index === self.findIndex((t) => t.timestamp === p.timestamp)
+                    );
+                    const maxHistoryLength = (24 * 60 * 7) + 1; // 7 days of 1-minute intervals
+                    return newHistory.slice(-maxHistoryLength);
+                });
+                fetchLiveData(deviceId, device.ipAddress); // Update context
+            }
+        } catch (e) {
+            console.error("Background refresh failed:", e);
+        }
     }, 60000); // Refresh every 1 minute
     
     return () => clearInterval(intervalId);
-  }, [isAutoRefresh, device, fetchLiveDataAndHistory]);
+  }, [isAutoRefresh, device, deviceId, fetchLiveData]);
+
   
   const showLoadingState = isLoading;
   const showErrorState = !isLoading && error && history.length === 0 && !liveData;
