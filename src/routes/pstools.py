@@ -714,54 +714,53 @@ def api_clean_temp_files():
 
     logger.info(f"Attempting to clean temporary files on {ip}.")
 
-    ps_command = """
+    ps_command = r"""
     $ErrorActionPreference = 'SilentlyContinue'
     
     # 1. Gather all paths to clean
     $pathsToClean = @(
-        "$env:SystemRoot\\Temp",
-        "$env:SystemRoot\\Prefetch"
+        Join-Path $env:SystemRoot "Temp",
+        Join-Path $env:SystemRoot "Prefetch"
     )
-    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile | Where-Object { $_.LocalPath -notlike "*\\Windows" -and $_.LocalPath -notlike "*\\system32*"}
+    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile
     foreach ($profile in $userProfiles) {
-        $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp"
-        if (Test-Path -Path $tempPath -PathType Container) {
-            $pathsToClean += $tempPath
+        $userTempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\Local\Temp"
+        if (Test-Path -Path $userTempPath -PathType Container) {
+            $pathsToClean += $userTempPath
         }
     }
-
+    
     # 2. Calculate size before cleaning
     $totalSizeBefore = 0
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $totalSizeBefore += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+            $totalSizeBefore += (Get-ChildItem $path -Recurse -Force | Measure-Object -Property Length -Sum).Sum
         }
     }
-
-    # 3. Perform cleanup and count failed files
+    
+    # 3. Perform cleanup
     $failedItems = @()
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $items = Get-ChildItem -Path "$path\\*" -Recurse -Force -ErrorAction SilentlyContinue
-            foreach($item in $items) {
-                Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                if ($?) {
-                    # Success
-                } else {
+            $items = Get-ChildItem -Path $path -Recurse -Force
+            foreach ($item in $items) {
+                try {
+                    Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction Stop
+                } catch {
                     $failedItems += $item.FullName
                 }
             }
         }
     }
-
+    
     # 4. Calculate size after cleaning
     $totalSizeAfter = 0
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $totalSizeAfter += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+            $totalSizeAfter += (Get-ChildItem $path -Recurse -Force | Measure-Object -Property Length -Sum).Sum
         }
     }
-
+    
     # 5. Prepare results
     $freedBytes = $totalSizeBefore - $totalSizeAfter
     if ($freedBytes -lt 0) { $freedBytes = 0 }
@@ -770,18 +769,14 @@ def api_clean_temp_files():
         freedMb = [math]::Round($freedBytes / 1MB, 2);
         failedFiles = $failedItems.Count
     }
-    
-    # Return result as JSON string
+
     return $result | ConvertTo-Json -Compress
     """
     
-    # This command needs to run as a single block for PowerShell
     cmd_args = ["powershell.exe", "-Command", ps_command]
     
-    # Using PsExec to run the command
     rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
-    # PsExec often puts its banner in stderr or stdout. We need to find the JSON.
     json_match = re.search(r'\{.*\}', out, re.DOTALL)
     
     if rc == 0 and json_match:
@@ -795,9 +790,51 @@ def api_clean_temp_files():
             logger.error(err_msg)
             return json_result(1, out, err_msg)
     else:
-        # If the script fails or no JSON is found, return the raw error.
         logger.error(f"Cleanup script failed on {ip}. RC={rc}. Error: {err}. Output: {out}")
         return json_result(rc, out, err)
+
+
+@pstools_bp.route('/get-installed-apps', methods=['POST'])
+def api_get_installed_apps():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
+
+    logger.info(f"Getting installed applications from {ip} via WinRM.")
+
+    ps_command = r"""
+    $ErrorActionPreference = 'SilentlyContinue'
+    $paths = @(
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    $apps = Get-ItemProperty $paths | Where-Object { $_.DisplayName -and $_.UninstallString }
+    
+    $results = @()
+    foreach ($app in $apps) {
+        $exePath = $null
+        if ($app.UninstallString) {
+            $match = [regex]::Match($app.UninstallString, '"(.*?)"')
+            if ($match.Success) {
+                $exePath = $match.Groups[1].Value
+            } else {
+                $exePath = ($app.UninstallString -split ' ')[0]
+            }
+        }
+        
+        $results += [PSCustomObject]@{
+            DisplayName  = $app.DisplayName
+            ExecutablePath = $exePath
+            Publisher    = $app.Publisher
+        }
+    }
+    
+    $results | Sort-Object DisplayName | ConvertTo-Json -Compress
+    """
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
+
+    return json_result(rc, out, err)
         
 
 
@@ -821,3 +858,7 @@ def api_clean_temp_files():
 
 
 
+
+
+
+    
