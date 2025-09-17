@@ -59,6 +59,7 @@ import {
   Upload,
   Wrench,
   LogOut,
+  Sparkles,
 } from "lucide-react";
 import {
   Sheet,
@@ -109,6 +110,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { Progress } from "@/components/ui/progress";
 
 
 type DeviceActionsPanelProps = {
@@ -197,6 +199,7 @@ type DialogState = {
         psservice?: PsServiceData[] | null;
         psloglist?: PsLogListData[] | null;
         psbrowse?: PsBrowseItem[] | null;
+        cleanTemp?: { freedMb: number } | null;
     } | null;
 }
 
@@ -927,6 +930,37 @@ const PsLoggedOnResult: React.FC<{ data: LoggedOnUser[], onLogoff: (sessionId: s
     </Card>
 );
 
+const CleaningProgress: React.FC<{ progress: number, isFinished: boolean, freedMb: number | null }> = ({ progress, isFinished, freedMb }) => {
+    return (
+        <div className="flex flex-col items-center justify-center text-center p-8 space-y-4">
+            {!isFinished ? (
+                <>
+                    <div className="relative h-24 w-24">
+                        <Trash2 className="h-24 w-24 text-primary animate-pulse" />
+                    </div>
+                    <h3 className="text-lg font-semibold">Cleaning in Progress...</h3>
+                    <p className="text-sm text-muted-foreground">Please wait while temporary files are being deleted.</p>
+                    <Progress value={progress} className="w-full" />
+                </>
+            ) : (
+                <>
+                     <div className="relative h-24 w-24">
+                        <Sparkles className="h-16 w-16 text-yellow-400 absolute -top-4 -left-4 animate-ping opacity-75" />
+                        <Sparkles className="h-10 w-10 text-yellow-400 absolute -bottom-2 -right-2 animate-ping" />
+                        <CheckCircle2 className="h-24 w-24 text-green-500" />
+                    </div>
+                    <h3 className="text-lg font-semibold">Cleanup Complete!</h3>
+                    {freedMb !== null && (
+                         <p className="text-sm text-muted-foreground">
+                            Successfully freed approximately <strong className="text-foreground">{freedMb.toFixed(2)} MB</strong> of space.
+                        </p>
+                    )}
+                </>
+            )}
+        </div>
+    )
+};
+
 
 const CommandOutputDialog: React.FC<{
     state: DialogState;
@@ -938,7 +972,9 @@ const CommandOutputDialog: React.FC<{
     onBrowseNavigate?: (path: string) => void;
     onBrowseAction?: (action: 'download' | 'upload' | 'delete' | 'rename' | 'create_folder', params: any) => void;
     browsePath?: string;
-}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onUserLogoff, onBrowseNavigate, onBrowseAction, browsePath }) => {
+    isCleaning?: boolean;
+    cleaningProgress?: number;
+}> = ({ state, onClose, onServiceAction, onServiceInfo, onProcessKill, onUserLogoff, onBrowseNavigate, onBrowseAction, browsePath, isCleaning, cleaningProgress }) => {
     
     const [isLoading, setIsLoading] = React.useState(false);
     
@@ -953,8 +989,9 @@ const CommandOutputDialog: React.FC<{
     const isProcessView = !!state.structuredData?.pslist?.pslist;
     const isInfoView = !!state.structuredData?.psinfo;
     const isLoggedOnView = state.structuredData?.psloggedon && Array.isArray(state.structuredData.psloggedon);
+    const isCleanTempView = state.structuredData?.cleanTemp || isCleaning;
     
-    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
+    const isHackerTheme = !isBrowseView && !isInfoView && !isProcessView && !isLoggedOnView && !isCleanTempView && !(state.structuredData?.psfile || state.structuredData?.psservice || state.structuredData?.psloglist);
     
     return (
     <AlertDialog open={state.isOpen} onOpenChange={onClose}>
@@ -970,7 +1007,13 @@ const CommandOutputDialog: React.FC<{
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="mt-4 space-y-4 max-h-[80vh] overflow-y-auto pr-4">
-                {/* Structured data views */}
+                {isCleanTempView && (
+                    <CleaningProgress
+                        progress={cleaningProgress ?? 0}
+                        isFinished={!isCleaning && state.structuredData?.cleanTemp !== undefined}
+                        freedMb={state.structuredData?.cleanTemp?.freedMb ?? null}
+                    />
+                )}
                 {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
                 {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
                 {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
@@ -1004,7 +1047,7 @@ const CommandOutputDialog: React.FC<{
 
 
                 {/* Raw output for non-structured data or if there's an error */}
-                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView) && (
+                {!(isBrowseView || isProcessView || isInfoView || isLoggedOnView || isCleanTempView) && (
                     <>
                     {(state.output && !isHackerTheme) && (
                          <details className="mt-4">
@@ -1036,6 +1079,13 @@ const CommandOutputDialog: React.FC<{
                         </div>
                     )}
                     </>
+                )}
+                 {state.error && isCleanTempView && (
+                     <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Cleanup Failed</AlertTitle>
+                        <AlertDescription>{state.error}</AlertDescription>
+                    </Alert>
                 )}
             </div>
             <AlertDialogFooter>
@@ -1155,6 +1205,8 @@ export default function DeviceActionsPanel({
       error: "",
       structuredData: null,
   });
+  const [isCleaning, setIsCleaning] = React.useState(false);
+  const [cleaningProgress, setCleaningProgress] = React.useState(0);
   const [serviceInfo, setServiceInfo] = React.useState<PsServiceData | null>(null);
   const [browsePath, setBrowsePath] = React.useState("drives");
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = React.useState(false);
@@ -1189,9 +1241,6 @@ export default function DeviceActionsPanel({
             try {
                 const errorJson = await response.json();
                 errorDetails = errorJson.error || errorJson.message || errorDetails;
-                if (response.status === 401) {
-                    toast({ variant: 'destructive', title: 'Authentication Failed', description: 'Your session may have expired. Please log in again.' });
-                }
             } catch (e) { /* Ignore if body is not JSON */ }
             return { ok: false, error: errorDetails, stderr: errorDetails, structured_data: null };
         }
@@ -1323,7 +1372,6 @@ export default function DeviceActionsPanel({
             psservice: "Services",
             psloglist: "Event Log",
             psfile: "Opened Files",
-            "clean-temp-files": "Clean Temporary Files"
         }
         setDialogState({
             isOpen: true,
@@ -1334,6 +1382,35 @@ export default function DeviceActionsPanel({
             structuredData: result.structured_data || null,
         });
       }
+  };
+
+  const handleCleanTempFiles = async () => {
+    if (!device) return;
+    setIsCleaning(true);
+    setCleaningProgress(0);
+    setDialogState({
+        isOpen: true,
+        title: "Clean Temporary Files",
+        description: `Running cleanup on ${device.name}...`,
+        output: '',
+        error: '',
+        structuredData: null,
+    });
+
+    const progressInterval = setInterval(() => {
+        setCleaningProgress(prev => (prev < 90 ? prev + 10 : 90));
+    }, 1000);
+
+    const result = await runApiAction('clean-temp-files', {}, false);
+    clearInterval(progressInterval);
+    setCleaningProgress(100);
+    setIsCleaning(false);
+
+    setDialogState(prev => ({
+        ...prev,
+        error: result?.ok ? '' : (result?.error || 'An unknown error occurred.'),
+        structuredData: { cleanTemp: result?.structured_data?.cleanTemp || null },
+    }));
   };
 
     const handleServiceAction = async (svc: string, action: 'start' | 'stop' | 'restart') => {
@@ -1388,14 +1465,11 @@ export default function DeviceActionsPanel({
     }
 
     const handleEnableWinRM = async () => {
-        if (!device) {
-            toast({ variant: 'destructive', title: "Error", description: "No device selected." });
-            return;
-        };
+        if (!device) return;
         setIsEnablingWinRM(true);
         toast({ title: "Attempting to Enable WinRM...", description: `Sending commands to ${device.name}. This might take a moment.` });
 
-        const result = await runApiAction('enable-winrm', {ip: device.ipAddress}, false);
+        const result = await runApiAction('enable-winrm', {}, false);
 
         if (result?.ok) {
             toast({ title: "Command Sent Successfully", description: "Re-running diagnostics to check the new status." });
@@ -1413,7 +1487,7 @@ export default function DeviceActionsPanel({
         setIsEnablingPrereqs(true);
         toast({ title: "Attempting to Enable Prerequisites...", description: `Configuring services and firewall on ${device.name}. This might take a moment.` });
 
-        const result = await runApiAction('enable-prereqs', {ip: device.ipAddress}, false);
+        const result = await runApiAction('enable-prereqs', {}, false);
 
         if (result?.ok) {
             toast({ title: "Commands Sent Successfully", description: "Prerequisites for RPC/WMI access have been configured. Please wait a moment before retrying." });
@@ -1538,7 +1612,7 @@ export default function DeviceActionsPanel({
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground">System Maintenance</h4>
                 <div className="grid grid-cols-1 gap-2">
-                    <ActionButton icon={Trash2} label="Clean Temp Files" onClick={() => handleGenericAction('clean-temp-files')} />
+                    <ActionButton icon={Trash2} label="Clean Temp Files" onClick={handleCleanTempFiles} />
                 </div>
             </div>
 
@@ -1607,6 +1681,8 @@ export default function DeviceActionsPanel({
         onBrowseNavigate={(path) => handleBrowseAction('navigate', { path })}
         onBrowseAction={handleBrowseAction}
         browsePath={browsePath}
+        isCleaning={isCleaning}
+        cleaningProgress={cleaningProgress}
     />
     {/* Dialog for showing specific service info */}
      <ServiceInfoDialog 
@@ -1635,27 +1711,3 @@ export default function DeviceActionsPanel({
     </>
   );
 }
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

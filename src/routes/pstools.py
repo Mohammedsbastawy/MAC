@@ -61,20 +61,22 @@ def require_login_hook():
 
     data = request.get_json(silent=True)
     if data is None:
-        logger.warning(f"Auth failed for {request.endpoint}: Request body is missing or not JSON.")
-        return jsonify({'ok': False, 'error': 'Authentication required. Request must contain a JSON body with credentials.'}), 401
-        
-    user, _, pwd, _ = get_auth_from_request(data)
-    if not user or not pwd:
-        logger.warning(f"Auth failed for {request.endpoint}: Username or password missing in request body.")
-        return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+        if 'user' not in session:
+            logger.warning(f"Auth failed for {request.endpoint}: Request body missing and no session found.")
+            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
+    else:
+        user, _, pwd, _ = get_auth_from_request(data)
+        if not user or not pwd:
+            if 'user' not in session:
+                logger.warning(f"Auth failed for {request.endpoint}: Credentials missing in body and no session found.")
+                return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
 
 @pstools_bp.route('/psexec', methods=['POST'])
 def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     
     logger.info(f"Executing psexec on {ip} with command: '{cmd}'")
     if not cmd:
@@ -88,7 +90,7 @@ def api_psexec():
 def api_psservice():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     svc, action = data.get("svc",""), data.get("action","query")
 
     logger.info(f"Executing psservice on {ip} with action: '{action}' for service: '{svc or 'all'}'")
@@ -122,11 +124,13 @@ def api_psservice():
 def api_pslist():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
+
 
     logger.info(f"Executing Get-Process (WinRM) on {ip}.")
     
-    ps_command = """
+    ps_command = r"""
     $processes = Get-Process
     $total_cpu_seconds = (Get-Counter '\Processor(_Total)\% Processor Time').CounterSamples[0].CookedValue
     $output = @()
@@ -176,7 +180,8 @@ def api_pslist():
 def api_pskill():
     data = request.get_json() or {}
     ip, proc_id = data.get("ip",""), data.get("proc","")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     logger.info(f"Executing Stop-Process (WinRM) on {ip} for PID: '{proc_id}'.")
     if not proc_id:
@@ -196,7 +201,7 @@ def api_pskill():
 def api_psloglist():
     data = request.get_json() or {}
     ip, kind = data.get("ip",""), data.get("kind","system")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     logger.info(f"Executing psloglist on {ip} for log type: '{kind}'.")
     rc, out, err = run_ps_command("psloglist", ip, user, domain, pwd, ["-d", "1", kind], timeout=120)
 
@@ -211,7 +216,7 @@ def api_psloglist():
 def api_psinfo():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     logger.info(f"Executing psinfo on {ip}.")
     rc, out, err = run_ps_command("psinfo", ip, user, domain, pwd, ["-d"], timeout=120)
 
@@ -226,7 +231,8 @@ def api_psinfo():
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     logger.info(f"Executing quser.exe (WinRM) on {ip}.")
     
@@ -282,7 +288,8 @@ def api_psshutdown():
     data = request.get_json() or {}
     ip, action = data.get("ip",""), data.get("action","restart")
     session_id = data.get("session")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     logger.info(f"Executing shutdown/restart/logoff on {ip} with action: '{action}'.")
 
@@ -306,7 +313,7 @@ def api_psshutdown():
 def api_psfile():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     logger.info(f"Executing psfile on {ip}.")
     rc, out, err = run_ps_command("psfile", ip, user, domain, pwd, [], timeout=60)
     
@@ -320,7 +327,7 @@ def api_psfile():
 def api_psgetsid():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     logger.info(f"Executing psgetsid on {ip}.")
     rc, out, err = run_ps_command("psgetsid", ip, user, domain, pwd, [], timeout=60)
     return json_result(rc, out, err)
@@ -329,7 +336,7 @@ def api_psgetsid():
 def api_pspasswd():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     target_user, new_pass = data.get("targetUser",""), data.get("newpass","")
     logger.info(f"Executing pspasswd on {ip} for user '{target_user}'.")
     if not target_user or not new_pass:
@@ -341,7 +348,7 @@ def api_pspasswd():
 def api_pssuspend():
     data = request.get_json() or {}
     ip, proc = data.get("ip",""), data.get("proc","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     logger.info(f"Executing pssuspend on {ip} for process: '{proc}'.")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
@@ -371,7 +378,8 @@ def api_psbrowse():
     data = request.get_json() or {}
     ip = data.get("ip", "")
     path = data.get("path", "")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
 
     logger.info(f"Executing file browse (WinRM) on {ip} for path: '{path or 'drives'}'")
     
@@ -418,7 +426,8 @@ def api_psbrowse():
 def download_file():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     if not path:
         return json_result(1, "", "File path is required.")
@@ -434,7 +443,8 @@ def download_file():
 def upload_file():
     data = request.get_json() or {}
     ip, dest_path, content_b64 = data.get("ip"), data.get("destinationPath"), data.get("fileContent")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     if not all([dest_path, content_b64]):
         return json_result(1, "", "Destination path and file content are required.")
@@ -463,7 +473,8 @@ def upload_file():
 def delete_item():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     ps_command = f"Remove-Item -Path '{path}' -Recurse -Force -ErrorAction Stop"
     logger.info(f"Attempting to delete '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -473,7 +484,8 @@ def delete_item():
 def rename_item():
     data = request.get_json() or {}
     ip, path, new_name = data.get("ip"), data.get("path"), data.get("newName")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     ps_command = f"Rename-Item -Path '{path}' -NewName '{new_name}' -ErrorAction Stop"
     logger.info(f"Attempting to rename '{path}' to '{new_name}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -483,7 +495,8 @@ def rename_item():
 def create_folder():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd = session.get('user'), session.get('domain'), session.get('password')
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     ps_command = f"New-Item -Path '{path}' -ItemType Directory -Force -ErrorAction Stop"
     logger.info(f"Attempting to create folder '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -494,7 +507,7 @@ def create_folder():
 def api_enable_winrm():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
 
     logger.info(f"Attempting to robustly enable WinRM on {ip} using PsExec.")
 
@@ -530,7 +543,7 @@ def api_enable_winrm():
 def api_enable_prereqs():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
 
     logger.info(f"Attempting to enable prerequisites (RPC/WMI) on {ip} using PsExec.")
 
@@ -566,7 +579,7 @@ def api_enable_prereqs():
 def api_set_network_private():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
 
     logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
 
@@ -596,7 +609,7 @@ def api_deploy_agent():
     ip = data.get("ip")
     device_name = data.get("name")
     
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
 
     if not all([ip, device_name]):
         return jsonify({"ok": False, "error": "Target IP and Device Name are required."}), 400
@@ -649,7 +662,7 @@ def api_enable_snmp():
     data = request.get_json() or {}
     ip = data.get("ip")
     server_ip = data.get("server_ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
 
     if not ip or not server_ip:
         return jsonify({"ok": False, "error": "Target IP and Server IP are required."}), 400
@@ -691,20 +704,68 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": full_details.strip()
         }), 500
-        
 
+@pstools_bp.route('/clean-temp-files', methods=['POST'])
+def api_clean_temp_files():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
 
+    logger.info(f"Attempting to clean temporary files on {ip}.")
+
+    ps_command = """
+    $pathsToClean = @(
+        "$env:SystemRoot\\Temp",
+        "$env:SystemRoot\\Prefetch"
+    )
+    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile
+    foreach ($profile in $userProfiles) {
+        $tempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\\Local\\Temp"
+        if (Test-Path -Path $tempPath) {
+            $pathsToClean += $tempPath
+        }
+    }
     
-
+    $totalSizeBefore = 0
+    foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+            $totalSizeBefore += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+        }
+    }
     
-
-
-
-
-
+    foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+            Get-ChildItem -Path $path -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
     
+    $totalSizeAfter = 0
+    foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+            $totalSizeAfter += (Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+        }
+    }
 
-
-
+    $freedBytes = $totalSizeBefore - $totalSizeAfter
+    $freedMb = [math]::Round($freedBytes / 1MB, 2)
     
+    $result = @{
+        freedMb = $freedMb
+    }
+    
+    return $result | ConvertTo-Json
+    """
+    
+    cmd_args = ["powershell.exe", "-Command", ps_command]
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
 
+    if rc == 0 and out:
+        try:
+            # The output is expected to be JSON now
+            structured_data = {"cleanTemp": json.loads(out)}
+            return json_result(rc, out, err, structured_data)
+        except json.JSONDecodeError:
+            err = f"Failed to parse JSON from cleanup script: {out}"
+            return json_result(1, out, err)
+    else:
+        return json_result(rc, out, err)
