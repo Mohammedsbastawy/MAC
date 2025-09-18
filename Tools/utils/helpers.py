@@ -171,13 +171,6 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
         if pwd:
             cred_args += ["-p", pwd]
         
-        # Add interactive flag if requested for psexec
-        if tool_name.lower() == 'psexec' and is_interactive:
-            if session_id:
-                cmd_list.append(f"-i {session_id}")
-            else:
-                 cmd_list.append("-i")
-
         # Build target arg
         target_arg = []
         # Allow hostnames or IPs
@@ -189,6 +182,13 @@ def run_ps_command(tool_name, ip, username=None, domain=None, pwd=None, extra_ar
                  raise ValueError("Invalid or missing IP address for target.")
 
         cmd_list += target_arg + cred_args
+
+        # Add interactive flag if requested for psexec, and place it BEFORE the command.
+        if tool_name.lower() == 'psexec' and is_interactive:
+            if session_id:
+                cmd_list.append(f"-i {session_id}")
+            else:
+                 cmd_list.append("-i")
         
         # Add any other arguments
         cmd_list += extra_args
@@ -426,5 +426,6 @@ def parse_query_user_output(output):
     
 
     
+
 
 
