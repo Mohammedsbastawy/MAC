@@ -77,13 +77,14 @@ def api_psexec():
     ip, cmd = data.get("ip",""), data.get("cmd","")
     user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
     is_interactive = data.get("isInteractive", False)
+    session_id = data.get("session_id")
     
-    logger.info(f"Executing psexec on {ip} with command: '{cmd}' (Interactive: {is_interactive})")
+    logger.info(f"Executing psexec on {ip} with command: '{cmd}' (Interactive: {is_interactive}, Session: {session_id or 'default'})")
     if not cmd:
         return json_result(2, "", "Command is required")
     
     cmd_args = [cmd] if is_interactive else ["cmd", "/c", cmd]
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, is_interactive=is_interactive)
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, is_interactive=is_interactive, session_id=session_id)
     return json_result(rc, out, err)
 
 
@@ -722,9 +723,9 @@ def api_clean_temp_files():
         Join-Path $env:SystemRoot "Temp",
         Join-Path $env:SystemRoot "Prefetch"
     )
-    $userProfiles = Get-CimInstance -ClassName Win32_UserProfile
-    foreach ($profile in $userProfiles) {
-        $userTempPath = Join-Path -Path $profile.LocalPath -ChildPath "AppData\Local\Temp"
+    # Add all user temp paths
+    Get-CimInstance -ClassName Win32_UserProfile | ForEach-Object {
+        $userTempPath = Join-Path -Path $_.LocalPath -ChildPath "AppData\Local\Temp"
         if (Test-Path -Path $userTempPath -PathType Container) {
             $pathsToClean += $userTempPath
         }
@@ -734,7 +735,10 @@ def api_clean_temp_files():
     $totalSizeBefore = 0
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $totalSizeBefore += (Get-ChildItem $path -Recurse -Force | Measure-Object -Property Length -Sum).Sum
+            $subItems = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
+            if ($subItems) {
+                $totalSizeBefore += ($subItems | Measure-Object -Property Length -Sum).Sum
+            }
         }
     }
     
@@ -755,9 +759,12 @@ def api_clean_temp_files():
     
     # 4. Calculate size after cleaning
     $totalSizeAfter = 0
-    foreach ($path in $pathsToClean) {
+     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-            $totalSizeAfter += (Get-ChildItem $path -Recurse -Force | Measure-Object -Property Length -Sum).Sum
+             $subItemsAfter = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
+            if ($subItemsAfter) {
+                $totalSizeAfter += ($subItemsAfter | Measure-Object -Property Length -Sum).Sum
+            }
         }
     }
     
@@ -790,8 +797,9 @@ def api_clean_temp_files():
             logger.error(err_msg)
             return json_result(1, out, err_msg)
     else:
-        logger.error(f"Cleanup script failed on {ip}. RC={rc}. Error: {err}. Output: {out}")
-        return json_result(rc, out, err)
+        err_out = err or out
+        logger.error(f"Cleanup script failed on {ip}. RC={rc}. Error: {err_out}")
+        return json_result(rc, out, err_out)
 
 
 @pstools_bp.route('/get-installed-apps', methods=['POST'])
