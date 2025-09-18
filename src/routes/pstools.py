@@ -76,15 +76,47 @@ def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
     user, domain, pwd, _ = session.get('user'), session.get('domain'), session.get('password'), None
-    is_interactive = data.get("isInteractive", False)
+    winrm_user = f"{user}@{domain}" if '@' not in user else user
     session_id = data.get("session_id")
     
-    logger.info(f"Executing psexec on {ip} with command: '{cmd}' (Interactive: {is_interactive}, Session: {session_id or 'default'})")
+    logger.info(f"Executing remote command on {ip} with command: '{cmd}' in session: {session_id or 'default'}")
+
     if not cmd:
         return json_result(2, "", "Command is required")
+
+    if not session_id:
+        # Fallback to a simple, non-interactive command if no session is specified
+        logger.warning(f"No session ID provided for interactive command on {ip}. Running non-interactively.")
+        ps_command = f"Start-Process -FilePath cmd.exe -ArgumentList '/c {cmd}' -Wait -NoNewWindow"
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=180)
+        return json_result(rc, out, err)
     
-    cmd_args = [cmd] if is_interactive else ["cmd", "/c", cmd]
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, is_interactive=is_interactive, session_id=session_id)
+    # Use Invoke-Command with a scheduled task to run interactively in the user's session
+    ps_command = f"""
+    $taskName = "AtlasPsexecTask-$(Get-Random)"
+    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c {cmd}"
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date)
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    
+    try {{
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -ErrorAction Stop
+        Start-ScheduledTask -TaskName $taskName
+        
+        # Give it a moment to run, then clean up
+        Start-Sleep -Seconds 2
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        
+        Write-Output "Command '{cmd}' was executed successfully on {ip}."
+    }} catch {{
+        Write-Error "Failed to schedule or run task: $_"
+        # Try to unregister in case of failure during start
+        Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
+    }}
+    """
+    
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=60)
+    
     return json_result(rc, out, err)
 
 
@@ -718,12 +750,10 @@ def api_clean_temp_files():
     ps_command = r"""
     $ErrorActionPreference = 'SilentlyContinue'
     
-    # 1. Gather all paths to clean
     $pathsToClean = @(
         Join-Path $env:SystemRoot "Temp",
         Join-Path $env:SystemRoot "Prefetch"
     )
-    # Add all user temp paths
     Get-CimInstance -ClassName Win32_UserProfile | ForEach-Object {
         $userTempPath = Join-Path -Path $_.LocalPath -ChildPath "AppData\Local\Temp"
         if (Test-Path -Path $userTempPath -PathType Container) {
@@ -731,7 +761,6 @@ def api_clean_temp_files():
         }
     }
     
-    # 2. Calculate size before cleaning
     $totalSizeBefore = 0
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
@@ -742,7 +771,6 @@ def api_clean_temp_files():
         }
     }
     
-    # 3. Perform cleanup
     $failedItems = @()
     foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
@@ -757,24 +785,23 @@ def api_clean_temp_files():
         }
     }
     
-    # 4. Calculate size after cleaning
     $totalSizeAfter = 0
-     foreach ($path in $pathsToClean) {
+    foreach ($path in $pathsToClean) {
         if (Test-Path $path) {
-             $subItemsAfter = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
+            $subItemsAfter = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
             if ($subItemsAfter) {
                 $totalSizeAfter += ($subItemsAfter | Measure-Object -Property Length -Sum).Sum
             }
         }
     }
     
-    # 5. Prepare results
     $freedBytes = $totalSizeBefore - $totalSizeAfter
     if ($freedBytes -lt 0) { $freedBytes = 0 }
     
     $result = @{
         freedMb = [math]::Round($freedBytes / 1MB, 2);
-        failedFiles = $failedItems.Count
+        failedFiles = $failedItems.Count;
+        errorDetails = if ($failedItems.Count -gt 0) { "Could not delete: " + ($failedItems -join ', ') } else { "" }
     }
 
     return $result | ConvertTo-Json -Compress
@@ -791,7 +818,7 @@ def api_clean_temp_files():
         try:
             parsed_out = json.loads(json_string)
             structured_data = {"cleanTemp": parsed_out}
-            return json_result(rc, json_string, err, structured_data)
+            return json_result(rc, json_string, parsed_out.get('errorDetails', err), structured_data)
         except json.JSONDecodeError:
             err_msg = f"Failed to parse JSON from cleanup script output. Raw output was: {out}"
             logger.error(err_msg)
@@ -870,3 +897,4 @@ def api_get_installed_apps():
 
 
     
+
