@@ -94,7 +94,7 @@ import {
     AlertDialogClose
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "../ui/input";
@@ -113,6 +113,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Progress } from "@/components/ui/progress";
 import { Sparkles } from "lucide-react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
 
 type DeviceActionsPanelProps = {
@@ -1242,10 +1243,15 @@ export default function DeviceActionsPanel({
   const [logDetail, setLogDetail] = React.useState<{ title: string, content: string } | null>(null);
   const [isEnablingWinRM, setIsEnablingWinRM] = React.useState(false);
   const [isEnablingPrereqs, setIsEnablingPrereqs] = React.useState(false);
-  const [apps, setApps] = React.useState<InstalledApp[]>([]);
-  const [isLoadingApps, setIsLoadingApps] = React.useState(false);
+  
+  // State for Open Application Dialog
   const [openAppDialog, setOpenAppDialog] = React.useState(false);
+  const [isLoadingApps, setIsLoadingApps] = React.useState(false);
+  const [isLoadingUsers, setIsLoadingUsers] = React.useState(false);
+  const [apps, setApps] = React.useState<InstalledApp[]>([]);
+  const [loggedOnUsers, setLoggedOnUsers] = React.useState<LoggedOnUser[]>([]);
   const [selectedApp, setSelectedApp] = React.useState<InstalledApp | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = React.useState<string | undefined>();
   
   const initialDiagnosticsState: WinRMDiagnosticsState = {
         service: { status: 'checking', message: '' },
@@ -1525,19 +1531,41 @@ export default function DeviceActionsPanel({
     const handleOpenAppDialog = async () => {
         setOpenAppDialog(true);
         setIsLoadingApps(true);
+        setIsLoadingUsers(true);
         setApps([]);
-        const result = await runApiAction('get-installed-apps', {}, false);
-        if (result?.ok) {
+        setLoggedOnUsers([]);
+        setSelectedApp(null);
+        setSelectedSessionId(undefined);
+
+        const appsPromise = runApiAction('get-installed-apps', {}, false);
+        const usersPromise = runApiAction('psloggedon', {}, false);
+
+        const [appsResult, usersResult] = await Promise.all([appsPromise, usersPromise]);
+
+        if (appsResult?.ok) {
             try {
-                const parsedApps = JSON.parse(result.stdout);
+                const parsedApps = JSON.parse(appsResult.stdout);
                 setApps(parsedApps);
             } catch {
                 toast({ variant: "destructive", title: "Error", description: "Failed to parse application list." });
             }
         } else {
-            toast({ variant: "destructive", title: "Error", description: result.error || "Could not fetch installed applications." });
+            toast({ variant: "destructive", title: "Error", description: appsResult?.error || "Could not fetch installed applications." });
         }
         setIsLoadingApps(false);
+
+        if (usersResult?.ok && usersResult.structured_data?.psloggedon) {
+            setLoggedOnUsers(usersResult.structured_data.psloggedon);
+            // Default to the first active user session if available
+            const activeUser = usersResult.structured_data.psloggedon.find(u => u.state.toLowerCase() === 'active');
+            if (activeUser) {
+                setSelectedSessionId(activeUser.id);
+            }
+
+        } else {
+            toast({ variant: "destructive", title: "Error", description: usersResult?.error || "Could not fetch logged on users." });
+        }
+        setIsLoadingUsers(false);
     }
     
     const handleRunApp = () => {
@@ -1545,9 +1573,12 @@ export default function DeviceActionsPanel({
             toast({ variant: 'destructive', title: 'No application selected' });
             return;
         }
-        handleGenericAction('psexec', { cmd: `"${selectedApp.ExecutablePath}"`, isInteractive: true });
+        handleGenericAction('psexec', { 
+            cmd: `"${selectedApp.ExecutablePath}"`, 
+            isInteractive: true,
+            session_id: selectedSessionId
+        });
         setOpenAppDialog(false);
-        setSelectedApp(null);
     }
 
     const Icon = device ? (ICONS[device.type] || Laptop) : Laptop;
@@ -1729,38 +1760,70 @@ export default function DeviceActionsPanel({
     </Sheet>
     
     <Dialog open={openAppDialog} onOpenChange={setOpenAppDialog}>
-        <DialogContent className="sm:max-w-[625px]">
+        <DialogContent className="sm:max-w-xl">
              <DialogHeader>
                 <DialogTitle>Open Remote Application</DialogTitle>
                 <DialogDescription>
-                    Select an installed application to run interactively on {device?.name}.
+                    Select an application and user session to run interactively on {device?.name}.
                 </DialogDescription>
             </DialogHeader>
-            <Command>
-                <CommandInput placeholder="Search for an application..." />
-                <CommandList>
-                    {isLoadingApps && <div className="py-6 text-center text-sm">Loading applications...</div>}
-                    <CommandEmpty>{!isLoadingApps && "No applications found."}</CommandEmpty>
-                    <CommandGroup>
-                        {apps.map((app) => (
-                            <CommandItem
-                                key={app.DisplayName + app.ExecutablePath}
-                                value={app.DisplayName}
-                                onSelect={() => {
-                                    setSelectedApp(app)
-                                    handleRunApp()
-                                }}
-                            >
-                                <AppWindow className="mr-2 h-4 w-4" />
-                                <div className="flex flex-col">
-                                    <span>{app.DisplayName}</span>
-                                    <span className="text-xs text-muted-foreground">{app.Publisher}</span>
-                                </div>
-                            </CommandItem>
-                        ))}
-                    </CommandGroup>
-                </CommandList>
-            </Command>
+            <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                    <Label htmlFor="user-session">User Session</Label>
+                    <Select onValueChange={setSelectedSessionId} value={selectedSessionId}>
+                        <SelectTrigger id="user-session" className="w-full">
+                            <SelectValue placeholder={isLoadingUsers ? "Loading users..." : "Select a user session"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {isLoadingUsers ? (
+                                <SelectItem value="loading" disabled>Loading...</SelectItem>
+                            ) : loggedOnUsers.length > 0 ? (
+                                loggedOnUsers.map(user => (
+                                    <SelectItem key={user.id} value={user.id}>
+                                        {user.username} ({user.state}, ID: {user.id})
+                                    </SelectItem>
+                                ))
+                            ) : (
+                                <SelectItem value="none" disabled>No active users found</SelectItem>
+                            )}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-2">
+                     <Label>Application</Label>
+                    <Command className="rounded-lg border shadow-md">
+                        <CommandInput placeholder="Search for an application..." />
+                        <CommandList className="max-h-[250px]">
+                            {isLoadingApps && <div className="py-6 text-center text-sm">Loading applications...</div>}
+                            <CommandEmpty>{!isLoadingApps && "No applications found."}</CommandEmpty>
+                            <CommandGroup>
+                                {apps.map((app) => (
+                                    <CommandItem
+                                        key={app.DisplayName + app.ExecutablePath}
+                                        value={app.DisplayName}
+                                        onSelect={() => setSelectedApp(app)}
+                                        className={cn(selectedApp?.DisplayName === app.DisplayName && "bg-accent")}
+                                    >
+                                        <AppWindow className="mr-2 h-4 w-4" />
+                                        <div className="flex flex-col">
+                                            <span>{app.DisplayName}</span>
+                                            <span className="text-xs text-muted-foreground">{app.Publisher}</span>
+                                        </div>
+                                    </CommandItem>
+                                ))}
+                            </CommandGroup>
+                        </CommandList>
+                    </Command>
+                </div>
+            </div>
+            <DialogFooter>
+                <DialogClose asChild>
+                    <Button type="button" variant="secondary">Cancel</Button>
+                </DialogClose>
+                <Button onClick={handleRunApp} disabled={!selectedApp}>
+                    Run Application
+                </Button>
+            </DialogFooter>
         </DialogContent>
     </Dialog>
 
