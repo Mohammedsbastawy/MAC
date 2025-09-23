@@ -13,6 +13,8 @@ def create_app():
     app = Flask(__name__)
     app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me-please")
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+    app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB limit for file uploads
+
     app.register_blueprint(network_bp)
     app.register_blueprint(pstools_bp)
     app.register_blueprint(auth_bp)
