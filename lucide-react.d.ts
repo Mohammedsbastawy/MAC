@@ -47,6 +47,7 @@ declare module 'lucide-react' {
     export const Laptop: Icon;
     export const LifeBuoy: Icon;
     export const Lightbulb: Icon;
+    export const List: Icon;
     export const Loader2: Icon;
     export const Lock: Icon;
     export const LogOut: Icon;
@@ -59,6 +60,7 @@ declare module 'lucide-react' {
     export const MoreVertical: Icon;
     export const Network: Icon;
     export const NotebookText: Icon;
+    export const Package: Icon;
     export const PanelLeft: Icon;
     export const PanelRight: Icon;
     export const PauseCircle: Icon;

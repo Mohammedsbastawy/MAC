@@ -26,6 +26,7 @@ import {
   ToyBrick,
   FileUp,
   Package,
+  List,
 } from "lucide-react";
 import {
   Table,
@@ -40,6 +41,13 @@ import type { Device } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type TargetDevice = Device & { isSelected: boolean };
 type TaskStatus = "pending" | "running" | "success" | "error";
@@ -48,6 +56,16 @@ type TaskResult = {
   status: TaskStatus;
   log: string;
 };
+
+const popularPackages = [
+    { name: "7-Zip", id: "7zip" },
+    { name: "Google Chrome", id: "googlechrome" },
+    { name: "VLC Media Player", id: "vlc" },
+    { name: "Notepad++", id: "notepadplusplus" },
+    { name: "Git", id: "git" },
+    { name: "Adobe Reader", id: "adobereader" },
+    { name: "Greenshot", id: "greenshot" },
+];
 
 export default function ChocolateyPage() {
   const { devices, isLoading: isLoadingDevices, error: devicesError } = useDeviceContext();
@@ -261,13 +279,28 @@ export default function ChocolateyPage() {
 
                          <div className="space-y-2">
                             <Label htmlFor="package-name">Package Name</Label>
-                            <Input 
-                                id="package-name" 
-                                placeholder="e.g., 7zip, vlc, git"
-                                value={packageName}
-                                onChange={(e) => setPackageName(e.target.value)}
-                                disabled={isTaskRunning}
-                            />
+                            <div className="flex gap-2">
+                                <Input 
+                                    id="package-name" 
+                                    placeholder="e.g., 7zip, vlc, git"
+                                    value={packageName}
+                                    onChange={(e) => setPackageName(e.target.value)}
+                                    disabled={isTaskRunning}
+                                />
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="outline"><List className="mr-2 h-4 w-4" /> Browse</Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent>
+                                        <DropdownMenuLabel>Popular Packages</DropdownMenuLabel>
+                                        {popularPackages.map(pkg => (
+                                            <DropdownMenuItem key={pkg.id} onSelect={() => setPackageName(pkg.id)}>
+                                                {pkg.name}
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
                         </div>
                          <div className="flex flex-wrap gap-2">
                             <Button onClick={() => handlePackageAction('install')} disabled={isTaskRunning || !packageName}><Package className="mr-2 h-4 w-4" />Install</Button>
@@ -296,13 +329,22 @@ export default function ChocolateyPage() {
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="exe-args">Silent Install Arguments</Label>
-                            <Input 
-                                id="exe-args" 
-                                placeholder="e.g. /S, /q, /quiet"
-                                value={exeArguments}
-                                onChange={(e) => setExeArguments(e.target.value)}
-                                disabled={isTaskRunning}
-                            />
+                            <div className="flex flex-col gap-2">
+                                <Input 
+                                    id="exe-args" 
+                                    placeholder="e.g. /S, /q, /quiet"
+                                    value={exeArguments}
+                                    onChange={(e) => setExeArguments(e.target.value)}
+                                    disabled={isTaskRunning}
+                                />
+                                <div className="flex flex-wrap gap-2">
+                                    {['/S', '/SILENT', '/q', '/quiet', '/norestart'].map(arg => (
+                                        <Button key={arg} variant="outline" size="sm" onClick={() => setExeArguments(prev => `${prev} ${arg}`.trim())}>
+                                            {arg}
+                                        </Button>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
 
                         <Button className="w-full" onClick={handleExeInstall} disabled={isTaskRunning || !exeFile}>
@@ -331,8 +373,8 @@ export default function ChocolateyPage() {
                         <div key={index}>
                              <details>
                                 <summary className="flex items-center gap-2 cursor-pointer">
-                                     {result.status === "pending" && <Loader2 className="h-4 w-4 animate-spin" />}
-                                    {result.status === "running" && <ChevronRight className="h-4 w-4 text-yellow-500 animate-pulse" />}
+                                     {result.status === "pending" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                    {result.status === "running" && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
                                     {result.status === "success" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
                                     {result.status === "error" && <XCircle className="h-4 w-4 text-red-500" />}
                                     <span className="font-medium">{result.deviceName}</span>
