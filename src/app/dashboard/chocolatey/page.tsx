@@ -40,7 +40,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import type { Device } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +47,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 
 type TargetDevice = Device & { isSelected: boolean };
 type TaskStatus = "pending" | "running" | "success" | "error";
@@ -65,6 +65,14 @@ const popularPackages = [
     { name: "Git", id: "git" },
     { name: "Adobe Reader", id: "adobereader" },
     { name: "Greenshot", id: "greenshot" },
+];
+
+const silentInstallArgs = [
+    { arg: '/S', description: 'Silent Mode' },
+    { arg: '/SILENT', description: 'Silent (Alternative)' },
+    { arg: '/q', description: 'Quiet Mode' },
+    { arg: '/qn', description: 'Quiet (No UI)' },
+    { arg: '/norestart', description: 'Prevent Restart' },
 ];
 
 export default function ChocolateyPage() {
@@ -338,9 +346,9 @@ export default function ChocolateyPage() {
                                     disabled={isTaskRunning}
                                 />
                                 <div className="flex flex-wrap gap-2">
-                                    {['/S', '/SILENT', '/q', '/quiet', '/norestart'].map(arg => (
-                                        <Button key={arg} variant="outline" size="sm" onClick={() => setExeArguments(prev => `${prev} ${arg}`.trim())}>
-                                            {arg}
+                                    {silentInstallArgs.map(item => (
+                                        <Button key={item.arg} variant="outline" size="sm" onClick={() => setExeArguments(prev => `${prev} ${item.arg}`.trim())}>
+                                            {item.description}
                                         </Button>
                                     ))}
                                 </div>
