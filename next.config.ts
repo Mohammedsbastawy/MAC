@@ -31,6 +31,9 @@ const nextConfig: NextConfig = {
       {
         source: '/api/:path*',
         destination: 'http://127.0.0.1:5000/api/:path*', // Proxy to Flask backend
+        // Disable the body parser to allow large file uploads to be streamed
+        // to the backend.
+        bodyParser: false,
       },
     ]
   },
