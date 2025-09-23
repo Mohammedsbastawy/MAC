@@ -59,6 +59,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+
 
 type TargetDevice = Device & { isSelected: boolean };
 type TaskStatus = "pending" | "running" | "success" | "error";
@@ -82,11 +84,11 @@ const popularPackages = [
 ];
 
 const silentInstallArgs = [
-    { arg: '/S', description: 'Silent Mode' },
-    { arg: '/SILENT', description: 'Silent (Alternative)' },
-    { arg: '/q', description: 'Quiet Mode' },
-    { arg: '/qn', description: 'Quiet (No UI)' },
-    { arg: '/norestart', description: 'Prevent Restart' },
+    { name: 'Silent Mode', arg: '/S' },
+    { name: 'Silent (Alt)', arg: '/SILENT' },
+    { name: 'Quiet Mode', arg: '/q' },
+    { name: 'Quiet (No UI)', arg: '/qn' },
+    { name: 'No Restart', arg: '/norestart' },
 ];
 
 const TaskTimer: React.FC<{ startTime: number | null, endTime: number | null, status: TaskStatus }> = ({ startTime, endTime, status }) => {
@@ -251,7 +253,6 @@ export default function ChocolateyPage() {
     }
     
     setIsTaskRunning(true);
-    const startTime = Date.now();
     setTaskExecutions(selectedDevices.map(d => ({ device: d, status: "pending", log: "", startTime: null, endTime: null })));
     toast({ title: "Task Started", description: initialMessage });
 
@@ -327,7 +328,7 @@ export default function ChocolateyPage() {
             reader.onerror = error => reject(error);
         });
     
-    const fileContent = await fileToBase64(exeFile);
+    const fileContentB64 = await fileToBase64(exeFile);
     
     runTaskManager(
         "/api/pstools/install-from-exe",
@@ -336,7 +337,7 @@ export default function ChocolateyPage() {
         (device) => ({
             targets: [device.ipAddress],
             fileName: exeFile.name,
-            fileContent: fileContent,
+            fileContent: fileContentB64,
             arguments: exeArguments,
         })
     )
@@ -427,7 +428,6 @@ export default function ChocolateyPage() {
                             <AlertDescription>
                                 If Chocolatey is not installed, run this command first.
                                 <Button size="sm" className="ml-4" onClick={handleInstallChoco} disabled={isTaskRunning}>
-                                    {isTaskRunning && taskExecutions.some(t => t.status === 'running') && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Install Chocolatey
                                 </Button>
                             </AlertDescription>
@@ -463,7 +463,23 @@ export default function ChocolateyPage() {
                          <div className="flex flex-wrap gap-2">
                             <Button onClick={() => handlePackageAction('install')} disabled={isTaskRunning || !packageName}><Package className="mr-2 h-4 w-4" />Install</Button>
                             <Button onClick={() => handlePackageAction('upgrade')} variant="outline" disabled={isTaskRunning || !packageName}>Upgrade</Button>
-                            <Button onClick={() => handlePackageAction('uninstall')} variant="destructive" disabled={isTaskRunning || !packageName}>Uninstall</Button>
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button variant="destructive" disabled={isTaskRunning || !packageName}>Uninstall</Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                    This will attempt to uninstall the package "{packageName}" from all selected devices. This action cannot be undone.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handlePackageAction('uninstall')} className="bg-destructive hover:bg-destructive/80">Yes, Uninstall</AlertDialogAction>
+                                </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
                         </div>
                     </CardContent>
                 </Card>
@@ -498,7 +514,7 @@ export default function ChocolateyPage() {
                                 <div className="flex flex-wrap gap-2">
                                     {silentInstallArgs.map(item => (
                                         <Button key={item.arg} variant="outline" size="sm" onClick={() => setExeArguments(prev => `${prev} ${item.arg}`.trim())}>
-                                            {item.description}
+                                            {item.name}
                                         </Button>
                                     ))}
                                 </div>

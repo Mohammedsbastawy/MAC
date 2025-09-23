@@ -10,11 +10,11 @@ from Tools.utils.logger import logger
 import datetime
 import json
 from .activedirectory import get_ldap_connection
+from Tools.utils.settings_manager import get_setting
 
 pstools_bp = Blueprint('pstools', __name__, url_prefix='/api/pstools')
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'monitoring_logs')
-LOG_RETENTION_HOURS = 168 # 7 days
 
 
 def json_result(rc, out, err, structured_data=None, extra_data={}):
@@ -43,13 +43,13 @@ def json_result(rc, out, err, structured_data=None, extra_data={}):
 
 
 
-def get_auth_from_request(data):
-    """Safely gets auth credentials from request JSON or falls back to session."""
-    user = data.get("username") if data else session.get("user")
-    domain = data.get("domain") if data else session.get("domain")
-    pwd = data.get("password") if data else session.get("password")
+def get_auth_from_session():
+    """Safely gets auth credentials from the server-side session."""
+    user = session.get("user")
+    domain = session.get("domain")
+    pwd = session.get("password")
     
-    if not user or not pwd:
+    if not user or not pwd or not domain:
         return None, None, None, None
 
     winrm_user = f"{user}@{domain}" if '@' not in user else user
@@ -58,22 +58,9 @@ def get_auth_from_request(data):
 
 @pstools_bp.before_request
 def require_login_hook():
-    # Special handling for endpoints that might not have a body and rely on session
-    endpoints_without_body = ['pstools.api_deploy_agent', 'pstools.api_enable_snmp']
-    if request.endpoint in endpoints_without_body:
-        if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
-        return  # Proceed with session auth
-
-    # For all other endpoints, try to get JSON, but fall back to session if no JSON body exists
-    data = request.get_json(silent=True)
-    if data is None:
-        if 'user' not in session:
-            return jsonify({'ok': False, 'error': 'Request is missing a body, and no active session was found.'}), 401
-        return # Proceed with session auth
-        
-    user, _, _, _ = get_auth_from_request(data)
-    if not user:
+    user, domain, pwd, _ = get_auth_from_session()
+    if not all([user, domain, pwd]):
+        logger.warning(f"Auth failed for {request.endpoint}: User credentials not found in session.")
         return jsonify({'ok': False, 'error': 'Authentication required. Please log in.'}), 401
 
 
@@ -81,13 +68,42 @@ def require_login_hook():
 def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_session()
+    is_interactive = data.get("isInteractive", False)
+    session_id = data.get("session_id")
     
-    logger.info(f"Executing psexec on {ip} with command: '{cmd}'")
+    logger.info(f"Executing remote command on {ip} with command: '{cmd}' (Interactive: {is_interactive}, Session: {session_id or 'default'})")
+
     if not cmd:
         return json_result(2, "", "Command is required")
-    cmd_args = ["cmd", "/c", cmd]
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180)
+
+    # For interactive commands, we use a more complex PowerShell script via WinRM
+    if is_interactive and session_id:
+        ps_command = f"""
+        try {{
+            $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c {cmd.replace('"', '`"')}"
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(1)
+            $principal = New-ScheduledTaskPrincipal -UserId (quser {session_id} | Select-Object -ExpandProperty USERNAME) -RunLevel Limited
+            $taskName = "AtlasInteractiveTask-$(Get-Random)"
+
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -ErrorAction Stop
+            Start-ScheduledTask -TaskName $taskName
+            
+            Start-Sleep -Seconds 3
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+            Write-Output "Interactive command '{cmd}' was executed in session {session_id}."
+        }} catch {{
+            Write-Error "Failed to execute interactive command: $_"
+            exit 1
+        }}
+        """
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=60)
+        return json_result(rc, out, err)
+    
+    # For non-interactive commands, use the simpler psexec
+    cmd_args = [cmd]
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, is_interactive=False)
     return json_result(rc, out, err)
 
 
@@ -95,7 +111,7 @@ def api_psexec():
 def api_psservice():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     svc, action = data.get("svc",""), data.get("action","query")
 
     logger.info(f"Executing psservice on {ip} with action: '{action}' for service: '{svc or 'all'}'")
@@ -129,7 +145,8 @@ def api_psservice():
 def api_pslist():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Executing Get-Process (WinRM) on {ip}.")
     
@@ -183,7 +200,8 @@ def api_pslist():
 def api_pskill():
     data = request.get_json() or {}
     ip, proc_id = data.get("ip",""), data.get("proc","")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     
     logger.info(f"Executing Stop-Process (WinRM) on {ip} for PID: '{proc_id}'.")
     if not proc_id:
@@ -203,7 +221,7 @@ def api_pskill():
 def api_psloglist():
     data = request.get_json() or {}
     ip, kind = data.get("ip",""), data.get("kind","system")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing psloglist on {ip} for log type: '{kind}'.")
     rc, out, err = run_ps_command("psloglist", ip, user, domain, pwd, ["-d", "1", kind], timeout=120)
 
@@ -223,15 +241,11 @@ def api_psinfo_internal(ip=None, name=None):
         return jsonify({"ok": False, "error": "Internal Server Error: IP address and device name are required for api_psinfo_internal."}), 500
 
     # Authentication must come from the session.
-    user = session.get("user")
-    domain = session.get("domain")
-    pwd = session.get("password")
+    user, domain, pwd, winrm_user = get_auth_from_session()
 
     if not all([user, domain, pwd]):
         logger.error(f"Authentication missing in session for internal call to '{name}' on IP '{ip}'.")
         return jsonify({"ok": False, "error": "Authentication required to fetch agent data."}), 401
-    
-    winrm_user = f"{user}@{domain}" if '@' not in user else user
     
     logger.info(f"Reading performance data for '{name}' from agent file on {ip}.")
     
@@ -271,7 +285,8 @@ def api_psinfo_internal(ip=None, name=None):
                 })
 
                 # Prune old data based on retention setting
-                retention_delta = datetime.timedelta(hours=LOG_RETENTION_HOURS)
+                log_retention_hours = get_setting('log_retention_hours')
+                retention_delta = datetime.timedelta(hours=log_retention_hours)
                 now_utc = datetime.datetime.now(datetime.timezone.utc)
                 
                 def parse_iso_with_timezone(ts_str):
@@ -315,7 +330,8 @@ def api_psinfo():
 def api_psloggedon():
     data = request.get_json() or {}
     ip = data.get("ip", "")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     
     logger.info(f"Executing quser.exe (WinRM) on {ip}.")
     
@@ -371,7 +387,7 @@ def api_psshutdown():
     data = request.get_json() or {}
     ip, action = data.get("ip",""), data.get("action","restart")
     session_id = data.get("session")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    user, domain, pwd, winrm_user = get_auth_from_session()
     
     logger.info(f"Executing shutdown/restart/logoff on {ip} with action: '{action}'.")
 
@@ -395,7 +411,7 @@ def api_psshutdown():
 def api_psfile():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing psfile on {ip}.")
     rc, out, err = run_ps_command("psfile", ip, user, domain, pwd, [], timeout=60)
     
@@ -409,7 +425,7 @@ def api_psfile():
 def api_psgetsid():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing psgetsid on {ip}.")
     rc, out, err = run_ps_command("psgetsid", ip, user, domain, pwd, [], timeout=60)
     return json_result(rc, out, err)
@@ -418,7 +434,7 @@ def api_psgetsid():
 def api_pspasswd():
     data = request.get_json() or {}
     ip = data.get("ip","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     target_user, new_pass = data.get("targetUser",""), data.get("newpass","")
     logger.info(f"Executing pspasswd on {ip} for user '{target_user}'.")
     if not target_user or not new_pass:
@@ -430,7 +446,7 @@ def api_pspasswd():
 def api_pssuspend():
     data = request.get_json() or {}
     ip, proc = data.get("ip",""), data.get("proc","")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
     logger.info(f"Executing pssuspend on {ip} for process: '{proc}'.")
     if not proc:
         return json_result(2, "", "Process name or PID is required")
@@ -460,7 +476,8 @@ def api_psbrowse():
     data = request.get_json() or {}
     ip = data.get("ip", "")
     path = data.get("path", "")
-    user, domain, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Executing file browse (WinRM) on {ip} for path: '{path or 'drives'}'")
     
@@ -507,7 +524,8 @@ def api_psbrowse():
 def download_file():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     
     if not path:
         return json_result(1, "", "File path is required.")
@@ -523,28 +541,19 @@ def download_file():
 def upload_file():
     data = request.get_json() or {}
     ip, dest_path, content_b64 = data.get("ip"), data.get("destinationPath"), data.get("fileContent")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
     
     if not all([dest_path, content_b64]):
         return json_result(1, "", "Destination path and file content are required.")
     
     logger.info(f"Initiating upload to '{dest_path}' on {ip}")
-    chunk_size = 8000 
-    chunks = [content_b64[i:i + chunk_size] for i in range(0, len(content_b64), chunk_size)]
     
-    ps_command_create = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{chunks[0]}'); [System.IO.File]::WriteAllBytes($path, $data)"
+    ps_command_create = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{content_b64}'); [System.IO.File]::WriteAllBytes($path, $data)"
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command_create)
     if rc != 0:
         logger.error(f"Upload failed (initial chunk) to {dest_path} on {ip}. Error: {err}")
         return json_result(rc, out, f"Failed to create file on remote host. {err}")
         
-    for chunk in chunks[1:]:
-        ps_command_append = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{chunk}'); [System.IO.File]::AppendAllBytes($path, $data)"
-        rc_append, out_append, err_append = run_winrm_command(ip, winrm_user, pwd, ps_command_append)
-        if rc_append != 0:
-            logger.error(f"Upload failed (append chunk) to {dest_path} on {ip}. Error: {err_append}")
-            return json_result(rc_append, out_append, f"Failed during file append. {err_append}")
-            
     logger.info(f"Successfully uploaded file to '{dest_path}' on {ip}")
     return json_result(0, "Upload successful", "", {"message": "File uploaded successfully."})
 
@@ -552,7 +561,8 @@ def upload_file():
 def delete_item():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     ps_command = f"Remove-Item -Path '{path}' -Recurse -Force -ErrorAction Stop"
     logger.info(f"Attempting to delete '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -562,7 +572,8 @@ def delete_item():
 def rename_item():
     data = request.get_json() or {}
     ip, path, new_name = data.get("ip"), data.get("path"), data.get("newName")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     ps_command = f"Rename-Item -Path '{path}' -NewName '{new_name}' -ErrorAction Stop"
     logger.info(f"Attempting to rename '{path}' to '{new_name}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -572,7 +583,8 @@ def rename_item():
 def create_folder():
     data = request.get_json() or {}
     ip, path = data.get("ip"), data.get("path")
-    _, _, pwd, winrm_user = get_auth_from_request(data)
+    _, _, _, winrm_user = get_auth_from_session()
+    user, domain, pwd, _ = get_auth_from_session()
     ps_command = f"New-Item -Path '{path}' -ItemType Directory -Force -ErrorAction Stop"
     logger.info(f"Attempting to create folder '{path}' on {ip}")
     rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
@@ -583,7 +595,7 @@ def create_folder():
 def api_enable_winrm():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Attempting to robustly enable WinRM on {ip} using PsExec.")
 
@@ -619,7 +631,7 @@ def api_enable_winrm():
 def api_enable_prereqs():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Attempting to enable prerequisites (RPC/WMI) on {ip} using PsExec.")
 
@@ -655,7 +667,7 @@ def api_enable_prereqs():
 def api_set_network_private():
     data = request.get_json() or {}
     ip = data.get("ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     logger.info(f"Attempting to set network profile to Private on {ip} using PsExec.")
 
@@ -685,13 +697,10 @@ def api_deploy_agent():
     ip = data.get("ip")
     device_name = data.get("name")
     
-    # Get auth from session, NOT from the request body for this endpoint
-    user = session.get("user")
-    domain = session.get("domain")
-    pwd = session.get("password")
+    user, domain, pwd, _ = get_auth_from_session()
 
-    if not all([ip, device_name, user, domain, pwd]):
-        return jsonify({"ok": False, "error": "Target IP, Device Name, and authentication are required."}), 400
+    if not all([ip, device_name]):
+        return jsonify({"ok": False, "error": "Target IP and Device Name are required."}), 400
 
     logger.info(f"Starting Atlas Agent deployment on {ip} for device {device_name}.")
     
@@ -741,7 +750,7 @@ def api_enable_snmp():
     data = request.get_json() or {}
     ip = data.get("ip")
     server_ip = data.get("server_ip")
-    user, domain, pwd, _ = get_auth_from_request(data)
+    user, domain, pwd, _ = get_auth_from_session()
 
     if not ip or not server_ip:
         return jsonify({"ok": False, "error": "Target IP and Server IP are required."}), 400
@@ -783,20 +792,316 @@ def api_enable_snmp():
             "error": f"Failed to execute SNMP script on {ip}.",
             "details": full_details.strip()
         }), 500
+
+@pstools_bp.route('/clean-temp-files', methods=['POST'])
+def api_clean_temp_files():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, _ = get_auth_from_session()
+
+    logger.info(f"Attempting to clean temporary files on {ip}.")
+
+    ps_command = r"""
+    $ErrorActionPreference = 'SilentlyContinue'
+    
+    # 1. Gather all paths to clean
+    $pathsToClean = @(
+        Join-Path $env:SystemRoot "Temp",
+        Join-Path $env:SystemRoot "Prefetch"
+    )
+    # Add all user temp paths
+    Get-CimInstance -ClassName Win32_UserProfile | ForEach-Object {
+        $userTempPath = Join-Path -Path $_.LocalPath -ChildPath "AppData\Local\Temp"
+        if (Test-Path -Path $userTempPath -PathType Container) {
+            $pathsToClean += $userTempPath
+        }
+    }
+    
+    # 2. Calculate size before cleaning
+    $totalSizeBefore = 0
+    foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+            $subItems = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
+            if ($subItems) {
+                $totalSizeBefore += ($subItems | Measure-Object -Property Length -Sum).Sum
+            }
+        }
+    }
+    
+    # 3. Perform cleanup
+    $failedItems = @()
+    foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+            $items = Get-ChildItem -Path $path -Recurse -Force
+            foreach ($item in $items) {
+                try {
+                    Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction Stop
+                } catch {
+                    $failedItems += $item.FullName
+                }
+            }
+        }
+    }
+    
+    # 4. Calculate size after cleaning
+    $totalSizeAfter = 0
+     foreach ($path in $pathsToClean) {
+        if (Test-Path $path) {
+             $subItemsAfter = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue
+            if ($subItemsAfter) {
+                $totalSizeAfter += ($subItemsAfter | Measure-Object -Property Length -Sum).Sum
+            }
+        }
+    }
+    
+    # 5. Prepare results
+    $freedBytes = $totalSizeBefore - $totalSizeAfter
+    if ($freedBytes -lt 0) { $freedBytes = 0 }
+    
+    $result = @{
+        freedMb = [math]::Round($freedBytes / 1MB, 2);
+        failedFiles = $failedItems.Count
+    }
+
+    return $result | ConvertTo-Json -Compress
+    """
+    
+    cmd_args = ["powershell.exe", "-Command", ps_command]
+    
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=300)
+
+    json_match = re.search(r'\{.*\}', out, re.DOTALL)
+    
+    if rc == 0 and json_match:
+        json_string = json_match.group(0)
+        try:
+            parsed_out = json.loads(json_string)
+            structured_data = {"cleanTemp": parsed_out}
+            return json_result(rc, json_string, err, structured_data)
+        except json.JSONDecodeError:
+            err_msg = f"Failed to parse JSON from cleanup script output. Raw output was: {out}"
+            logger.error(err_msg)
+            return json_result(1, out, err_msg)
+    else:
+        err_out = err or out
+        logger.error(f"Cleanup script failed on {ip}. RC={rc}. Error: {err_out}")
+        return json_result(rc, out, err_out)
+
+
+@pstools_bp.route('/get-installed-apps', methods=['POST'])
+def api_get_installed_apps():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    user, domain, pwd, winrm_user = get_auth_from_session()
+
+    logger.info(f"Getting installed applications from {ip} via WinRM.")
+
+    ps_command = r"""
+    $ErrorActionPreference = 'SilentlyContinue'
+    $paths = @(
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    $apps = Get-ItemProperty $paths | Where-Object { $_.DisplayName -and $_.UninstallString }
+    
+    $results = @()
+    foreach ($app in $apps) {
+        $exePath = $null
+        if ($app.UninstallString) {
+            $match = [regex]::Match($app.UninstallString, '"(.*?)"')
+            if ($match.Success) {
+                $exePath = $match.Groups[1].Value
+            } else {
+                $exePath = ($app.UninstallString -split ' ')[0]
+            }
+        }
+        
+        $results += [PSCustomObject]@{
+            DisplayName  = $app.DisplayName
+            ExecutablePath = $exePath
+            Publisher    = $app.Publisher
+        }
+    }
+    
+    $results | Sort-Object DisplayName | ConvertTo-Json -Compress
+    """
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=120)
+
+    return json_result(rc, out, err)
         
 
+@pstools_bp.route('/install-chocolatey', methods=['POST'])
+def install_chocolatey():
+    data = request.get_json() or {}
+    targets = data.get("targets", [])
+    if not targets:
+        return jsonify({"ok": False, "error": "No target devices specified."}), 400
 
+    user, domain, pwd, winrm_user = get_auth_from_session()
+
+    ps_script = """
+    Set-ExecutionPolicy Bypass -Scope Process -Force;
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    """
     
-
+    # Since we are targeting one machine at a time from the UI loop
+    target_ip = targets[0]
+    logger.info(f"Attempting to install Chocolatey on {target_ip}.")
+    rc, out, err = run_winrm_command(target_ip, winrm_user, pwd, ps_script, timeout=300)
     
+    return json_result(rc, out, err)
 
 
+@pstools_bp.route('/manage-package', methods=['POST'])
+def manage_package():
+    data = request.get_json() or {}
+    targets = data.get("targets", [])
+    package_name = data.get("package_name")
+    action = data.get("action")
 
+    if not all([targets, package_name, action]):
+        return jsonify({"ok": False, "error": "Missing parameters: targets, package_name, and action are required."}), 400
 
+    if action not in ["install", "upgrade", "uninstall"]:
+        return jsonify({"ok": False, "error": "Invalid action specified."}), 400
 
+    user, domain, pwd, winrm_user = get_auth_from_session()
     
-
-
-
+    ps_script = f"""
+    $chocoPath = "C:\\ProgramData\\chocolatey\\bin\\choco.exe"
+    if (Test-Path $chocoPath) {{
+        try {{
+            & $chocoPath {action} {package_name} -y
+            if ($LASTEXITCODE -ne 0) {{
+                Write-Error "Chocolatey command failed with exit code $LASTEXITCODE."
+                exit $LASTEXITCODE
+            }}
+        }} catch {{
+            Write-Error "An error occurred while running Chocolatey: $_"
+            exit 1
+        }}
+    }} else {{
+        Write-Error "Chocolatey is not installed at the expected path: $chocoPath"
+        exit 1
+    }}
+    """
     
+    target_ip = targets[0]
+    logger.info(f"Attempting to run 'choco {action} {package_name}' on {target_ip}.")
+    rc, out, err = run_winrm_command(target_ip, winrm_user, pwd, ps_script, timeout=1200)
+    
+    return json_result(rc, out, err)
 
+@pstools_bp.route('/reset-trust-relationship', methods=['POST'])
+def reset_trust_relationship():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    local_user = data.get("local_username")
+    local_pass = data.get("local_password")
+    
+    if not ip or not local_user or not local_pass:
+        return jsonify({"ok": False, "error": "Target IP, local username, and password are required."}), 400
+
+    # Domain admin credentials from the session for the -Credential parameter
+    domain_admin_user, domain, domain_admin_pass, _ = get_auth_from_session()
+    if not domain_admin_user:
+        return jsonify({"ok": False, "error": "Domain admin session has expired. Please log in again."}), 401
+    
+    domain_controller = domain # Assume the domain name is the DC for simplicity
+    
+    logger.info(f"Attempting to reset trust relationship for {ip} using local user '{local_user}'.")
+
+    # This PowerShell script will be executed on the remote machine
+    # It creates a PSCredential object for the domain admin and then runs the reset command
+    ps_command = f"""
+    $domainUser = "{domain}\\{domain_admin_user}";
+    $domainPass = ConvertTo-SecureString "{domain_admin_pass}" -AsPlainText -Force;
+    $cred = New-Object System.Management.Automation.PSCredential($domainUser, $domainPass);
+    
+    Reset-ComputerMachinePassword -Server "{domain_controller}" -Credential $cred;
+    
+    if ($LASTEXITCODE -eq 0) {{
+        Write-Host "Trust relationship reset successfully. Restarting machine in 30 seconds to apply changes.";
+        Start-Sleep -Seconds 5;
+        Restart-Computer -Force;
+    }} else {{
+        Write-Error "Failed to reset trust relationship. Exit code: $LASTEXITCODE";
+    }}
+    """
+    
+    # We use the local credentials to connect via PsExec
+    # And run the PowerShell command which uses the domain credentials internally
+    cmd_args = ["powershell.exe", "-Command", ps_command]
+    
+    rc, out, err = run_ps_command(
+        "psexec", 
+        ip, 
+        username=local_user, 
+        domain=".", # Use "." for local account
+        pwd=local_pass, 
+        extra_args=cmd_args, 
+        timeout=180
+    )
+    
+    return json_result(rc, out, err)
+
+
+@pstools_bp.route('/install-from-exe', methods=['POST'])
+def install_from_exe():
+    data = request.get_json() or {}
+    targets = data.get("targets", [])
+    file_name = data.get("fileName")
+    file_content_b64 = data.get("fileContent")
+    arguments = data.get("arguments", "")
+
+    if not all([targets, file_name, file_content_b64]):
+        return jsonify({"ok": False, "error": "Missing parameters: targets, fileName, and fileContent are required."}), 400
+
+    user, domain, pwd, winrm_user = get_auth_from_session()
+    target_ip = targets[0]
+    
+    remote_path = f"C:\\Windows\\Temp\\{file_name}"
+    
+    logger.info(f"Starting EXE deployment for {file_name} to {target_ip}")
+    
+    # 1. Upload the file
+    upload_script = f"""
+    $path = "{remote_path}"
+    $data = [System.Convert]::FromBase64String("{file_content_b64}")
+    [System.IO.File]::WriteAllBytes($path, $data)
+    """
+    rc_upload, out_upload, err_upload = run_winrm_command(target_ip, winrm_user, pwd, upload_script, timeout=600)
+    
+    if rc_upload != 0:
+        logger.error(f"Failed to upload {file_name} to {target_ip}: {err_upload}")
+        return json_result(rc_upload, out_upload, f"Failed to upload installer: {err_upload}")
+
+    logger.info(f"Successfully uploaded {file_name} to {target_ip}. Now attempting installation.")
+
+    # 2. Execute the installer
+    install_script = f"""
+    try {{
+        Start-Process -FilePath "{remote_path}" -ArgumentList "{arguments}" -Wait -PassThru -ErrorAction Stop
+        $stdout = "Installation process completed."
+        $stderr = ""
+        $rc = 0
+    }} catch {{
+        $stdout = ""
+        $stderr = "Failed to start installer process: $_"
+        $rc = 1
+    }}
+    
+    # 3. Clean up the installer file
+    Remove-Item -Path "{remote_path}" -Force -ErrorAction SilentlyContinue
+    
+    Write-Output $stdout
+    Write-Error $stderr
+    exit $rc
+    """
+    rc_install, out_install, err_install = run_winrm_command(target_ip, winrm_user, pwd, install_script, timeout=1200)
+
+    final_output = f"Upload complete.\n\n--- Installation Log ---\n{out_install}"
+    final_error = err_install
+    
+    return json_result(rc_install, final_output, final_error)
