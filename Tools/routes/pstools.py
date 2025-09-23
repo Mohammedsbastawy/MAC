@@ -70,16 +70,42 @@ def require_login_hook():
 def api_psexec():
     data = request.get_json() or {}
     ip, cmd = data.get("ip",""), data.get("cmd","")
-    user, domain, pwd, _ = get_auth_from_session()
+    user, domain, pwd, winrm_user = get_auth_from_session()
     is_interactive = data.get("isInteractive", False)
     session_id = data.get("session_id")
     
-    logger.info(f"Executing psexec on {ip} with command: '{cmd}' (Interactive: {is_interactive}, Session: {session_id or 'default'})")
+    logger.info(f"Executing remote command on {ip} with command: '{cmd}' (Interactive: {is_interactive}, Session: {session_id or 'default'})")
+
     if not cmd:
         return json_result(2, "", "Command is required")
+
+    # For interactive commands, we use a more complex PowerShell script via WinRM
+    if is_interactive and session_id:
+        ps_command = f"""
+        try {{
+            $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c {cmd.replace('"', '`"')}"
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(1)
+            $principal = New-ScheduledTaskPrincipal -UserId (quser {session_id} | Select-Object -ExpandProperty USERNAME) -RunLevel Limited
+            $taskName = "AtlasInteractiveTask-$(Get-Random)"
+
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -ErrorAction Stop
+            Start-ScheduledTask -TaskName $taskName
+            
+            Start-Sleep -Seconds 3
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+            Write-Output "Interactive command '{cmd}' was executed in session {session_id}."
+        }} catch {{
+            Write-Error "Failed to execute interactive command: $_"
+            exit 1
+        }}
+        """
+        rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command, timeout=60)
+        return json_result(rc, out, err)
     
+    # For non-interactive commands, use the simpler psexec
     cmd_args = [cmd]
-    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, is_interactive=is_interactive, session_id=session_id)
+    rc, out, err = run_ps_command("psexec", ip, user, domain, pwd, cmd_args, timeout=180, is_interactive=False)
     return json_result(rc, out, err)
 
 
@@ -954,7 +980,6 @@ def manage_package():
 
     user, domain, pwd, winrm_user = get_auth_from_session()
     
-    # This is a more robust script to run choco commands
     ps_script = f"""
     $chocoPath = "C:\\ProgramData\\chocolatey\\bin\\choco.exe"
     if (Test-Path $chocoPath) {{
@@ -976,9 +1001,10 @@ def manage_package():
     
     target_ip = targets[0]
     logger.info(f"Attempting to run 'choco {action} {package_name}' on {target_ip}.")
-    rc, out, err = run_winrm_command(target_ip, winrm_user, pwd, ps_script, timeout=600)
+    rc, out, err = run_winrm_command(target_ip, winrm_user, pwd, ps_script, timeout=1200)
     
     return json_result(rc, out, err)
+
 @pstools_bp.route('/reset-trust-relationship', methods=['POST'])
 def reset_trust_relationship():
     data = request.get_json() or {}
