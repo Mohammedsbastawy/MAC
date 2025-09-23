@@ -1,3 +1,4 @@
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -914,26 +915,271 @@ def api_get_installed_apps():
     return json_result(rc, out, err)
         
 
+@pstools_bp.route('/install-chocolatey', methods=['POST'])
+def install_chocolatey():
+    data = request.get_json() or {}
+    targets = data.get("targets", [])
+    if not targets:
+        return jsonify({"ok": False, "error": "No target devices specified."}), 400
 
+    user, domain, pwd, winrm_user = get_auth_from_session()
+
+    ps_script = """
+    Set-ExecutionPolicy Bypass -Scope Process -Force;
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    """
     
-
+    # Since we are targeting one machine at a time from the UI loop
+    target_ip = targets[0]
+    logger.info(f"Attempting to install Chocolatey on {target_ip}.")
+    rc, out, err = run_winrm_command(target_ip, winrm_user, pwd, ps_script, timeout=300)
     
+    return json_result(rc, out, err)
 
 
+@pstools_bp.route('/manage-package', methods=['POST'])
+def manage_package():
+    data = request.get_json() or {}
+    targets = data.get("targets", [])
+    package_name = data.get("package_name")
+    action = data.get("action")
 
+    if not all([targets, package_name, action]):
+        return jsonify({"ok": False, "error": "Missing parameters: targets, package_name, and action are required."}), 400
 
+    if action not in ["install", "upgrade", "uninstall"]:
+        return jsonify({"ok": False, "error": "Invalid action specified."}), 400
 
+    user, domain, pwd, winrm_user = get_auth_from_session()
     
-
-
-
+    ps_script = f"choco {action} {package_name} -y"
     
+    target_ip = targets[0]
+    logger.info(f"Attempting to run 'choco {action} {package_name}' on {target_ip}.")
+    rc, out, err = run_winrm_command(target_ip, winrm_user, pwd, ps_script, timeout=600)
+    
+    return json_result(rc, out, err)
+
+```
+- src/hooks/use-device-context.tsx
+- ```tsx
 
 
+"use client";
+
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import type { Device, ADComputer, PerformanceData } from '@/lib/types';
+import { useToast } from './use-toast';
+import { useAuth } from './use-auth';
+
+// Helper function from devices/page.tsx
+const mapAdComputerToDevice = (adComputer: ADComputer): Device => ({
+    id: adComputer.dn,
+    name: adComputer.name,
+    ipAddress: adComputer.dns_hostname,
+    macAddress: "-",
+    status: 'unknown',
+    type: determineDeviceType(adComputer.name),
+    os: adComputer.os,
+    lastSeen: adComputer.last_logon,
+    domain: adComputer.domain || "Domain",
+    isDomainMember: true,
+    isLoadingDetails: false,
+    source: 'ad',
+    isAgentDeployed: false,
+    agentLastUpdate: null,
+    agentStatusError: null,
+});
+
+const determineDeviceType = (hostname: string): Device["type"] => {
+    if (!hostname) return 'unknown';
+    const lowerHostname = hostname.toLowerCase();
+    if (lowerHostname.includes("laptop")) return "laptop";
+    if (lowerHostname.includes("server")) return "server";
+    if (lowerHostname.includes("router") || lowerHostname.includes("gateway")) return "router";
+    if (lowerHostname.includes("phone") || lowerHostname.includes("mobile")) return "mobile";
+    if (lowerHostname.includes("desktop") || lowerHostname.includes("pc")) return "desktop";
+    if (lowerHostname.includes("iot") || lowerHostname.includes("thermostat") || lowerHostname.includes("light")) return "iot";
+    return "unknown";
+};
 
 
+interface DeviceContextType {
+  devices: Device[];
+  isLoading: boolean;
+  isUpdating: boolean;
+  updateProgress: number;
+  error: { title: string; message: string; details?: string } | null;
+  fetchAllDevices: () => Promise<void>;
+  fetchLiveData: (deviceId: string, deviceIp: string) => Promise<{success: boolean, error?: string | null}>;
+  refreshAllDeviceStatus: () => Promise<void>;
+  updateDeviceData: (deviceId: string, newData: Partial<Device>) => void;
+  checkAllAgentStatus: () => Promise<void>;
+}
+
+const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
+
+export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [error, setError] = useState<{ title: string; message: string; details?: string } | null>(null);
+  const { toast } = useToast();
+  const { user } = useAuth();
+
+  const updateDeviceData = useCallback((deviceId: string, newData: Partial<Device>) => {
+    setDevices(prev => prev.map(d => d.id === deviceId ? { ...d, ...newData } : d));
+  }, []);
 
 
+  const fetchLiveData = useCallback(async (deviceId: string, deviceIp: string): Promise<{success: boolean, error?: string | null}> => {
+    if (!deviceIp || !user) {
+        const err = { isAgentDeployed: false, agentLastUpdate: null, agentStatusError: "Authentication or IP is missing." };
+        updateDeviceData(deviceId, err);
+        return { success: false, error: err.agentStatusError };
+    }
+    try {
+        const res = await fetch("/api/network/fetch-live-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: deviceId, ip: deviceIp }),
+        });
+        const data = await res.json();
+        
+        if (data.ok && data.liveData) {
+            updateDeviceData(deviceId, { isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp, agentStatusError: null });
+            return { success: true, error: null };
+        } else {
+            const err = { isAgentDeployed: false, agentLastUpdate: null, agentStatusError: data.details || data.error || "Failed to fetch live data." };
+            updateDeviceData(deviceId, err);
+            return { success: false, error: err.agentStatusError };
+        }
+    } catch(e: any) {
+        const err = { isAgentDeployed: false, agentLastUpdate: null, agentStatusError: e.message || "Client-side fetch error." };
+        updateDeviceData(deviceId, err);
+        return { success: false, error: err.agentStatusError };
+    }
+  }, [updateDeviceData, user]);
+
+  const checkAllAgentStatus = useCallback(async () => {
+    if (!devices.length || isUpdating) return;
+
+    setIsUpdating(true);
+    setUpdateProgress(0);
+    toast({ title: "Checking Agent Status...", description: "Verifying agent on all online devices." });
+
+    const onlineDevices = devices.filter(d => d.status === 'online');
+    if (onlineDevices.length === 0) {
+      toast({ title: "No Online Devices", description: "No devices to check agent status on." });
+      setIsUpdating(false);
+      setUpdateProgress(100);
+      return;
+    }
+    
+    let processedCount = 0;
+    const totalOnline = onlineDevices.length;
+    
+    const agentCheckPromises = onlineDevices.map(async (device) => {
+        await fetchLiveData(device.id, device.ipAddress);
+        processedCount++;
+        const progress = Math.floor((processedCount / totalOnline) * 100);
+        setUpdateProgress(progress);
+    });
+
+    await Promise.all(agentCheckPromises);
+
+    setIsUpdating(false);
+    setUpdateProgress(100);
+    toast({ title: "Agent Status Check Complete" });
+  }, [devices, isUpdating, toast, fetchLiveData]);
 
 
+  const fetchAllDevices = useCallback(async () => {
+    if (isLoading || isUpdating || !user) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const adResponse = await fetch("/api/ad/get-computers", { method: "POST" });
+      const adData = await adResponse.json();
+      if (!adData.ok) throw adData;
 
+      let initialDevices: Device[] = adData.computers.map(mapAdComputerToDevice);
+      setDevices(initialDevices);
+      
+      setIsLoading(false); 
+      
+      await refreshAllDeviceStatus(initialDevices);
+
+
+    } catch (err: any) {
+      setError({
+        title: err.error || "Server Error",
+        message: err.message || "Failed to connect to the server to get devices.",
+        details: err.details,
+      });
+      setDevices([]);
+      setIsLoading(false);
+    }
+  }, [isLoading, isUpdating, user]);
+
+  const refreshAllDeviceStatus = useCallback(async (deviceList?: Device[]) => {
+    const targetDevices = deviceList || devices;
+    if (targetDevices.length === 0) {
+        toast({ title: "No devices to refresh" });
+        return;
+    }
+    if (isUpdating || !user) return;
+    setIsUpdating(true);
+    setUpdateProgress(0);
+    toast({ title: "Refreshing Status...", description: `Checking ${targetDevices.length} devices.` });
+
+    try {
+        const ipsToCheck = targetDevices.map(d => d.ipAddress).filter(Boolean);
+        setUpdateProgress(10);
+        const res = await fetch("/api/network/check-status", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ips: ipsToCheck })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Status check failed.");
+        
+        setUpdateProgress(100);
+        const onlineIps = new Set(data.online_ips);
+        
+        setDevices(prevDevices => prevDevices.map(d => ({
+            ...d,
+            status: onlineIps.has(d.ipAddress) ? 'online' : 'offline'
+        })));
+        
+        toast({ title: "Status Refresh Complete", description: `Found ${onlineIps.size} online devices.` });
+
+    } catch (err: any) {
+        toast({ variant: "destructive", title: "Error Refreshing Status", description: err.message });
+    } finally {
+        setIsUpdating(false);
+        setUpdateProgress(100);
+    }
+  }, [devices, toast, user, isUpdating]);
+
+  const contextValue = useMemo(() => ({
+    devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData, checkAllAgentStatus
+  }), [devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData, checkAllAgentStatus]);
+
+  return (
+    <DeviceContext.Provider value={contextValue}>
+      {children}
+    </DeviceContext.Provider>
+  );
+};
+
+export const useDeviceContext = (): DeviceContextType => {
+  const context = useContext(DeviceContext);
+  if (context === undefined) {
+    throw new Error('useDeviceContext must be used within a DeviceProvider');
+  }
+  return context;
+};
+```

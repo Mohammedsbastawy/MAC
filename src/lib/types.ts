@@ -108,4 +108,3 @@ export type SnmpLogEntry = {
     log: string;
     status: 'pending' | 'success' | 'error';
 }
-    

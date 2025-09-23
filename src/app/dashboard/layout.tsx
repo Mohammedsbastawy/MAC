@@ -1,10 +1,9 @@
-
 "use client";
 
 import DashboardHeader from "@/components/dashboard/header";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarMenuItem, SidebarMenuButton, SidebarProvider, useSidebar, SidebarHeader, SidebarSub, SidebarSubTrigger, SidebarSubContent, SidebarMenu } from "@/components/ui/sidebar";
-import { Globe, Users, NotebookText, HelpCircle, Settings, File, Briefcase, Monitor } from "lucide-react";
+import { Globe, Users, NotebookText, HelpCircle, Settings, File, Briefcase, Monitor, ToyBrick } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -52,6 +51,14 @@ const AppSidebar = () => {
                                  <Link href="/dashboard/monitoring">
                                     <Monitor />
                                     <span className={cn(state === 'collapsed' && "hidden")}>Monitoring</span>
+                                </Link>
+                            </SidebarMenuButton>
+                        </SidebarMenuItem>
+                        <SidebarMenuItem>
+                            <SidebarMenuButton asChild isActive={pathname.startsWith('/dashboard/chocolatey')} onClick={closeSidebar}>
+                                 <Link href="/dashboard/chocolatey">
+                                    <ToyBrick />
+                                    <span className={cn(state === 'collapsed' && "hidden")}>Software Management</span>
                                 </Link>
                             </SidebarMenuButton>
                         </SidebarMenuItem>
