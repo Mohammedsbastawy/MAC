@@ -59,7 +59,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogTrigger, AlertDialogFooter } from "@/components/ui/alert-dialog";
 
 
 type TargetDevice = Device & { isSelected: boolean };
@@ -84,11 +84,11 @@ const popularPackages = [
 ];
 
 const silentInstallArgs = [
-    { name: 'Silent Mode', arg: '/S' },
-    { name: 'Silent (Alt)', arg: '/SILENT' },
-    { name: 'Quiet Mode', arg: '/q' },
-    { name: 'Quiet (No UI)', arg: '/qn' },
-    { name: 'No Restart', arg: '/norestart' },
+    { name: "Silent Mode", arg: "/S" },
+    { name: "Silent (Alt)", arg: "/SILENT" },
+    { name: "Quiet Mode", arg: "/q" },
+    { name: "Quiet (No UI)", arg: "/qn" },
+    { name: "No Restart", arg: "/norestart" },
 ];
 
 const TaskTimer: React.FC<{ startTime: number | null, endTime: number | null, status: TaskStatus }> = ({ startTime, endTime, status }) => {
@@ -536,3 +536,5 @@ export default function ChocolateyPage() {
     </>
   );
 }
+
+    
