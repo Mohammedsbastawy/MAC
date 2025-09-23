@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -15,9 +16,7 @@ import { useDeviceContext } from "@/hooks/use-device-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Loader2,
-  Package,
   Terminal,
-  ToyBrick,
   CheckCircle2,
   XCircle,
   DownloadCloud,
@@ -36,6 +35,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import type { Device } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 
 type TargetDevice = Device & { isSelected: boolean };
 type TaskStatus = "pending" | "running" | "success" | "error";
