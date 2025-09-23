@@ -309,6 +309,7 @@ const PsListResult: React.FC<{ data: WinRMProcess[], onKill: (processId: number)
     };
     
     const filteredData = React.useMemo(() => {
+        if (!Array.isArray(data)) return [];
         return data.filter(proc => proc.Name.toLowerCase().includes(searchTerm.toLowerCase()));
     }, [data, searchTerm]);
 
@@ -1065,7 +1066,7 @@ const CommandOutputDialog: React.FC<{
                 ) : (
                     <>
                         {isInfoView && <PsInfoResult data={state.structuredData!.psinfo!} />}
-                        {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist!} onKill={onProcessKill} />}
+                        {isProcessView && onProcessKill && <PsListResult data={state.structuredData!.pslist!.pslist} onKill={onProcessKill} />}
                         {isLoggedOnView && onUserLogoff && <PsLoggedOnResult data={state.structuredData!.psloggedon!} onLogoff={onUserLogoff} />}
                         {state.structuredData?.psfile && <PsFileResult data={state.structuredData.psfile} />}
                         {state.structuredData?.psservice && onServiceAction && onServiceInfo && 
@@ -1468,7 +1469,7 @@ export default function DeviceActionsPanel({
              if (refreshResult?.ok) {
                 setDialogState(prev => ({
                     ...prev,
-                    structuredData: { ...prev.structuredData, pslist: refreshResult.structured_data }
+                    structuredData: { ...prev.structuredData, ...refreshResult.structured_data }
                 }));
             }
         } else {
