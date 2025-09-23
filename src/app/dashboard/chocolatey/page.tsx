@@ -27,6 +27,7 @@ import {
   FileUp,
   Package,
   List,
+  Clock,
 } from "lucide-react";
 import {
   Table,
@@ -36,6 +37,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+    DialogClose,
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Device } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
@@ -48,13 +58,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 
 type TargetDevice = Device & { isSelected: boolean };
 type TaskStatus = "pending" | "running" | "success" | "error";
-type TaskResult = {
-  deviceName: string;
+
+type TaskExecution = {
+  device: Device;
   status: TaskStatus;
   log: string;
+  startTime: number | null;
+  endTime: number | null;
 };
 
 const popularPackages = [
@@ -75,13 +89,141 @@ const silentInstallArgs = [
     { arg: '/norestart', description: 'Prevent Restart' },
 ];
 
+const TaskTimer: React.FC<{ startTime: number | null, endTime: number | null, status: TaskStatus }> = ({ startTime, endTime, status }) => {
+    const [elapsedTime, setElapsedTime] = React.useState(0);
+
+    React.useEffect(() => {
+        if (status !== 'running' || !startTime) {
+            if (startTime && endTime) {
+                setElapsedTime(endTime - startTime);
+            }
+            return;
+        }
+
+        const timer = setInterval(() => {
+            setElapsedTime(Date.now() - startTime);
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [status, startTime, endTime]);
+
+    const formatTime = (ms: number) => {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+        const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+        return `${minutes}:${seconds}`;
+    };
+
+    return (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Clock className="h-4 w-4" />
+            <span>{formatTime(elapsedTime)}</span>
+        </div>
+    );
+};
+
+
+const TaskDetailsModal: React.FC<{ task: TaskExecution | null, onClose: () => void }> = ({ task, onClose }) => {
+    if (!task) return null;
+
+    return (
+        <Dialog open={!!task} onOpenChange={(open) => !open && onClose()}>
+            <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
+                <DialogHeader>
+                    <DialogTitle className="text-xl">Task Details: {task.device.name}</DialogTitle>
+                    <DialogDescription>
+                        <div className="flex items-center gap-4 mt-2">
+                             <Badge variant={
+                                task.status === 'success' ? 'default' :
+                                task.status === 'error' ? 'destructive' :
+                                'secondary'
+                            } className={task.status === 'success' ? 'bg-green-600' : ''}>
+                                {task.status === "running" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                {task.status}
+                            </Badge>
+                            <TaskTimer startTime={task.startTime} endTime={task.endTime} status={task.status} />
+                        </div>
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="flex-grow overflow-hidden">
+                    <Textarea
+                        readOnly
+                        value={task.log || "Waiting for output..."}
+                        className="w-full h-full font-mono text-xs resize-none"
+                    />
+                </div>
+                 <DialogFooter>
+                    <DialogClose asChild>
+                        <Button variant="outline">Close</Button>
+                    </DialogClose>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
+
+const ResultsTable: React.FC<{ executions: TaskExecution[], onSelectTask: (task: TaskExecution) => void }> = ({ executions, onSelectTask }) => {
+    if (executions.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-center h-40">
+              <Terminal className="h-10 w-10 mb-2 text-muted-foreground" />
+              <h3 className="text-lg font-semibold text-foreground">No Tasks Running</h3>
+              <p className="mt-2 text-sm text-muted-foreground">Run a task to see its results here.</p>
+            </div>
+        );
+    }
+    
+    return (
+         <Card>
+            <CardHeader>
+                <CardTitle>Task Executions</CardTitle>
+                <CardDescription>Click on a task to view its detailed log.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Device Name</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Elapsed Time</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {executions.map((task) => (
+                            <TableRow key={task.device.id} onClick={() => onSelectTask(task)} className="cursor-pointer">
+                                <TableCell className="font-medium">{task.device.name}</TableCell>
+                                <TableCell>
+                                    <Badge variant={
+                                        task.status === 'success' ? 'default' :
+                                        task.status === 'error' ? 'destructive' :
+                                        'secondary'
+                                    } className={task.status === 'success' ? 'bg-green-600' : ''}>
+                                        {task.status === "running" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        {task.status}
+                                    </Badge>
+                                </TableCell>
+                                <TableCell>
+                                    <TaskTimer startTime={task.startTime} endTime={task.endTime} status={task.status} />
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </CardContent>
+        </Card>
+    );
+};
+
+
 export default function ChocolateyPage() {
   const { devices, isLoading: isLoadingDevices, error: devicesError } = useDeviceContext();
   const { toast } = useToast();
   const [targetDevices, setTargetDevices] = React.useState<TargetDevice[]>([]);
   const [packageName, setPackageName] = React.useState("");
-  const [taskResults, setTaskResults] = React.useState<TaskResult[]>([]);
+  const [taskExecutions, setTaskExecutions] = React.useState<TaskExecution[]>([]);
   const [isTaskRunning, setIsTaskRunning] = React.useState(false);
+  const [viewingTask, setViewingTask] = React.useState<TaskExecution | null>(null);
   
   const [exeFile, setExeFile] = React.useState<File | null>(null);
   const [exeArguments, setExeArguments] = React.useState<string>("");
@@ -109,12 +251,13 @@ export default function ChocolateyPage() {
     }
     
     setIsTaskRunning(true);
-    setTaskResults(selectedDevices.map(d => ({ deviceName: d.name, status: "pending", log: "" })));
+    const startTime = Date.now();
+    setTaskExecutions(selectedDevices.map(d => ({ device: d, status: "pending", log: "", startTime: null, endTime: null })));
     toast({ title: "Task Started", description: initialMessage });
 
     const devicePromises = selectedDevices.map(device => 
         new Promise<void>(async (resolve) => {
-            setTaskResults(prev => prev.map(r => r.deviceName === device.name ? { ...r, status: 'running' } : r));
+            setTaskExecutions(prev => prev.map(r => r.device.id === device.id ? { ...r, status: 'running', startTime: Date.now() } : r));
             try {
                 const res = await fetch(endpoint, {
                     method: 'POST',
@@ -123,17 +266,19 @@ export default function ChocolateyPage() {
                 });
                 const data = await res.json();
                 
-                setTaskResults(prev => prev.map(r => r.deviceName === device.name ? { 
+                setTaskExecutions(prev => prev.map(r => r.device.id === device.id ? { 
                     ...r, 
                     status: data.ok ? "success" : "error",
-                    log: data.stdout || data.stderr || data.error || data.details || "No output."
+                    log: data.stdout || data.stderr || data.error || data.details || "No output.",
+                    endTime: Date.now()
                 } : r));
 
             } catch (err: any) {
-                 setTaskResults(prev => prev.map(r => r.deviceName === device.name ? { 
+                 setTaskExecutions(prev => prev.map(r => r.device.id === device.id ? { 
                     ...r, 
                     status: 'error',
-                    log: err.message || "A client-side error occurred."
+                    log: err.message || "A client-side error occurred.",
+                    endTime: Date.now()
                 } : r));
             } finally {
                 resolve();
@@ -220,6 +365,7 @@ export default function ChocolateyPage() {
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Software Management</h1>
@@ -228,14 +374,13 @@ export default function ChocolateyPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6">
             <Card>
                 <CardHeader>
                     <CardTitle>1. Select Target Devices</CardTitle>
-                    <CardDescription>Choose which online devices to manage.</CardDescription>
+                    <CardDescription>Choose which online devices to manage. Only online devices are shown.</CardDescription>
                 </CardHeader>
-                <CardContent className="h-96 overflow-y-auto">
+                <CardContent className="h-80 overflow-y-auto">
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -252,13 +397,18 @@ export default function ChocolateyPage() {
                         </TableHeader>
                         <TableBody>
                             {targetDevices.filter(d => d.status === 'online').map(device => (
-                                <TableRow key={device.id} onClick={() => handleSelectDevice(device.id)} className="cursor-pointer">
+                                <TableRow key={device.id} onClick={() => handleSelectDevice(device.id)} className="cursor-pointer" data-state={device.isSelected && 'selected'}>
                                     <TableCell><Checkbox checked={device.isSelected} /></TableCell>
                                     <TableCell>{device.name}</TableCell>
                                     <TableCell>{device.ipAddress}</TableCell>
                                     <TableCell>{device.os}</TableCell>
                                 </TableRow>
                             ))}
+                             {targetDevices.filter(d => d.status === 'online').length === 0 && (
+                                <TableRow>
+                                    <TableCell colSpan={4} className="text-center h-24">No online devices available.</TableCell>
+                                </TableRow>
+                             )}
                         </TableBody>
                     </Table>
                 </CardContent>
@@ -277,7 +427,7 @@ export default function ChocolateyPage() {
                             <AlertDescription>
                                 If Chocolatey is not installed, run this command first.
                                 <Button size="sm" className="ml-4" onClick={handleInstallChoco} disabled={isTaskRunning}>
-                                    {isTaskRunning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    {isTaskRunning && taskExecutions.some(t => t.status === 'running') && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Install Chocolatey
                                 </Button>
                             </AlertDescription>
@@ -362,48 +512,11 @@ export default function ChocolateyPage() {
                     </CardContent>
                 </Card>
              </div>
+             
+             <ResultsTable executions={taskExecutions} onSelectTask={setViewingTask} />
         </div>
-
-        <Card className="lg:col-span-1">
-            <CardHeader>
-                <CardTitle>Live Task Results</CardTitle>
-                 <CardDescription>Real-time output from the remote machines.</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[calc(100vh-4rem-1.5rem-12rem)]">
-                <div className="h-full rounded-md border bg-muted p-4 space-y-3 overflow-y-auto">
-                    {taskResults.length === 0 && !isTaskRunning && (
-                         <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
-                            <Terminal className="h-10 w-10 mb-2" />
-                            <p>Results will appear here.</p>
-                        </div>
-                    )}
-                    {taskResults.map((result, index) => (
-                        <div key={index}>
-                             <details>
-                                <summary className="flex items-center gap-2 cursor-pointer">
-                                     {result.status === "pending" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                                    {result.status === "running" && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-                                    {result.status === "success" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-                                    {result.status === "error" && <XCircle className="h-4 w-4 text-red-500" />}
-                                    <span className="font-medium">{result.deviceName}</span>
-                                    <Badge variant={
-                                        result.status === 'success' ? 'default' :
-                                        result.status === 'error' ? 'destructive' :
-                                        'secondary'
-                                    } className={result.status === 'success' ? 'bg-green-600' : ''}>
-                                        {result.status}
-                                    </Badge>
-                                </summary>
-                                <pre className="mt-2 text-xs p-2 bg-background rounded-md overflow-x-auto">
-                                    <code>{result.log || "No output..."}</code>
-                                </pre>
-                            </details>
-                        </div>
-                    ))}
-                </div>
-            </CardContent>
-        </Card>
-      </div>
     </div>
+    <TaskDetailsModal task={viewingTask} onClose={() => setViewingTask(null)} />
+    </>
   );
 }
