@@ -1,4 +1,5 @@
 
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -953,10 +954,80 @@ def manage_package():
 
     user, domain, pwd, winrm_user = get_auth_from_session()
     
-    ps_script = f"choco {action} {package_name} -y"
+    # This is a more robust script to run choco commands
+    ps_script = f"""
+    $chocoPath = "C:\\ProgramData\\chocolatey\\bin\\choco.exe"
+    if (Test-Path $chocoPath) {{
+        try {{
+            & $chocoPath {action} {package_name} -y
+            if ($LASTEXITCODE -ne 0) {{
+                Write-Error "Chocolatey command failed with exit code $LASTEXITCODE."
+                exit $LASTEXITCODE
+            }}
+        }} catch {{
+            Write-Error "An error occurred while running Chocolatey: $_"
+            exit 1
+        }}
+    }} else {{
+        Write-Error "Chocolatey is not installed at the expected path: $chocoPath"
+        exit 1
+    }}
+    """
     
     target_ip = targets[0]
     logger.info(f"Attempting to run 'choco {action} {package_name}' on {target_ip}.")
     rc, out, err = run_winrm_command(target_ip, winrm_user, pwd, ps_script, timeout=600)
+    
+    return json_result(rc, out, err)
+@pstools_bp.route('/reset-trust-relationship', methods=['POST'])
+def reset_trust_relationship():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    local_user = data.get("local_username")
+    local_pass = data.get("local_password")
+    
+    if not ip or not local_user or not local_pass:
+        return jsonify({"ok": False, "error": "Target IP, local username, and password are required."}), 400
+
+    # Domain admin credentials from the session for the -Credential parameter
+    domain_admin_user, domain, domain_admin_pass, _ = get_auth_from_session()
+    if not domain_admin_user:
+        return jsonify({"ok": False, "error": "Domain admin session has expired. Please log in again."}), 401
+    
+    domain_controller = domain # Assume the domain name is the DC for simplicity
+    
+    logger.info(f"Attempting to reset trust relationship for {ip} using local user '{local_user}'.")
+
+    # This PowerShell script will be executed on the remote machine
+    # It creates a PSCredential object for the domain admin and then runs the reset command
+    ps_command = f"""
+    $domainUser = "{domain}\\{domain_admin_user}";
+    $domainPass = ConvertTo-SecureString "{domain_admin_pass}" -AsPlainText -Force;
+    $cred = New-Object System.Management.Automation.PSCredential($domainUser, $domainPass);
+    
+    Reset-ComputerMachinePassword -Server "{domain_controller}" -Credential $cred;
+    
+    if ($LASTEXITCODE -eq 0) {{
+        Write-Host "Trust relationship reset successfully. Restarting machine in 30 seconds to apply changes.";
+        Start-Sleep -Seconds 5;
+        Restart-Computer -Force;
+    }} else {{
+        Write-Error "Failed to reset trust relationship. Exit code: $LASTEXITCODE";
+    }}
+    """
+    
+    # We use the local credentials to connect via PsExec
+    # And run the PowerShell command which uses the domain credentials internally
+    cmd_args = ["powershell.exe", "-Command", ps_command]
+    
+    rc, out, err = run_ps_command(
+        "psexec", 
+        ip, 
+        username=local_user, 
+        domain=".", # Use "." for local account
+        pwd=local_pass, 
+        extra_args=cmd_args, 
+        timeout=180
+    )
     
     return json_result(rc, out, err)
