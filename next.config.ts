@@ -26,17 +26,6 @@ const nextConfig: NextConfig = {
   },
   // This is to allow cross-origin requests in development.
   allowedDevOrigins: ["*.cloudworkstations.dev"],
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: 'http://127.0.0.1:5000/api/:path*', // Proxy to Flask backend
-        // Disable the body parser to allow large file uploads to be streamed
-        // to the backend.
-        bodyParser: false,
-      },
-    ]
-  },
 };
 
 export default nextConfig;
