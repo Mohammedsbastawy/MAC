@@ -21,7 +21,11 @@ import {
   XCircle,
   DownloadCloud,
   ChevronRight,
-  ServerCrash
+  ServerCrash,
+  Upload,
+  ToyBrick,
+  FileUp,
+  Package,
 } from "lucide-react";
 import {
   Table,
@@ -52,6 +56,10 @@ export default function ChocolateyPage() {
   const [packageName, setPackageName] = React.useState("");
   const [taskResults, setTaskResults] = React.useState<TaskResult[]>([]);
   const [isTaskRunning, setIsTaskRunning] = React.useState(false);
+  
+  const [exeFile, setExeFile] = React.useState<File | null>(null);
+  const [exeArguments, setExeArguments] = React.useState<string>("");
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     setTargetDevices(devices.map(d => ({ ...d, isSelected: d.status === 'online' })));
@@ -67,7 +75,7 @@ export default function ChocolateyPage() {
       setTargetDevices(prev => prev.map(d => ({...d, isSelected: select})));
   }
 
-  const runTaskManager = async (endpoint: string, params: Record<string, any>, initialMessage: string) => {
+  const runTaskManager = async (endpoint: string, params: Record<string, any>, initialMessage: string, getBody: (device: Device) => Record<string, any>) => {
     const selectedDevices = targetDevices.filter(d => d.isSelected);
     if (selectedDevices.length === 0) {
       toast({ variant: "destructive", title: "No devices selected" });
@@ -85,14 +93,14 @@ export default function ChocolateyPage() {
                 const res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...params, targets: [device.ipAddress] })
+                    body: JSON.stringify(getBody(device))
                 });
                 const data = await res.json();
                 
                 setTaskResults(prev => prev.map(r => r.deviceName === device.name ? { 
                     ...r, 
                     status: data.ok ? "success" : "error",
-                    log: data.stdout || data.stderr || data.error || "No output."
+                    log: data.stdout || data.stderr || data.error || data.details || "No output."
                 } : r));
 
             } catch (err: any) {
@@ -116,7 +124,8 @@ export default function ChocolateyPage() {
     runTaskManager(
         "/api/pstools/install-chocolatey",
         {},
-        "Installing Chocolatey on selected devices..."
+        "Installing Chocolatey on selected devices...",
+        (device) => ({ targets: [device.ipAddress] })
     )
   }
 
@@ -128,9 +137,39 @@ export default function ChocolateyPage() {
     runTaskManager(
         "/api/pstools/manage-package",
         { package_name: packageName, action: action },
-        `Running choco ${action} ${packageName}...`
+        `Running choco ${action} ${packageName}...`,
+        (device) => ({ package_name: packageName, action: action, targets: [device.ipAddress] })
     )
   };
+
+  const handleExeInstall = async () => {
+    if (!exeFile) {
+        toast({ variant: "destructive", title: "No .exe file selected" });
+        return;
+    }
+
+    const fileToBase64 = (file: File): Promise<string> => 
+        new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result?.toString().split(',')[1] || '');
+            reader.onerror = error => reject(error);
+        });
+    
+    const fileContent = await fileToBase64(exeFile);
+    
+    runTaskManager(
+        "/api/pstools/install-from-exe",
+        {},
+        `Deploying and installing ${exeFile.name}...`,
+        (device) => ({
+            targets: [device.ipAddress],
+            fileName: exeFile.name,
+            fileContent: fileContent,
+            arguments: exeArguments,
+        })
+    )
+  }
 
 
   if (isLoadingDevices) {
@@ -159,7 +198,7 @@ export default function ChocolateyPage() {
       <div className="space-y-1">
         <h1 className="text-2xl font-headline font-bold tracking-tight md:text-3xl">Software Management</h1>
         <p className="text-muted-foreground">
-          Deploy, upgrade, and uninstall software on remote machines using Chocolatey.
+          Deploy, upgrade, and uninstall software on remote machines using Chocolatey or direct executable deployment.
         </p>
       </div>
 
@@ -198,53 +237,89 @@ export default function ChocolateyPage() {
                     </Table>
                 </CardContent>
             </Card>
+            
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><ToyBrick /> Deploy with Chocolatey</CardTitle>
+                         <CardDescription>First-time setup or manage packages by name.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <Alert>
+                            <DownloadCloud className="h-4 w-4" />
+                            <AlertTitle>First-Time Setup</AlertTitle>
+                            <AlertDescription>
+                                If Chocolatey is not installed, run this command first.
+                                <Button size="sm" className="ml-4" onClick={handleInstallChoco} disabled={isTaskRunning}>
+                                    {isTaskRunning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    Install Chocolatey
+                                </Button>
+                            </AlertDescription>
+                        </Alert>
+                        
+                        <Separator />
 
-            <Card>
-                <CardHeader>
-                     <CardTitle>2. Execute Actions</CardTitle>
-                     <CardDescription>First-time setup or manage packages on selected devices.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <Alert>
-                        <DownloadCloud className="h-4 w-4" />
-                        <AlertTitle>First-Time Setup</AlertTitle>
-                        <AlertDescription>
-                            If Chocolatey is not installed on the target machines, run this command first.
-                            <Button size="sm" className="ml-4" onClick={handleInstallChoco} disabled={isTaskRunning}>
-                                {isTaskRunning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Install Chocolatey
-                            </Button>
-                        </AlertDescription>
-                    </Alert>
-                    
-                    <Separator />
+                         <div className="space-y-2">
+                            <Label htmlFor="package-name">Package Name</Label>
+                            <Input 
+                                id="package-name" 
+                                placeholder="e.g., 7zip, vlc, git"
+                                value={packageName}
+                                onChange={(e) => setPackageName(e.target.value)}
+                                disabled={isTaskRunning}
+                            />
+                        </div>
+                         <div className="flex flex-wrap gap-2">
+                            <Button onClick={() => handlePackageAction('install')} disabled={isTaskRunning || !packageName}><Package className="mr-2 h-4 w-4" />Install</Button>
+                            <Button onClick={() => handlePackageAction('upgrade')} variant="outline" disabled={isTaskRunning || !packageName}>Upgrade</Button>
+                            <Button onClick={() => handlePackageAction('uninstall')} variant="destructive" disabled={isTaskRunning || !packageName}>Uninstall</Button>
+                        </div>
+                    </CardContent>
+                </Card>
+                 <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><FileUp /> Install from Executable</CardTitle>
+                         <CardDescription>Upload and run a custom `.exe` installer.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>Installer File (.exe)</Label>
+                            <Input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".exe"
+                                onChange={(e) => setExeFile(e.target.files ? e.target.files[0] : null)}
+                                disabled={isTaskRunning}
+                                className="pt-2 h-auto"
+                            />
+                            {exeFile && <p className="text-xs text-muted-foreground">Selected: {exeFile.name}</p>}
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="exe-args">Silent Install Arguments</Label>
+                            <Input 
+                                id="exe-args" 
+                                placeholder="e.g. /S, /q, /quiet"
+                                value={exeArguments}
+                                onChange={(e) => setExeArguments(e.target.value)}
+                                disabled={isTaskRunning}
+                            />
+                        </div>
 
-                     <div className="space-y-2">
-                        <Label htmlFor="package-name">Chocolatey Package Name</Label>
-                        <Input 
-                            id="package-name" 
-                            placeholder="e.g., 7zip, vlc, git"
-                            value={packageName}
-                            onChange={(e) => setPackageName(e.target.value)}
-                            disabled={isTaskRunning}
-                        />
-                    </div>
-                     <div className="flex flex-wrap gap-2">
-                        <Button onClick={() => handlePackageAction('install')} disabled={isTaskRunning || !packageName}>Install</Button>
-                        <Button onClick={() => handlePackageAction('upgrade')} variant="outline" disabled={isTaskRunning || !packageName}>Upgrade</Button>
-                        <Button onClick={() => handlePackageAction('uninstall')} variant="destructive" disabled={isTaskRunning || !packageName}>Uninstall</Button>
-                    </div>
-
-                </CardContent>
-            </Card>
+                        <Button className="w-full" onClick={handleExeInstall} disabled={isTaskRunning || !exeFile}>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Deploy & Install EXE
+                        </Button>
+                    </CardContent>
+                </Card>
+             </div>
         </div>
 
         <Card className="lg:col-span-1">
             <CardHeader>
-                <CardTitle>3. Live Task Results</CardTitle>
+                <CardTitle>Live Task Results</CardTitle>
                  <CardDescription>Real-time output from the remote machines.</CardDescription>
             </CardHeader>
-            <CardContent className="h-[calc(100%-4rem-1.5rem)]">
+            <CardContent className="h-[calc(100vh-4rem-1.5rem-12rem)]">
                 <div className="h-full rounded-md border bg-muted p-4 space-y-3 overflow-y-auto">
                     {taskResults.length === 0 && !isTaskRunning && (
                          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">

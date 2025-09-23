@@ -1031,3 +1031,63 @@ def reset_trust_relationship():
     )
     
     return json_result(rc, out, err)
+
+
+@pstools_bp.route('/install-from-exe', methods=['POST'])
+def install_from_exe():
+    data = request.get_json() or {}
+    targets = data.get("targets", [])
+    file_name = data.get("fileName")
+    file_content_b64 = data.get("fileContent")
+    arguments = data.get("arguments", "")
+
+    if not all([targets, file_name, file_content_b64]):
+        return jsonify({"ok": False, "error": "Missing parameters: targets, fileName, and fileContent are required."}), 400
+
+    user, domain, pwd, winrm_user = get_auth_from_session()
+    target_ip = targets[0]
+    
+    remote_path = f"C:\\Windows\\Temp\\{file_name}"
+    
+    logger.info(f"Starting EXE deployment for {file_name} to {target_ip}")
+    
+    # 1. Upload the file
+    upload_script = f"""
+    $path = "{remote_path}"
+    $data = [System.Convert]::FromBase64String("{file_content_b64}")
+    [System.IO.File]::WriteAllBytes($path, $data)
+    """
+    rc_upload, out_upload, err_upload = run_winrm_command(target_ip, winrm_user, pwd, upload_script, timeout=600)
+    
+    if rc_upload != 0:
+        logger.error(f"Failed to upload {file_name} to {target_ip}: {err_upload}")
+        return json_result(rc_upload, out_upload, f"Failed to upload installer: {err_upload}")
+
+    logger.info(f"Successfully uploaded {file_name} to {target_ip}. Now attempting installation.")
+
+    # 2. Execute the installer
+    install_script = f"""
+    try {{
+        Start-Process -FilePath "{remote_path}" -ArgumentList "{arguments}" -Wait -PassThru -ErrorAction Stop
+        $stdout = "Installation process completed."
+        $stderr = ""
+        $rc = 0
+    }} catch {{
+        $stdout = ""
+        $stderr = "Failed to start installer process: $_"
+        $rc = 1
+    }}
+    
+    # 3. Clean up the installer file
+    Remove-Item -Path "{remote_path}" -Force -ErrorAction SilentlyContinue
+    
+    Write-Output $stdout
+    Write-Error $stderr
+    exit $rc
+    """
+    rc_install, out_install, err_install = run_winrm_command(target_ip, winrm_user, pwd, install_script, timeout=1200)
+
+    final_output = f"Upload complete.\n\n--- Installation Log ---\n{out_install}"
+    final_error = err_install
+    
+    return json_result(rc_install, final_output, final_error)
