@@ -245,7 +245,7 @@ export default function ChocolateyPage() {
       setTargetDevices(prev => prev.map(d => ({...d, isSelected: select})));
   }
 
-  const runTaskManager = async (endpoint: string, params: Record<string, any>, initialMessage: string, getBody: (device: Device) => Record<string, any>) => {
+  const runTaskManager = async (initialMessage: string, taskFunction: (device: Device, updateLog: (log: string) => void) => Promise<{ok: boolean, finalLog: string}>) => {
     const selectedDevices = targetDevices.filter(d => d.isSelected);
     if (selectedDevices.length === 0) {
       toast({ variant: "destructive", title: "No devices selected" });
@@ -256,34 +256,21 @@ export default function ChocolateyPage() {
     setTaskExecutions(selectedDevices.map(d => ({ device: d, status: "pending", log: "", startTime: null, endTime: null })));
     toast({ title: "Task Started", description: initialMessage });
 
+    const updateLog = (deviceId: string, log: string) => {
+        setTaskExecutions(prev => prev.map(r => r.device.id === deviceId ? { ...r, log: r.log + log } : r));
+    };
+
     const devicePromises = selectedDevices.map(device => 
         new Promise<void>(async (resolve) => {
             setTaskExecutions(prev => prev.map(r => r.device.id === device.id ? { ...r, status: 'running', startTime: Date.now() } : r));
-            try {
-                const res = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(getBody(device))
-                });
-                const data = await res.json();
-                
-                setTaskExecutions(prev => prev.map(r => r.device.id === device.id ? { 
-                    ...r, 
-                    status: data.ok ? "success" : "error",
-                    log: data.stdout || data.stderr || data.error || data.details || "No output.",
-                    endTime: Date.now()
-                } : r));
-
-            } catch (err: any) {
-                 setTaskExecutions(prev => prev.map(r => r.device.id === device.id ? { 
-                    ...r, 
-                    status: 'error',
-                    log: err.message || "A client-side error occurred.",
-                    endTime: Date.now()
-                } : r));
-            } finally {
-                resolve();
-            }
+            const { ok, finalLog } = await taskFunction(device, (log) => updateLog(device.id, log));
+            setTaskExecutions(prev => prev.map(r => r.device.id === device.id ? { 
+                ...r, 
+                status: ok ? "success" : "error",
+                log: finalLog,
+                endTime: Date.now()
+            } : r));
+            resolve();
         })
     );
 
@@ -294,10 +281,18 @@ export default function ChocolateyPage() {
 
   const handleInstallChoco = () => {
     runTaskManager(
-        "/api/pstools/install-chocolatey",
-        {},
         "Installing Chocolatey on selected devices...",
-        (device) => ({ targets: [device.ipAddress] })
+        async (device, updateLog) => {
+            updateLog("Executing Chocolatey installation script...\n");
+            const res = await fetch("/api/pstools/install-chocolatey", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ targets: [device.ipAddress] })
+            });
+            const data = await res.json();
+            const finalLog = data.stdout || data.stderr || data.error || "No output.";
+            return { ok: data.ok, finalLog };
+        }
     )
   }
 
@@ -307,10 +302,18 @@ export default function ChocolateyPage() {
       return;
     }
     runTaskManager(
-        "/api/pstools/manage-package",
-        { package_name: packageName, action: action },
         `Running choco ${action} ${packageName}...`,
-        (device) => ({ package_name: packageName, action: action, targets: [device.ipAddress] })
+        async (device, updateLog) => {
+            updateLog(`Starting choco ${action} ${packageName} on ${device.name}...\n`);
+            const res = await fetch("/api/pstools/manage-package", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ package_name: packageName, action: action, targets: [device.ipAddress] })
+            });
+            const data = await res.json();
+            const finalLog = data.stdout || data.stderr || data.error || data.details || "No output.";
+            return { ok: data.ok, finalLog };
+        }
     )
   };
 
@@ -319,28 +322,67 @@ export default function ChocolateyPage() {
         toast({ variant: "destructive", title: "No .exe file selected" });
         return;
     }
-
-    const fileToBase64 = (file: File): Promise<string> => 
-        new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result?.toString().split(',')[1] || '');
-            reader.onerror = error => reject(error);
-        });
-    
-    const fileContentB64 = await fileToBase64(exeFile);
     
     runTaskManager(
-        "/api/pstools/install-from-exe",
-        {},
         `Deploying and installing ${exeFile.name}...`,
-        (device) => ({
-            targets: [device.ipAddress],
-            fileName: exeFile.name,
-            fileContent: fileContentB64,
-            arguments: exeArguments,
-        })
-    )
+        async (device, updateLog) => {
+            try {
+                // Chunk and upload file
+                updateLog(`Starting upload of ${exeFile.name} to ${device.name}...\n`);
+                const CHUNK_SIZE = 8000;
+                const fileContent = await exeFile.arrayBuffer();
+                
+                for (let i = 0; i < fileContent.byteLength; i += CHUNK_SIZE) {
+                    const chunk = fileContent.slice(i, i + CHUNK_SIZE);
+                    const isFirstChunk = i === 0;
+                    const endpoint = isFirstChunk ? 'upload-chunk-create' : 'upload-chunk-append';
+
+                    const base64Chunk = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(chunk))));
+                    
+                    const res = await fetch(`/api/pstools/${endpoint}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            ip: device.ipAddress,
+                            destinationPath: `C:\\Windows\\Temp\\${exeFile.name}`,
+                            fileContent: base64Chunk
+                        })
+                    });
+
+                    const data = await res.json();
+                    updateLog(data.log); // Log from backend
+                    if (!data.ok) {
+                        throw new Error(data.error || "Chunk upload failed.");
+                    }
+                }
+                updateLog("\nUpload complete.\n");
+
+                // Execute installer
+                updateLog("Executing installer...\n");
+                const installRes = await fetch("/api/pstools/execute-installer", {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({
+                         ip: device.ipAddress,
+                         remotePath: `C:\\Windows\\Temp\\${exeFile.name}`,
+                         arguments: exeArguments
+                     })
+                });
+                const installData = await installRes.json();
+                updateLog(installData.log || installData.error || "No installer output.");
+                if (!installData.ok) {
+                    throw new Error(installData.error || "Installation failed.");
+                }
+                
+                updateLog("\nInstallation process finished.");
+                return { ok: true, finalLog: "Deployment and installation completed successfully."};
+
+            } catch (err: any) {
+                updateLog(`\n--- ERROR ---\n${err.message}`);
+                return { ok: false, finalLog: `Task failed: ${err.message}`};
+            }
+        }
+    );
   }
 
 
@@ -536,5 +578,3 @@ export default function ChocolateyPage() {
     </>
   );
 }
-
-    
