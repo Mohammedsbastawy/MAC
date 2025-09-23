@@ -91,7 +91,6 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
     AlertDialogTrigger,
-    AlertDialogClose
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog"
@@ -1120,13 +1119,14 @@ const CommandOutputDialog: React.FC<{
                 )}
             </div>
             <AlertDialogFooter>
-                <AlertDialogClose asChild>
+                <AlertDialogCancel asChild>
                     <Button 
+                        onClick={onClose}
                         variant="outline"
                         className={cn(isHackerTheme && "text-green-400 border-green-500/50 hover:bg-green-900/50 hover:text-green-300")}>
                         Close
                     </Button>
-                </AlertDialogClose>
+                </AlertDialogCancel>
             </AlertDialogFooter>
         </AlertDialogContent>
     </AlertDialog>
