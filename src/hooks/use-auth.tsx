@@ -19,35 +19,34 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // Start as true
+  const [isLoading, setIsLoading] = useState(true);
+
+  const checkSession = useCallback(async () => {
+    if (typeof window !== "undefined") {
+      try {
+        const response = await fetch('/api/check-session');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.ok) {
+                setUser(data);
+            } else {
+                setUser(null);
+            }
+        } else {
+             setUser(null);
+        }
+      } catch (error) {
+          console.error("Failed to check session", error);
+          setUser(null);
+      } finally {
+          setIsLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    // This effect runs only on the client side
-    const checkSession = async () => {
-        if (typeof window !== "undefined") {
-            try {
-                const response = await fetch('/api/check-session');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.ok) {
-                        setUser(data);
-                    } else {
-                        setUser(null);
-                    }
-                } else {
-                     setUser(null);
-                }
-            } catch (error) {
-                console.error("Failed to check session", error);
-                setUser(null);
-            } finally {
-                setIsLoading(false);
-            }
-        }
-    };
-    
     checkSession();
-  }, []);
+  }, [checkSession]);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
     setIsLoading(true);

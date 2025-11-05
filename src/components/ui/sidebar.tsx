@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import * as React from "react"
@@ -73,16 +74,20 @@ export const SidebarProvider = React.forwardRef<
 
     // Set initial state to true to avoid hydration mismatch, will be updated by useEffect
     const [isClient, setIsClient] = React.useState(false);
-    const [_open, _setOpen] = React.useState(defaultOpen); 
+    const [_open, _setOpen] = React.useState(true); 
 
     React.useEffect(() => {
         setIsClient(true);
-        const cookieValue = document.cookie
-            .split('; ')
-            .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-            ?.split('=')[1];
-        if (cookieValue !== undefined) {
-            _setOpen(cookieValue === 'true');
+        if (typeof window !== "undefined") {
+            const cookieValue = document.cookie
+                .split('; ')
+                .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+                ?.split('=')[1];
+            if (cookieValue !== undefined) {
+                _setOpen(cookieValue === 'true');
+            } else {
+                 _setOpen(defaultOpen);
+            }
         }
     }, [defaultOpen]);
 
@@ -96,7 +101,9 @@ export const SidebarProvider = React.forwardRef<
         } else {
           _setOpen(openState)
         }
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        if (typeof window !== "undefined") {
+            document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        }
       },
       [setOpenProp, open]
     )
@@ -114,8 +121,10 @@ export const SidebarProvider = React.forwardRef<
                 toggleSidebar()
             }
         }
-        window.addEventListener("keydown", handleKeyDown)
-        return () => window.removeEventListener("keydown", handleKeyDown)
+        if (typeof window !== "undefined") {
+            window.addEventListener("keydown", handleKeyDown)
+            return () => window.removeEventListener("keydown", handleKeyDown)
+        }
     }, [toggleSidebar])
 
     const state = !isClient ? "expanded" : open ? "expanded" : "collapsed";
