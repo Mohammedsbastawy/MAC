@@ -16,72 +16,28 @@ import type { PerformanceData } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useDeviceContext } from "@/hooks/use-device-context";
 import { Progress } from "@/components/ui/progress";
 
 
-const ChartCard: React.FC<{
+const DataCard: React.FC<{
     title: string;
-    currentValue: string;
+    value: string;
     description: string;
-    data: any[];
-    dataKey: string;
-    unit: string;
     icon: React.ElementType;
-}> = ({ title, currentValue, description, data, dataKey, unit, icon: Icon }) => (
-     <Card>
-        <CardHeader>
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <Icon className="h-5 w-5 text-muted-foreground" />
-                    <CardTitle>{title}</CardTitle>
-                </div>
-                <div className="text-right">
-                    <p className="text-2xl font-bold">{currentValue}</p>
-                    <p className="text-xs text-muted-foreground">{description}</p>
-                </div>
-            </div>
+}> = ({ title, value, description, icon: Icon }) => (
+    <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">{title}</CardTitle>
+            <Icon className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-            <div className="h-64 w-full">
-                <ResponsiveContainer>
-                    <AreaChart data={data} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
-                        <defs>
-                            <linearGradient id={`color${dataKey}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
-                                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                            </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                            dataKey="timestamp" 
-                            tickFormatter={(timeStr) => new Date(timeStr).toLocaleTimeString()}
-                            fontSize={12}
-                            tickLine={false}
-                            axisLine={false}
-                        />
-                        <YAxis unit={unit} fontSize={12} tickLine={false} axisLine={false}/>
-                        <Tooltip 
-                            contentStyle={{ 
-                                backgroundColor: 'hsl(var(--background))', 
-                                border: '1px solid hsl(var(--border))'
-                            }}
-                            labelFormatter={(label) => new Date(label).toLocaleString()}
-                        />
-                        <Area 
-                            type="monotone" 
-                            dataKey={dataKey} 
-                            stroke="hsl(var(--primary))" 
-                            fillOpacity={1} 
-                            fill={`url(#color${dataKey})`} 
-                        />
-                    </AreaChart>
-                </ResponsiveContainer>
-            </div>
+            <div className="text-2xl font-bold">{value}</div>
+            <p className="text-xs text-muted-foreground">{description}</p>
         </CardContent>
     </Card>
 );
+
 
 const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
   const { devices, fetchLiveData } = useDeviceContext();
@@ -211,9 +167,9 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 </div>
             </div>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                 <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
-                 <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
-                 <Card className="h-[350px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+                 <Card className="h-[120px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+                 <Card className="h-[120px]"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
+                 <Card className="h-[240px] lg:row-span-2"><CardContent className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></CardContent></Card>
             </div>
         </div>
       )
@@ -271,27 +227,19 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
         </Alert>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <ChartCard
-                    icon={Cpu}
-                    title="CPU Usage"
-                    currentValue={`${latestDataPoint?.cpuUsage?.toFixed(2) ?? 'N/A'}%`}
-                    description={`Last updated: ${latestDataPoint ? new Date(latestDataPoint.timestamp).toLocaleTimeString() : 'N/A'}`}
-                    data={history}
-                    dataKey="cpuUsage"
-                    unit="%"
-                />
-                <ChartCard
-                    icon={MemoryStick}
-                    title="Used Memory"
-                    currentValue={`${latestDataPoint?.usedMemoryGB?.toFixed(2) ?? 'N/A'} GB`}
-                    description={`Total: ${latestDataPoint?.totalMemoryGB ? latestDataPoint.totalMemoryGB.toFixed(2) : 'N/A'} GB`}
-                    data={history}
-                    dataKey="usedMemoryGB"
-                    unit="GB"
-                />
-            </div>
-            <Card className="lg:col-span-1">
+            <DataCard
+                icon={Cpu}
+                title="CPU Usage"
+                value={`${latestDataPoint?.cpuUsage?.toFixed(2) ?? 'N/A'}%`}
+                description={`Last updated: ${latestDataPoint ? new Date(latestDataPoint.timestamp).toLocaleTimeString() : 'N/A'}`}
+            />
+            <DataCard
+                icon={MemoryStick}
+                title="Used Memory"
+                value={`${latestDataPoint?.usedMemoryGB?.toFixed(2) ?? 'N/A'} GB`}
+                description={`Total: ${latestDataPoint?.totalMemoryGB ? latestDataPoint.totalMemoryGB.toFixed(2) : 'N/A'} GB`}
+            />
+            <Card className="lg:col-span-1 row-span-2">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                         <HardDrive />
@@ -304,7 +252,7 @@ const DeviceDashboardPage = ({ params }: { params: { id: string } }) => {
                 <CardContent className="space-y-4">
                     {latestDataPoint?.diskInfo && latestDataPoint.diskInfo.length > 0 ? latestDataPoint.diskInfo.map(disk => {
                         const usedSpace = disk.sizeGB - disk.freeGB;
-                        const usagePercentage = (usedSpace / disk.sizeGB) * 100;
+                        const usagePercentage = disk.sizeGB > 0 ? (usedSpace / disk.sizeGB) * 100 : 0;
                         return (
                         <div key={disk.volume}>
                             <div className="flex justify-between items-center mb-1">
