@@ -25,8 +25,8 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  devServer: {
-    allowedHosts: ["192.168.3.84"],
+  experimental: {
+    allowedDevOrigins: ["http://localhost:9002", "http://192.168.3.84:9002"],
   },
 };
 
