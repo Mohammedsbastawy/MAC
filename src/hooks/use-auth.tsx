@@ -19,10 +19,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // Start as true
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const checkSession = async () => {
+  const checkSession = useCallback(async () => {
       try {
         const response = await fetch('/api/check-session');
         const data = await response.json();
@@ -37,10 +36,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } finally {
         setIsLoading(false);
       }
-    };
-    
+    }, []);
+
+  useEffect(() => {
     checkSession();
-  }, []);
+  }, [checkSession]);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
     setIsLoading(true);
