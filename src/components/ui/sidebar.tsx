@@ -71,7 +71,8 @@ export const SidebarProvider = React.forwardRef<
     const isMobile = useIsMobile()
     const [openMobile, setOpenMobile] = React.useState(false)
 
-    const [_open, _setOpen] = React.useState(defaultOpen)
+    // Set initial state to true to avoid hydration mismatch, will be updated by useEffect
+    const [_open, _setOpen] = React.useState(true) 
     const open = openProp ?? _open
     const setOpen = React.useCallback(
       (value: boolean | ((value: boolean) => boolean)) => {
@@ -85,6 +86,22 @@ export const SidebarProvider = React.forwardRef<
       },
       [setOpenProp, open]
     )
+
+    // This effect runs only on the client side to read the cookie
+    React.useEffect(() => {
+        const cookieValue = document.cookie
+            .split('; ')
+            .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+            ?.split('=')[1];
+        
+        if (cookieValue !== undefined) {
+            _setOpen(cookieValue === 'true');
+        } else {
+            _setOpen(defaultOpen);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [defaultOpen]);
+
 
     const toggleSidebar = React.useCallback(() => {
       return isMobile

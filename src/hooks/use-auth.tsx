@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -19,10 +20,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Start as true
 
   const checkSession = useCallback(async () => {
-    setIsLoading(true);
+    // This now only runs on the client, so no need for an initial `true` state
+    // It will run after mount and determine the user state from the server.
     try {
       const response = await fetch('/api/check-session');
       const data = await response.json();
