@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -19,10 +20,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading true
 
-  const checkSession = useCallback(async () => {
-    if (typeof window !== "undefined") {
+  useEffect(() => {
+    const checkSession = async () => {
       try {
         const response = await fetch('/api/check-session');
         if (response.ok) {
@@ -41,12 +42,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } finally {
           setIsLoading(false);
       }
-    }
-  }, []);
-
-  useEffect(() => {
+    };
+    
     checkSession();
-  }, [checkSession]);
+  }, []);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
     setIsLoading(true);
