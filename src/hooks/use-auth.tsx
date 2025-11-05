@@ -22,8 +22,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   const checkSession = useCallback(async () => {
-    // We start assuming we are not logged in and not loading anymore
-    // This prevents any localStorage calls on the server
     setIsLoading(true);
     try {
       const response = await fetch('/api/check-session');
