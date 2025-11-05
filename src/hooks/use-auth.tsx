@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -20,10 +19,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Start as true to show loading state initially
 
+  // checkSession is now wrapped in useCallback to stabilize its identity
   const checkSession = useCallback(async () => {
-    setIsLoading(true);
     try {
       const response = await fetch('/api/check-session');
       const data = await response.json();
@@ -40,12 +39,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // useEffect now runs only once on component mount on the client-side
   useEffect(() => {
     checkSession();
   }, [checkSession]);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
+    setIsLoading(true); // Set loading true on login attempt
     if (!password) {
+        setIsLoading(false);
         return { success: false, error: "Password is required." };
     }
     try {
@@ -57,22 +59,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await response.json();
       if (data.ok) {
         setUser(data);
+        setIsLoading(false);
         return { success: true };
       }
+      setIsLoading(false);
       return { success: false, error: data.error };
     } catch (error) {
       console.error("Login failed", error);
+      setIsLoading(false);
       return { success: false, error: "An unknown error occurred during login." };
     }
   };
 
   const logout = async (): Promise<void> => {
+    setIsLoading(true);
     try {
       await fetch('/api/logout', { method: 'POST' });
     } catch (error) {
       console.error("Logout failed", error);
     } finally {
         setUser(null);
+        setIsLoading(false);
     }
   };
 
