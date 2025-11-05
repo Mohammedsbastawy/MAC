@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -82,22 +81,26 @@ export const SidebarProvider = React.forwardRef<
         } else {
           _setOpen(openState)
         }
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        if (typeof window !== "undefined") {
+            document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        }
       },
       [setOpenProp, open]
     )
 
     // This effect runs only on the client side to read the cookie
     React.useEffect(() => {
-        const cookieValue = document.cookie
-            .split('; ')
-            .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-            ?.split('=')[1];
-        
-        if (cookieValue !== undefined) {
-            _setOpen(cookieValue === 'true');
-        } else {
-            _setOpen(defaultOpen);
+        if (typeof window !== "undefined") {
+            const cookieValue = document.cookie
+                .split('; ')
+                .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+                ?.split('=')[1];
+            
+            if (cookieValue !== undefined) {
+                _setOpen(cookieValue === 'true');
+            } else {
+                _setOpen(defaultOpen);
+            }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [defaultOpen]);
@@ -110,17 +113,16 @@ export const SidebarProvider = React.forwardRef<
     }, [isMobile, setOpen, setOpenMobile])
 
     React.useEffect(() => {
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if (
-          event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-          (event.metaKey || event.ctrlKey)
-        ) {
-          event.preventDefault()
-          toggleSidebar()
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault()
+                toggleSidebar()
+            }
         }
-      }
-      window.addEventListener("keydown", handleKeyDown)
-      return () => window.removeEventListener("keydown", handleKeyDown)
+        if (typeof window !== "undefined") {
+            window.addEventListener("keydown", handleKeyDown)
+            return () => window.removeEventListener("keydown", handleKeyDown)
+        }
     }, [toggleSidebar])
 
     const state = open ? "expanded" : "collapsed"

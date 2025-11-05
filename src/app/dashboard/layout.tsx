@@ -1,14 +1,13 @@
 "use client";
 
 import DashboardHeader from "@/components/dashboard/header";
-import { AuthProvider } from "@/hooks/use-auth";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarMenuItem, SidebarMenuButton, SidebarProvider, useSidebar, SidebarHeader, SidebarSub, SidebarSubTrigger, SidebarSubContent, SidebarMenu } from "@/components/ui/sidebar";
 import { Globe, Users, NotebookText, HelpCircle, Settings, File, Briefcase, Monitor, ToyBrick } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
-import { DeviceProvider } from "@/hooks/use-device-context";
+import { ClientProvider } from "@/components/providers/client-provider";
 
 
 const AppSidebar = () => {
@@ -124,21 +123,6 @@ const AppSidebar = () => {
     )
 }
 
-function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
-  const { state } = useSidebar();
-  return (
-    <div className="flex min-h-screen w-full flex-col bg-muted/40">
-      <AppSidebar />
-      <div className={cn(
-        "flex flex-col sm:gap-4 sm:py-4 transition-[padding-left]",
-        state === 'expanded' ? "sm:pl-64" : "sm:pl-14"
-      )}>
-        <DashboardHeader />
-        <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
-      </div>
-    </div>
-  );
-}
 
 export default function DashboardLayout({
   children,
@@ -146,12 +130,10 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AuthProvider>
-      <SidebarProvider>
-        <DeviceProvider>
-          <DashboardLayoutContent>{children}</DashboardLayoutContent>
-        </DeviceProvider>
-      </SidebarProvider>
-    </AuthProvider>
+    <ClientProvider>
+      <AppSidebar />
+      <DashboardHeader />
+      <main className="p-4 sm:p-6 md:p-8">{children}</main>
+    </ClientProvider>
   );
 }
