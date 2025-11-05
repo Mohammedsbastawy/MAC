@@ -1,3 +1,5 @@
+
+
 # دوال تشغيل أوامر PsTools (كل API خاصة بالأدوات)
 import os
 import re
@@ -537,25 +539,100 @@ def download_file():
     return json_result(rc, "", err, extra_data={"content": out.strip()})
 
 
-@pstools_bp.route('/upload-file', methods=['POST'])
-def upload_file():
+@pstools_bp.route('/upload-chunk-create', methods=['POST'])
+def upload_chunk_create():
     data = request.get_json() or {}
     ip, dest_path, content_b64 = data.get("ip"), data.get("destinationPath"), data.get("fileContent")
     _, _, _, winrm_user = get_auth_from_session()
     
-    if not all([dest_path, content_b64]):
-        return json_result(1, "", "Destination path and file content are required.")
+    log_message = ""
+    if not all([ip, dest_path, content_b64]):
+        log_message = "ERROR: Missing parameters for create chunk.\n"
+        logger.error(log_message)
+        return jsonify({"ok": False, "error": "Missing parameters.", "log": log_message})
     
-    logger.info(f"Initiating upload to '{dest_path}' on {ip}")
+    log_message += f"Received create chunk for {dest_path} on {ip}. Chunk size: {len(content_b64)} bytes.\n"
     
-    ps_command_create = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{content_b64}'); [System.IO.File]::WriteAllBytes($path, $data)"
-    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command_create)
+    ps_command = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{content_b64}'); [System.IO.File]::WriteAllBytes($path, $data)"
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
+    
     if rc != 0:
+        log_message += f"ERROR: Failed to create file on remote host. {err}\n"
         logger.error(f"Upload failed (initial chunk) to {dest_path} on {ip}. Error: {err}")
-        return json_result(rc, out, f"Failed to create file on remote host. {err}")
-        
-    logger.info(f"Successfully uploaded file to '{dest_path}' on {ip}")
-    return json_result(0, "Upload successful", "", {"message": "File uploaded successfully."})
+        return jsonify({"ok": False, "error": f"Failed to create file on remote host. {err}", "log": log_message})
+    
+    log_message += "Successfully created file with first chunk.\n"
+    return jsonify({"ok": True, "log": log_message})
+
+
+@pstools_bp.route('/upload-chunk-append', methods=['POST'])
+def upload_chunk_append():
+    data = request.get_json() or {}
+    ip, dest_path, content_b64 = data.get("ip"), data.get("destinationPath"), data.get("fileContent")
+    _, _, _, winrm_user = get_auth_from_session()
+
+    log_message = ""
+    if not all([ip, dest_path, content_b64]):
+        log_message = "ERROR: Missing parameters for append chunk.\n"
+        logger.error(log_message)
+        return jsonify({"ok": False, "error": "Missing parameters.", "log": log_message})
+
+    log_message += f"Received append chunk for {dest_path}. Chunk size: {len(content_b64)} bytes.\n"
+
+    ps_command = f"$path = '{dest_path}'; $data = [System.Convert]::FromBase64String('{content_b64}'); [System.IO.File]::AppendAllBytes($path, $data)"
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, ps_command)
+
+    if rc != 0:
+        log_message += f"ERROR: Failed during file append. {err}\n"
+        logger.error(f"Upload failed (append chunk) to {dest_path} on {ip}. Error: {err}")
+        return jsonify({"ok": False, "error": f"Failed during file append. {err}", "log": log_message})
+    
+    return jsonify({"ok": True, "log": "Appended chunk successfully.\n"})
+
+
+@pstools_bp.route('/execute-installer', methods=['POST'])
+def execute_installer():
+    data = request.get_json() or {}
+    ip = data.get("ip")
+    remote_path = data.get("remotePath")
+    arguments = data.get("arguments", "")
+    _, _, _, winrm_user = get_auth_from_session()
+
+    log_message = ""
+    if not all([ip, remote_path]):
+        log_message = "ERROR: Missing IP or remotePath for installer execution.\n"
+        logger.error(log_message)
+        return jsonify({"ok": False, "error": "Missing parameters.", "log": log_message})
+
+    log_message += f"Executing installer at {remote_path} with args: '{arguments}'\n"
+    
+    install_script = f"""
+    try {{
+        $process = Start-Process -FilePath "{remote_path}" -ArgumentList "{arguments}" -Wait -PassThru -ErrorAction Stop
+        Write-Output "Installer process completed with exit code: $($process.ExitCode)."
+        if ($process.ExitCode -ne 0) {{
+             Write-Error "Installer exited with a non-zero exit code."
+             exit $process.ExitCode
+        }}
+    }} catch {{
+        Write-Error "Failed to start installer process: $_"
+        exit 1
+    }}
+    finally {{
+        Start-Sleep -Seconds 2
+        Remove-Item -Path "{remote_path}" -Force -ErrorAction SilentlyContinue
+        Write-Output "Cleaned up installer file."
+    }}
+    """
+    rc, out, err = run_winrm_command(ip, winrm_user, pwd, install_script, timeout=1200)
+
+    log_message += f"--- Installer Output ---\n{out}\n"
+    if err:
+        log_message += f"--- Installer Error ---\n{err}\n"
+
+    ok = rc == 0
+    return jsonify({"ok": ok, "log": log_message, "error": err if not ok else ""})
+
 
 @pstools_bp.route('/delete-item', methods=['POST'])
 def delete_item():
@@ -1105,3 +1182,4 @@ def install_from_exe():
     final_error = err_install
     
     return json_result(rc_install, final_output, final_error)
+

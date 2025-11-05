@@ -25,6 +25,8 @@ const nextConfig: NextConfig = {
     ],
   },
   // This is to allow cross-origin requests in development.
+  // The API proxy is now handled by the route handler in /api/[...path]/route.ts
+  // so the rewrites configuration is no longer needed.
   allowedDevOrigins: ["*.cloudworkstations.dev"],
 };
 
