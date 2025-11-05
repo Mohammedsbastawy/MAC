@@ -72,18 +72,22 @@ export const SidebarProvider = React.forwardRef<
     const isMobile = useIsMobile()
     const [openMobile, setOpenMobile] = React.useState(false)
 
-    // Set initial state to true to avoid hydration mismatch, will be updated by useEffect
     const [isClient, setIsClient] = React.useState(false);
     const [_open, _setOpen] = React.useState(defaultOpen); 
 
     React.useEffect(() => {
         setIsClient(true);
-        const cookieValue = document.cookie
-            .split('; ')
-            .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-            ?.split('=')[1];
-        if (cookieValue !== undefined) {
-            _setOpen(cookieValue === 'true');
+        try {
+            const cookieValue = document.cookie
+                .split('; ')
+                .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+                ?.split('=')[1];
+            if (cookieValue !== undefined) {
+                _setOpen(cookieValue === 'true');
+            }
+        } catch (e) {
+            // In case of any error (e.g. in environments where cookies are restricted)
+            console.warn("Could not read sidebar cookie.");
         }
     }, []);
 
@@ -97,7 +101,11 @@ export const SidebarProvider = React.forwardRef<
         } else {
           _setOpen(openState)
         }
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        try {
+            document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        } catch (e) {
+             console.warn("Could not set sidebar cookie.");
+        }
       },
       [setOpenProp, open]
     )
