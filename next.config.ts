@@ -25,10 +25,6 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // This is to allow cross-origin requests in development.
-  // The API proxy is now handled by the route handler in /api/[...path]/route.ts
-  // so the rewrites configuration is no longer needed.
-  // The 'experimental' block is not needed for this config in recent Next.js versions.
   devServer: {
     allowedHosts: ["192.168.3.84"],
   },

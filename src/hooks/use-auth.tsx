@@ -21,26 +21,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true); // Start as true
 
-  const checkSession = useCallback(async () => {
-    try {
-      const response = await fetch('/api/check-session');
-      const data = await response.json();
-      if (data.ok) {
-        setUser(data);
-      } else {
-        setUser(null);
-      }
-    } catch (error) {
-      console.error("Failed to check session", error);
-      setUser(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const response = await fetch('/api/check-session');
+        const data = await response.json();
+        if (data.ok) {
+          setUser(data);
+        } else {
+          setUser(null);
+        }
+      } catch (error) {
+        console.error("Failed to check session", error);
+        setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
     checkSession();
-  }, [checkSession]);
+  }, []);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
     setIsLoading(true);
