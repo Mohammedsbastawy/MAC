@@ -10,7 +10,8 @@ export default function Home() {
   const { isLoading } = useAuth();
 
   useEffect(() => {
-    // We wait until the auth state is determined before redirecting.
+    // Redirect to the main dashboard page, which in turn will redirect
+    // to the default 'devices' page.
     if (!isLoading) {
       router.replace('/dashboard');
     }
