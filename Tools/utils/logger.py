@@ -9,6 +9,13 @@ from collections import deque
 # We use an absolute path to be safe.
 log_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'atlas-tools.log'))
 
+# --- Custom Filter to exclude specific log messages ---
+class NoGetLogsFilter(logging.Filter):
+    def filter(self, record):
+        # Exclude log messages that are requests to the get-logs endpoint
+        # This prevents the log viewer from logging its own activity.
+        return '/api/logs/get-logs' not in record.getMessage()
+
 # --- Formatter ---
 log_formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s.%(funcName)s: %(message)s')
 
@@ -33,16 +40,19 @@ class FormattedMemoryHandler(logging.Handler):
 # Create a single instance of the memory handler to be shared across the app
 memory_handler = FormattedMemoryHandler()
 memory_handler.setFormatter(log_formatter)
+memory_handler.addFilter(NoGetLogsFilter())
 
 
 # --- File Handler Setup ---
 # 2 MB per file, keep 5 old files
 file_handler = RotatingFileHandler(log_file_path, maxBytes=2*1024*1024, backupCount=5, encoding='utf-8')
 file_handler.setFormatter(log_formatter)
+file_handler.addFilter(NoGetLogsFilter())
 
 # --- Console Handler ---
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(log_formatter)
+console_handler.addFilter(NoGetLogsFilter())
 
 # --- Configure the Root Logger to capture everything ---
 # This is the central logger for the entire application.
