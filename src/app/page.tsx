@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
@@ -12,7 +12,7 @@ export default function Home() {
   useEffect(() => {
     // We wait until the auth state is determined before redirecting.
     if (!isLoading) {
-      router.replace("/dashboard/devices");
+      router.replace('/dashboard/devices');
     }
   }, [router, isLoading]);
 
