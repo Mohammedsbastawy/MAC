@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import * as React from "react"
@@ -71,11 +70,11 @@ export const SidebarProvider = React.forwardRef<
   ) => {
     const isMobile = useIsMobile()
     const [openMobile, setOpenMobile] = React.useState(false)
-
     const [isClient, setIsClient] = React.useState(false);
     const [_open, _setOpen] = React.useState(defaultOpen); 
-
+    
     React.useEffect(() => {
+        // This effect runs only on the client, after hydration
         setIsClient(true);
         try {
             const cookieValue = document.cookie
@@ -86,7 +85,6 @@ export const SidebarProvider = React.forwardRef<
                 _setOpen(cookieValue === 'true');
             }
         } catch (e) {
-            // In case of any error (e.g. in environments where cookies are restricted)
             console.warn("Could not read sidebar cookie.");
         }
     }, []);
@@ -101,10 +99,12 @@ export const SidebarProvider = React.forwardRef<
         } else {
           _setOpen(openState)
         }
-        try {
-            document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
-        } catch (e) {
-             console.warn("Could not set sidebar cookie.");
+         if (typeof window !== "undefined") {
+            try {
+                document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+            } catch (e) {
+                console.warn("Could not set sidebar cookie.");
+            }
         }
       },
       [setOpenProp, open]
@@ -466,5 +466,3 @@ export const SidebarTrigger = (props: React.HTMLAttributes<HTMLButtonElement>) =
     const { toggleSidebar } = useSidebar();
     return <Button onClick={toggleSidebar} {...props} />
 }
-
-    

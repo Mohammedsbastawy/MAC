@@ -23,6 +23,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const checkSession = async () => {
+      // This function now runs only on the client
       try {
         const response = await fetch('/api/check-session');
         if (response.ok) {
@@ -43,7 +44,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
     
-    checkSession();
+    // Only run on the client side
+    if (typeof window !== "undefined") {
+      checkSession();
+    }
   }, []);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
