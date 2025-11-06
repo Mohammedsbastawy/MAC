@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import * as React from "react"
@@ -17,9 +18,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import * as Collapsible from "@radix-ui/react-collapsible";
+import { safeLocalStorage } from "@/lib/safe-local-storage"
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+const SIDEBAR_STORAGE_KEY = "sidebar_state"
 const SIDEBAR_WIDTH = "16rem" 
 const SIDEBAR_WIDTH_MOBILE = "16rem"
 const SIDEBAR_WIDTH_ICON = "3.5rem" 
@@ -72,16 +73,9 @@ export const SidebarProvider = React.forwardRef<
     
     React.useEffect(() => {
         setIsClient(true);
-        try {
-            const cookieValue = document.cookie
-                .split('; ')
-                .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-                ?.split('=')[1];
-            if (cookieValue !== undefined) {
-                _setOpen(cookieValue === 'true');
-            }
-        } catch (e) {
-            console.warn("Could not read sidebar cookie.");
+        const storedValue = safeLocalStorage.getItem(SIDEBAR_STORAGE_KEY);
+        if (storedValue !== null) {
+            _setOpen(storedValue === 'true');
         }
     }, []);
 
@@ -95,11 +89,7 @@ export const SidebarProvider = React.forwardRef<
         } else {
           _setOpen(openState)
         }
-         try {
-            document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
-        } catch (e) {
-            console.warn("Could not set sidebar cookie.");
-        }
+         safeLocalStorage.setItem(SIDEBAR_STORAGE_KEY, String(openState));
       },
       [setOpenProp, open]
     )
