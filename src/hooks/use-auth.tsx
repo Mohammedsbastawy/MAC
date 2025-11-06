@@ -19,36 +19,33 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // Start with loading true
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const checkSession = async () => {
-      // This function now runs only on the client
-      try {
-        const response = await fetch('/api/check-session');
-        if (response.ok) {
-            const data = await response.json();
-            if (data.ok) {
-                setUser(data);
-            } else {
-                setUser(null);
-            }
-        } else {
-             setUser(null);
-        }
-      } catch (error) {
-          console.error("Failed to check session", error);
-          setUser(null);
-      } finally {
-          setIsLoading(false);
+  const checkSession = useCallback(async () => {
+    try {
+      const response = await fetch('/api/check-session');
+      if (response.ok) {
+          const data = await response.json();
+          if (data.ok) {
+              setUser(data);
+          } else {
+              setUser(null);
+          }
+      } else {
+           setUser(null);
       }
-    };
-    
-    // Only run on the client side
-    if (typeof window !== "undefined") {
-      checkSession();
+    } catch (error) {
+        console.error("Failed to check session", error);
+        setUser(null);
+    } finally {
+        setIsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    // This effect runs only on the client, after the initial render.
+    checkSession();
+  }, [checkSession]);
 
   const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
     setIsLoading(true);
