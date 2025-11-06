@@ -78,8 +78,9 @@ export default function MonitoringPage() {
     fetchAllDevices, 
     isUpdating,
     updateProgress,
-    checkAllAgentStatus,
+    checkSingleAgentStatus,
     refreshAllDeviceStatus,
+    updateDeviceData,
   } = useDeviceContext();
   const { toast } = useToast();
   const router = useRouter();
@@ -115,14 +116,6 @@ export default function MonitoringPage() {
     loadData();
   }, [user, devices.length, isLoading, fetchAllDevices]);
 
-  // This effect runs AFTER the devices have been loaded.
-  React.useEffect(() => {
-      // If devices are loaded, but agent status has not been checked for any, check them.
-      if (user && devices.length > 0 && devices.every(d => d.agentLastUpdate === null && !d.isAgentDeployed)) {
-        checkAllAgentStatus();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, devices.length]); // Depends only on devices.length to run once after they load.
   
   const handleDeployAgent = async () => {
     if (!deploymentState.device) return;
@@ -143,7 +136,7 @@ export default function MonitoringPage() {
         if (data.ok) {
             toast({ title: "Deployment Successful", description: `Atlas Agent script has been run on ${deploymentState.device.name}.`});
             // Immediately re-check agent status for this device
-            await checkAllAgentStatus(); // Re-check all, simple way to update one
+            await checkSingleAgentStatus(deploymentState.device.id, deploymentState.device.ipAddress);
         } else {
              toast({ variant: "destructive", title: "Deployment Failed", description: data.error || "An unknown error occurred."});
              if (logOutput.includes("Couldn't access") || logOutput.includes("Connecting to") || logOutput.includes("transport error")) {
@@ -159,6 +152,13 @@ export default function MonitoringPage() {
     }
 
     setIsDeploying(false);
+  }
+
+  const handleCheckAgent = async (device: Device) => {
+    updateDeviceData(device.id, { isLoadingDetails: true });
+    await checkSingleAgentStatus(device.id, device.ipAddress);
+    updateDeviceData(device.id, { isLoadingDetails: false });
+    toast({ title: 'Check Complete', description: `Agent status verified for ${device.name}.`});
   }
 
 
@@ -189,6 +189,10 @@ export default function MonitoringPage() {
   }
 
   const AgentStatusCell: React.FC<{device: Device}> = ({ device }) => {
+    if (device.isLoadingDetails) {
+        return <div className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs text-muted-foreground">Checking...</span></div>
+    }
+
     if (device.isAgentDeployed) {
       return (
         <div>
@@ -202,10 +206,6 @@ export default function MonitoringPage() {
         return (
             <div className='flex items-center gap-2'>
                 <Badge variant="destructive"><AlertCircle className="mr-1 h-3 w-3" /> WinRM Error</Badge>
-                 <Button variant="ghost" size="sm" className="h-auto p-1 text-xs" onClick={() => handleSelectDevice(device, true)}>
-                    <Zap className="mr-1 h-3 w-3"/>
-                    Diagnostics
-                </Button>
             </div>
         );
     }
@@ -214,8 +214,54 @@ export default function MonitoringPage() {
         return <Badge variant="secondary">Offline</Badge>
     }
 
-    return <Badge variant="destructive">Not Deployed</Badge>;
+    return <Badge variant="outline">Unknown</Badge>;
   };
+
+  const ActionButtonsCell: React.FC<{ device: Device }> = ({ device }) => {
+    if (device.status !== 'online') {
+      return (
+        <Button variant="ghost" size="sm" disabled>
+          Device Offline
+        </Button>
+      );
+    }
+
+    if (device.isAgentDeployed) {
+      return (
+        <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)}>
+          View Dashboard <ChevronRight className="ml-2 h-4 w-4" />
+        </Button>
+      );
+    }
+    
+    if (device.agentStatusError) {
+         return (
+            <div className="flex items-center gap-2">
+                 <Button variant="outline" size="sm" onClick={() => handleSelectDevice(device, true)}>
+                    <Zap className="mr-2 h-4 w-4"/>
+                    Diagnostics
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => { setDeploymentLog(""); setShowDiagnosticsButton(false); setDeploymentState({isOpen: true, device}); }}>
+                    Deploy Agent
+                </Button>
+            </div>
+         );
+    }
+
+    return (
+        <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => handleCheckAgent(device)} disabled={device.isLoadingDetails}>
+                {device.isLoadingDetails ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                Check Status
+            </Button>
+             {device.agentStatusError === null && (
+                 <Button variant="outline" size="sm" onClick={() => { setDeploymentLog(""); setShowDiagnosticsButton(false); setDeploymentState({isOpen: true, device}); }}>
+                    Deploy Agent
+                </Button>
+            )}
+        </div>
+    )
+  }
 
   return (
     <>
@@ -232,10 +278,6 @@ export default function MonitoringPage() {
                     <RefreshCw className="mr-2 h-4 w-4" />
                     Refresh Online Status
                 </Button>
-                <Button onClick={() => checkAllAgentStatus()} disabled={isUpdating}>
-                    {isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Refresh Agent Status
-                </Button>
             </div>
         </div>
         
@@ -246,7 +288,7 @@ export default function MonitoringPage() {
                 {isUpdating && (
                   <div className="pt-2 space-y-1">
                     <Progress value={updateProgress} className="h-2 w-full bg-primary/20" />
-                    <p className="text-xs text-muted-foreground">Checking agent status on online devices... ({updateProgress}%)</p>
+                    <p className="text-xs text-muted-foreground">Refreshing online status... ({updateProgress}%)</p>
                   </div>
                 )}
             </CardHeader>
@@ -276,12 +318,7 @@ export default function MonitoringPage() {
                                      <AgentStatusCell device={device} />
                                 </TableCell>
                                 <TableCell className="text-right">
-                                     <Button variant="outline" size="sm" className="mr-2" onClick={() => { setDeploymentLog(""); setShowDiagnosticsButton(false); setDeploymentState({isOpen: true, device}); }} disabled={device.status !== 'online' || isUpdating}>
-                                        <RefreshCw className="mr-2 h-4 w-4" /> Deploy Agent
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => router.push(`/dashboard/monitoring/${encodeURIComponent(device.id)}`)} disabled={!device.isAgentDeployed || isUpdating}>
-                                        View Dashboard <ChevronRight className="ml-2 h-4 w-4" />
-                                    </Button>
+                                     <ActionButtonsCell device={device} />
                                 </TableCell>
                             </TableRow>
                         )) : (

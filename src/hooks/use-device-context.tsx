@@ -46,10 +46,9 @@ interface DeviceContextType {
   updateProgress: number;
   error: { title: string; message: string; details?: string } | null;
   fetchAllDevices: () => Promise<void>;
-  fetchLiveData: (deviceId: string, deviceIp: string) => Promise<{success: boolean, error?: string | null}>;
+  checkSingleAgentStatus: (deviceId: string, deviceIp: string) => Promise<{success: boolean, error?: string | null}>;
   refreshAllDeviceStatus: (deviceList?: Device[]) => Promise<void>;
   updateDeviceData: (deviceId: string, newData: Partial<Device>) => void;
-  checkAllAgentStatus: () => Promise<void>;
 }
 
 const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
@@ -68,12 +67,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
 
-  const fetchLiveData = useCallback(async (deviceId: string, deviceIp: string): Promise<{success: boolean, error?: string | null}> => {
+  const checkSingleAgentStatus = useCallback(async (deviceId: string, deviceIp: string): Promise<{success: boolean, error?: string | null}> => {
     if (!deviceIp || !user) {
-        const err = { isAgentDeployed: false, agentLastUpdate: null, agentStatusError: "Authentication or IP is missing." };
+        const err = { isLoadingDetails: false, isAgentDeployed: false, agentLastUpdate: null, agentStatusError: "Authentication or IP is missing." };
         updateDeviceData(deviceId, err);
         return { success: false, error: err.agentStatusError };
     }
+    updateDeviceData(deviceId, { isLoadingDetails: true });
     try {
         const res = await fetch("/api/network/fetch-live-data", {
             method: "POST",
@@ -83,51 +83,20 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const data = await res.json();
         
         if (data.ok && data.liveData) {
-            updateDeviceData(deviceId, { isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp, agentStatusError: null });
+            const update = { isLoadingDetails: false, isAgentDeployed: true, agentLastUpdate: data.liveData.timestamp, agentStatusError: null };
+            updateDeviceData(deviceId, update);
             return { success: true, error: null };
         } else {
-            const err = { isAgentDeployed: false, agentLastUpdate: null, agentStatusError: data.details || data.error || "Failed to fetch live data." };
+            const err = { isLoadingDetails: false, isAgentDeployed: false, agentLastUpdate: null, agentStatusError: data.details || data.error || "Failed to fetch live data." };
             updateDeviceData(deviceId, err);
             return { success: false, error: err.agentStatusError };
         }
     } catch(e: any) {
-        const err = { isAgentDeployed: false, agentLastUpdate: null, agentStatusError: e.message || "Client-side fetch error." };
+        const err = { isLoadingDetails: false, isAgentDeployed: false, agentLastUpdate: null, agentStatusError: e.message || "Client-side fetch error." };
         updateDeviceData(deviceId, err);
         return { success: false, error: err.agentStatusError };
     }
   }, [updateDeviceData, user]);
-
-  const checkAllAgentStatus = useCallback(async () => {
-    if (!devices.length || isUpdating) return;
-
-    setIsUpdating(true);
-    setUpdateProgress(0);
-    toast({ title: "Checking Agent Status...", description: "Verifying agent on all online devices." });
-
-    const onlineDevices = devices.filter(d => d.status === 'online');
-    if (onlineDevices.length === 0) {
-      toast({ title: "No Online Devices", description: "No devices to check agent status on." });
-      setIsUpdating(false);
-      setUpdateProgress(100);
-      return;
-    }
-    
-    let processedCount = 0;
-    const totalOnline = onlineDevices.length;
-    
-    const agentCheckPromises = onlineDevices.map(async (device) => {
-        await fetchLiveData(device.id, device.ipAddress);
-        processedCount++;
-        const progress = Math.floor((processedCount / totalOnline) * 100);
-        setUpdateProgress(progress);
-    });
-
-    await Promise.all(agentCheckPromises);
-
-    setIsUpdating(false);
-    setUpdateProgress(100);
-    toast({ title: "Agent Status Check Complete" });
-  }, [devices, isUpdating, toast, fetchLiveData]);
 
 
   const fetchAllDevices = useCallback(async () => {
@@ -198,8 +167,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [devices, toast, user, isUpdating]);
 
   const contextValue = useMemo(() => ({
-    devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData, checkAllAgentStatus
-  }), [devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, fetchLiveData, refreshAllDeviceStatus, updateDeviceData, checkAllAgentStatus]);
+    devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, checkSingleAgentStatus, refreshAllDeviceStatus, updateDeviceData
+  }), [devices, isLoading, isUpdating, updateProgress, error, fetchAllDevices, checkSingleAgentStatus, refreshAllDeviceStatus, updateDeviceData]);
 
   return (
     <DeviceContext.Provider value={contextValue}>
