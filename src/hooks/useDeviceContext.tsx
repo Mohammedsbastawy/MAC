@@ -47,7 +47,7 @@ interface DeviceContextType {
   error: { title: string; message: string; details?: string } | null;
   fetchAllDevices: () => Promise<void>;
   fetchLiveData: (deviceId: string, deviceIp: string) => Promise<{success: boolean, error?: string | null}>;
-  refreshAllDeviceStatus: () => Promise<void>;
+  refreshAllDeviceStatus: (deviceList?: Device[]) => Promise<void>;
   updateDeviceData: (deviceId: string, newData: Partial<Device>) => void;
   checkAllAgentStatus: () => Promise<void>;
 }
@@ -161,7 +161,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const refreshAllDeviceStatus = useCallback(async (deviceList?: Device[]) => {
     const targetDevices = deviceList || devices;
     if (targetDevices.length === 0) {
-        toast({ title: "No devices to refresh" });
         return;
     }
     if (isUpdating || !user) return;

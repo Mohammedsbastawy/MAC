@@ -17,6 +17,9 @@ import {
 } from "@/components/ui/tooltip"
 import * as Collapsible from "@radix-ui/react-collapsible";
 
+const SIDEBAR_COOKIE_NAME = "atlas-sidebar-state";
+const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
+
 type SidebarContext = {
   state: "expanded" | "collapsed"
   open: boolean
@@ -59,13 +62,24 @@ export const SidebarProvider = React.forwardRef<
   ) => {
     const isMobile = useIsMobile()
     const [openMobile, setOpenMobile] = React.useState(false)
-    const [isClient, setIsClient] = React.useState(false);
     const [_open, _setOpen] = React.useState(defaultOpen); 
     
+    // Read from cookie only on the client side
     React.useEffect(() => {
-        setIsClient(true);
+        if (typeof window !== "undefined") {
+            try {
+                const savedState = document.cookie
+                    .split('; ')
+                    .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+                    ?.split('=')[1];
+                if (savedState) {
+                    _setOpen(savedState === 'expanded');
+                }
+            } catch (e) {
+                console.error("Failed to read sidebar state from cookie:", e);
+            }
+        }
     }, []);
-
 
     const open = openProp ?? _open
     const setOpen = React.useCallback(
@@ -75,6 +89,14 @@ export const SidebarProvider = React.forwardRef<
           setOpenProp(openState)
         } else {
           _setOpen(openState)
+          // Save to cookie on change
+           if (typeof window !== "undefined") {
+              try {
+                document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState ? 'expanded' : 'collapsed'}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+              } catch (e) {
+                  console.error("Failed to save sidebar state to cookie:", e);
+              }
+           }
         }
       },
       [setOpenProp, open]
@@ -97,7 +119,7 @@ export const SidebarProvider = React.forwardRef<
         return () => window.removeEventListener("keydown", handleKeyDown)
     }, [toggleSidebar])
 
-    const state = !isClient ? "expanded" : open ? "expanded" : "collapsed";
+    const state = open ? "expanded" : "collapsed";
 
     const contextValue = React.useMemo<SidebarContext>(
       () => ({
