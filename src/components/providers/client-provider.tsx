@@ -8,13 +8,11 @@ import { cn } from "@/lib/utils";
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const { state } = useSidebar();
   return (
-    <div className="flex min-h-screen w-full flex-col bg-muted/40">
-      <div className={cn(
-        "flex flex-col sm:gap-4 sm:py-4 transition-[padding-left]",
-        state === 'expanded' ? "sm:pl-64" : "sm:pl-14"
-      )}>
+    <div className={cn(
+      "flex min-h-screen w-full flex-col bg-muted/40 transition-[padding-left]",
+      state === 'expanded' ? "sm:pl-64" : "sm:pl-14"
+    )}>
         {children}
-      </div>
     </div>
   );
 }

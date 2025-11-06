@@ -132,8 +132,10 @@ export default function DashboardLayout({
   return (
     <ClientProvider>
       <AppSidebar />
-      <DashboardHeader />
-      <main className="p-4 sm:p-6 md:p-8">{children}</main>
+      <div className="flex flex-col">
+        <DashboardHeader />
+        <main className="p-4 sm:p-6 md:p-8">{children}</main>
+      </div>
     </ClientProvider>
   );
 }
