@@ -4,15 +4,12 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { VariantProps, cva } from "class-variance-authority"
-import { PanelLeft, PanelRight, ChevronUp, ChevronDown } from "lucide-react"
+import { PanelLeft, PanelRight, ChevronDown } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   Tooltip,
   TooltipContent,
@@ -74,18 +71,19 @@ export const SidebarProvider = React.forwardRef<
     const [_open, _setOpen] = React.useState(defaultOpen); 
     
     React.useEffect(() => {
-        // This effect runs only on the client, after hydration
         setIsClient(true);
-        try {
-            const cookieValue = document.cookie
-                .split('; ')
-                .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-                ?.split('=')[1];
-            if (cookieValue !== undefined) {
-                _setOpen(cookieValue === 'true');
+        if (typeof window !== "undefined") {
+            try {
+                const cookieValue = document.cookie
+                    .split('; ')
+                    .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+                    ?.split('=')[1];
+                if (cookieValue !== undefined) {
+                    _setOpen(cookieValue === 'true');
+                }
+            } catch (e) {
+                console.warn("Could not read sidebar cookie.");
             }
-        } catch (e) {
-            console.warn("Could not read sidebar cookie.");
         }
     }, []);
 
