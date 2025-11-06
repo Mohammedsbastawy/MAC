@@ -17,9 +17,6 @@ import {
 } from "@/components/ui/tooltip"
 import * as Collapsible from "@radix-ui/react-collapsible";
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state";
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
-
 type SidebarContext = {
   state: "expanded" | "collapsed"
   open: boolean
@@ -67,17 +64,6 @@ export const SidebarProvider = React.forwardRef<
     
     React.useEffect(() => {
         setIsClient(true);
-        try {
-            const cookieValue = document.cookie
-                .split('; ')
-                .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-                ?.split('=')[1];
-            if (cookieValue !== undefined) {
-                _setOpen(cookieValue === 'true');
-            }
-        } catch (error) {
-            console.error("Could not read sidebar state from cookie:", error);
-        }
     }, []);
 
 
@@ -89,11 +75,6 @@ export const SidebarProvider = React.forwardRef<
           setOpenProp(openState)
         } else {
           _setOpen(openState)
-        }
-        try {
-            document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
-        } catch (error) {
-             console.error("Could not save sidebar state to cookie:", error);
         }
       },
       [setOpenProp, open]
