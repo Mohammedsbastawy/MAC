@@ -75,6 +75,19 @@ export default function HelpPage() {
                                 </Alert>
                             </AccordionContent>
                         </AccordionItem>
+                         <AccordionItem value="item-2">
+                            <AccordionTrigger className="text-lg font-medium text-destructive">Error: "Logon failure: the user has not been granted the requested logon type"</AccordionTrigger>
+                            <AccordionContent className="space-y-2 text-base">
+                                <p className="text-muted-foreground">
+                                    **Symptom:** PsTools commands (like PsExec, PsInfo) fail with a logon failure message.
+                                </p>
+                                <p className="text-muted-foreground">
+                                    **Cause:** This is a security policy issue on the target machine. The account you are using (even if it's a Domain Admin) lacks the specific right to **"Log on as a service"** which is required by PsTools to function.
+                                </p>
+                                <h5 className="font-semibold pt-2">Solution: Grant User Rights via Group Policy</h5>
+                                <p className="text-muted-foreground">You must configure a Group Policy Object (GPO) to grant this permission to your admin group across all computers. See **Prerequisite 4: User Rights Assignment** below for step-by-step instructions.</p>
+                            </AccordionContent>
+                        </AccordionItem>
                     </Accordion>
                 </CardContent>
             </Card>
@@ -207,10 +220,10 @@ export default function HelpPage() {
              <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-2xl">
-                        <UserCog /> Prerequisite 4: User Rights Assignment
+                        <UserCog /> Prerequisite 4: User Rights Assignment (Fixes "Logon Failure")
                     </CardTitle>
                     <CardDescription>
-                        Ensure the administrator account has the correct permissions to connect remotely. This is a critical security step.
+                        Ensure the administrator account has the correct permissions to connect remotely. This is a critical security step and the solution to the "user has not been granted the requested logon type" error.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -223,8 +236,7 @@ export default function HelpPage() {
                              <p>Edit the following policies to **include** your administrator user or an appropriate admin group (e.g., "Domain Admins"):</p>
                             <ul className="list-disc pl-6 space-y-2 mt-2">
                                 <li><strong>Allow log on locally</strong></li>
-                                <li><strong>Log on as a service</strong></li>
-                                <li><strong>Allow log on through Remote Desktop Services</strong> (if you intend to use RDP alongside this tool)</li>
+                                <li><strong>Log on as a service</strong> (This is the most critical one for PsTools)</li>
                             </ul>
                         </Step>
                          <Step number={3} title="Configure 'Deny' Policies">
@@ -232,7 +244,6 @@ export default function HelpPage() {
                             <ul className="list-disc pl-6 space-y-2 mt-2">
                                 <li><strong>Deny log on locally</strong></li>
                                 <li><strong>Deny log on as a service</strong></li>
-                                <li><strong>Deny log on through Remote Desktop Services</strong></li>
                             </ul>
                         </Step>
                     </div>

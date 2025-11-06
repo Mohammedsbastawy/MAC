@@ -28,21 +28,21 @@ This service allows tools like `PsInfo` to gather detailed system information.
 4.  Find **Remote Registry** in the list.
 5.  Define the policy setting and set the service startup mode to **Automatic**.
 
-### 2. User Rights Assignment
+### 2. User Rights Assignment (Crucial for PsTools)
 
-Ensure the administrator account being used has the correct permissions to connect remotely.
+To fix "Logon failure" errors with PsExec, ensure the administrator account being used has the correct permissions to log on as a service.
 
 #### How to Configure via Group Policy
 
 1.  In your GPO, navigate to: `Computer Configuration` -> `Policies` -> `Windows Settings` -> `Security Settings` -> `Local Policies` -> `User Rights Assignment`.
-2.  Edit the following policies to include your administrator user or an appropriate admin group (e.g., "Domain Admins"):
+2.  Edit the following policies to **include** your administrator user or an appropriate admin group (e.g., "Domain Admins"):
     *   **Allow log on locally**
     *   **Log on as a service**
-    *   **Allow log on through Remote Desktop Services** (if you intend to use RDP alongside this tool).
-3.  Crucially, ensure the same user or group is **NOT** present in the following "Deny" policies:
+3.  Crucially, ensure the same user or group is **NOT** present in the following "Deny" policies, as they override the "Allow" settings:
     *   **Deny log on locally**
     *   **Deny log on as a service**
-    *   **Deny log on through Remote Desktop Services**
+
+After updating the GPO, you may need to run `gpupdate /force` on the target machines or wait for the policy to apply automatically.
 
 ---
 
