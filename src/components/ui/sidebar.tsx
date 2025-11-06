@@ -72,18 +72,16 @@ export const SidebarProvider = React.forwardRef<
     
     React.useEffect(() => {
         setIsClient(true);
-        if (typeof window !== "undefined") {
-            try {
-                const cookieValue = document.cookie
-                    .split('; ')
-                    .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
-                    ?.split('=')[1];
-                if (cookieValue !== undefined) {
-                    _setOpen(cookieValue === 'true');
-                }
-            } catch (e) {
-                console.warn("Could not read sidebar cookie.");
+        try {
+            const cookieValue = document.cookie
+                .split('; ')
+                .find(row => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+                ?.split('=')[1];
+            if (cookieValue !== undefined) {
+                _setOpen(cookieValue === 'true');
             }
+        } catch (e) {
+            console.warn("Could not read sidebar cookie.");
         }
     }, []);
 
@@ -97,12 +95,10 @@ export const SidebarProvider = React.forwardRef<
         } else {
           _setOpen(openState)
         }
-         if (typeof window !== "undefined") {
-            try {
-                document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
-            } catch (e) {
-                console.warn("Could not set sidebar cookie.");
-            }
+         try {
+            document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        } catch (e) {
+            console.warn("Could not set sidebar cookie.");
         }
       },
       [setOpenProp, open]

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { safeLocalStorage } from '@/lib/safe-local-storage';
 
 interface User {
   user: string;
@@ -22,6 +23,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true); // Start as true
 
   const checkSession = useCallback(async () => {
+    // This check is redundant due to useEffect but adds an extra layer of safety.
+    if (typeof window === 'undefined') {
+        setIsLoading(false);
+        return;
+    }
     try {
       const response = await fetch('/api/check-session');
       if (response.ok) {
@@ -43,8 +49,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
-    // This effect runs only on the client, after the initial render.
-    // This is the correct place to perform actions that need the browser environment.
     checkSession();
   }, [checkSession]);
 
