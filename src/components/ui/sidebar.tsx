@@ -1,5 +1,3 @@
-
-
 "use client"
 
 import * as React from "react"
@@ -457,5 +455,3 @@ export const SidebarTrigger = (props: React.HTMLAttributes<HTMLButtonElement>) =
     const { toggleSidebar } = useSidebar();
     return <Button onClick={toggleSidebar} {...props} />
 }
-
-    

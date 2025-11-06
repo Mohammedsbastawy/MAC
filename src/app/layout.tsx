@@ -3,12 +3,6 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { ThemeProviderClient } from "@/components/theme-provider-client";
 
-// Polyfill localStorage for Server-Side Rendering
-if (typeof localStorage === "undefined" || localStorage === null) {
-  const { LocalStorage } = require("node-localstorage");
-  global.localStorage = new LocalStorage("./scratch");
-}
-
 export const metadata: Metadata = {
   title: 'Dominion Control Panel',
   description: 'Manage your network devices with ease.',
