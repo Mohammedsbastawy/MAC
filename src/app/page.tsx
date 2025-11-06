@@ -12,7 +12,7 @@ export default function Home() {
   useEffect(() => {
     // We wait until the auth state is determined before redirecting.
     if (!isLoading) {
-      router.replace('/dashboard/devices');
+      router.replace('/dashboard');
     }
   }, [router, isLoading]);
 
