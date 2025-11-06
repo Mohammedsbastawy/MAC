@@ -23,9 +23,6 @@ const nextConfig = {
       },
     ],
   },
-  experimental: {
-    allowedDevOrigins: ["http://localhost:9002", "http://192.168.3.84:9002"],
-  },
 };
 
 module.exports = nextConfig;

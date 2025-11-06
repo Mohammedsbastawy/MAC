@@ -2,6 +2,7 @@ import type {Metadata} from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 import { ThemeProviderClient } from "@/components/theme-provider-client";
+import { ClientProvider } from '@/components/providers/client-provider';
 
 export const metadata: Metadata = {
   title: 'Dominion Control Panel',
@@ -22,7 +23,7 @@ export default function RootLayout({
       </head>
       <body className="font-body antialiased">
         <ThemeProviderClient>
-          {children}
+          <ClientProvider>{children}</ClientProvider>
           <Toaster />
         </ThemeProviderClient>
       </body>
